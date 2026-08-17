@@ -1,0 +1,17 @@
+#scenario {
+  name: "routing-basics",
+  notes: """Confirms the pool routes ordinary chat DIRECT, tool work
+            PLAN, and replays an identical question from the cache.""",
+  turns: [
+    { say: "ciao!",
+      expect: { class: "simple", mode: "direct", detail: "terse" } },
+    { say: "leggi il file src/main.c e spiegami cosa fa",
+      expect: { mode: "plan", tools: ["fs.read"] } },
+    { say: "riassumi in una riga la licenza MIT",
+      expect: { class: "simple", detail: "terse" } },
+    { say: "ciao!",
+      expect: { cache: "hit" } },
+    { say: "scrivi una funzione C che inverte una stringa in place, con test",
+      expect: { class: "complex", detail: "rich" } },
+  ],
+}

@@ -1,0 +1,180 @@
+/*
+ * modal.c — confirmation modal and help overlay of the asngn TUI.
+ *
+ * The confirmation modal centers over a dimmed backdrop with a yellow
+ * double-line border: tool.command in bold, pretty-printed args (max 8
+ * lines), annotation badges, and the key line. Keys are resolved in
+ * main.c via asngn_confirm. The help overlay lists the keymap and the
+ * slash commands; both render through the same cell-buffer path so
+ * frames can be golden-tested.
+ *
+ * MIT License — per aspera ad astra.
+ */
+
+#include "tui.h"
+
+#include <stdio.h>
+#include <string.h>
+
+/* Wraps s into rows of at most `width` cells; returns rows written. */
+static int wrap_text(const char *s, int width, int max_rows,
+                     const char **starts, int *lens) {
+  size_t i = 0, len = strlen(s);
+  int rows = 0;
+  if (width < 4) width = 4;
+  while (i < len && rows < max_rows) {
+    size_t j = i, last_space = 0, cells = 0;
+    int have_space = 0;
+    while (j < len && s[j] != '\n' && cells < (size_t)width) {
+      if (s[j] == ' ') {
+        last_space = j;
+        have_space = 1;
+      }
+      j = tui_u8_next(s, j);
+      cells++;
+    }
+    if (j < len && s[j] != '\n' && have_space && last_space > i)
+      j = last_space;
+    starts[rows] = s + i;
+    lens[rows] = (int)(j - i);
+    rows++;
+    if (j < len && (s[j] == '\n' || s[j] == ' ')) j++;
+    i = j;
+  }
+  return rows;
+}
+
+static void put_clipped(tui_frame *f, int x, int y, const char *s,
+                        int len, int maxcells, uint8_t fg, uint8_t attr) {
+  char buf[256];
+  if (len > (int)sizeof buf - 1) len = (int)sizeof buf - 1;
+  if (len < 0) len = 0;
+  memcpy(buf, s, (size_t)len);
+  buf[len] = '\0';
+  d_putn(f, x, y, buf, maxcells, fg, TBG_DEFAULT, attr);
+}
+
+void modal_draw_confirm(tui_app *a, tui_frame *f) {
+  const tui_theme *th = &a->theme;
+  const char *starts[8];
+  int lens[8];
+  int arg_rows;
+  int bw = f->w - 8;
+  int bh, bx, by, row;
+  char title[96];
+
+  if (bw > 58) bw = 58;
+  if (bw < 24) bw = f->w - 2;
+  if (bw < 20) return; /* hopeless geometry: keys still work */
+
+  arg_rows = wrap_text(a->confirm.args, bw - 4, 8, starts, lens);
+  bh = 6 + arg_rows + (a->confirm.destructive ? 1 : 0);
+  if (bh > f->h - 2) bh = f->h - 2;
+  bx = (f->w - bw) / 2;
+  by = (f->h - bh) / 2;
+  if (by < 0) by = 0;
+
+  d_dim_rect(f, 0, 0, f->w, f->h);
+  {
+    int x1, y1;
+    for (y1 = by; y1 < by + bh; y1++)
+      for (x1 = bx; x1 < bx + bw; x1++)
+        d_cell(f, x1, y1, " ", TFG_DEFAULT, TBG_DEFAULT, 0);
+  }
+  d_box(f, bx, by, bw, bh, th, 1, TFG_ACCENT, 0);
+  snprintf(title, sizeof title, " confirm %s ", th->star);
+  d_put(f, bx + 2, by, title, TFG_ACCENT, TBG_DEFAULT, TA_BOLD);
+
+  row = by + 2;
+  {
+    char head[136];
+    snprintf(head, sizeof head, "%s.%s", a->confirm.tool,
+             a->confirm.cmd);
+    d_putn(f, bx + 2, row, head, bw - 4, TFG_BRIGHT, TBG_DEFAULT,
+           TA_BOLD);
+    row++;
+  }
+  if (a->confirm.destructive) {
+    d_putn(f, bx + 2, row, "[destructive]", bw - 4, TFG_AMBER,
+           TBG_DEFAULT, 0);
+    row++;
+  }
+  {
+    int i;
+    for (i = 0; i < arg_rows && row < by + bh - 2; i++, row++)
+      put_clipped(f, bx + 2, row, starts[i], lens[i], bw - 4, TFG_DIM,
+                  0);
+  }
+  {
+    char keys[96];
+    snprintf(keys, sizeof keys,
+             "y allow %s n deny %s a always this session %s Esc deny",
+             th->bullet, th->bullet, th->bullet);
+    d_putn(f, bx + 2, by + bh - 2, keys, bw - 4, TFG_DIM, TBG_DEFAULT,
+           0);
+  }
+}
+
+/* ── help overlay (F1) ────────────────────────────────────────────────── */
+
+static const char *const HELP_KEYS[] = {
+    "Enter        send; Alt+Enter / Ctrl+J newline",
+    "Esc          cancel the running turn / close",
+    "Tab          cycle sidebar panes; complete /commands",
+    "F1           this help",
+    "F2..F6       trace / stats / memory / tools / cache",
+    "F7 / F8      rate the last answer good / poor",
+    "PgUp / PgDn  scroll the chat",
+    "Up / Down    input history (empty editor)",
+    "Ctrl+U/K/W/Y kill to start / end / word; yank",
+    "Ctrl+D       quit (empty editor)",
+};
+
+static const char *const HELP_CMDS[] = {
+    "/help /quit /more /retry /pin [n] /compact",
+    "/session <slug>|new|list|delete <slug>",
+    "/project <slug>|none",
+    "/detail terse|normal|rich|auto",
+    "/cache stats|clear, /redact on|off",
+    "/memory <question>, /export",
+    "/tools /stats",
+};
+
+void modal_draw_help(tui_app *a, tui_frame *f) {
+  const tui_theme *th = &a->theme;
+  int nk = (int)(sizeof HELP_KEYS / sizeof HELP_KEYS[0]);
+  int nc = (int)(sizeof HELP_CMDS / sizeof HELP_CMDS[0]);
+  int bw = f->w - 8;
+  int bh = nk + nc + 6;
+  int bx, by, row, i;
+  char title[64];
+
+  if (bw > 56) bw = 56;
+  if (bh > f->h) bh = f->h;
+  bx = (f->w - bw) / 2;
+  by = (f->h - bh) / 2;
+  if (bx < 0) bx = 0;
+  if (by < 0) by = 0;
+
+  d_dim_rect(f, 0, 0, f->w, f->h);
+  {
+    int x1, y1;
+    for (y1 = by; y1 < by + bh; y1++)
+      for (x1 = bx; x1 < bx + bw; x1++)
+        d_cell(f, x1, y1, " ", TFG_DEFAULT, TBG_DEFAULT, 0);
+  }
+  d_box(f, bx, by, bw, bh, th, 0, TFG_DIM, 0);
+  snprintf(title, sizeof title, " help %s ", th->star);
+  d_put(f, bx + 2, by, title, TFG_ACCENT, TBG_DEFAULT, TA_BOLD);
+
+  row = by + 2;
+  for (i = 0; i < nk && row < by + bh - 2; i++, row++)
+    d_putn(f, bx + 2, row, HELP_KEYS[i], bw - 4, TFG_DEFAULT,
+           TBG_DEFAULT, 0);
+  row++;
+  for (i = 0; i < nc && row < by + bh - 2; i++, row++)
+    d_putn(f, bx + 2, row, HELP_CMDS[i], bw - 4, TFG_DIM, TBG_DEFAULT,
+           0);
+  d_putn(f, bx + 2, by + bh - 2, "Esc closes", bw - 4, TFG_DIM,
+         TBG_DEFAULT, TA_DIM);
+}

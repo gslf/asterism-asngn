@@ -53,3 +53,19 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+# macOS AppleDouble metadata (created when copying through non-HFS volumes)
+._*
+
+# Build trees
+build/
+build-*/
+
+# Demo engine root: keep config + workspace seed, ignore generated state
+demo/memory/
+demo/sessions/
+demo/cache/
+demo/telemetry/
+demo/models/
+demo/asngn.log*
+demo/workspace/.astools/

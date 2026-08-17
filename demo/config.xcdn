@@ -1,0 +1,32 @@
+// asngn demo engine root — try the TUI from the repository:
+//
+//   ./build/asngn --root demo
+//
+// The tool registry points at the astools std packages assembled by the
+// build (fs, grep, edit, git, proc, env, sys). Model weights are NOT
+// bundled: download the reference pool into demo/models/ (see
+// tests/quality/README.md) to chat; without weights the engine opens
+// degraded and the UI, panes, and slash commands still work.
+
+#asngn_config {
+  engine: {
+    base_prompt: """You are asngn, a frugal local assistant. Answer
+plainly and honestly; use the tools when the task touches the
+machine.""",
+  },
+  integration: {
+    asper: { enable: true, root: "memory" },
+    astls: {
+      enable: true,
+      root: "../build/packages",   // std tool suite from the build
+      workspace: "workspace",
+    },
+  },
+  telemetry: {
+    path: "telemetry/telemetry.xcdn",
+  },
+  logging: {
+    path: "asngn.log",
+    level: "info",
+  },
+}

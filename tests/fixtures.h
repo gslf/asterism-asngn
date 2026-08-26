@@ -9,7 +9,7 @@
  * integration, and any caller-supplied extra sections.
  *
  * All paths are taken and written verbatim — pass absolute paths
- * (integration.astls.* and registry paths pass absolute values through
+ * (integration.astools.* and registry paths pass absolute values through
  * root_join / sib_join untouched).
  *
  * MIT License — per aspera ad astra.
@@ -63,7 +63,7 @@ int asngn_fix_astools_config(const char *path, const char *registry_root,
 /*
  * Write the engine config.xcdn at `path`: models.pool of 4 (nano / light
  * / std / embed dim 16, see ASNGN_FIX_POOL), integration asper off +
- * astls on (root / workspace / config as given, absolute), validation
+ * astools on (root / workspace / config as given, absolute), validation
  * judge off, cache disabled, routing.classifier "model". `extra` (may be
  * NULL) is appended verbatim before the closing brace: additional
  * top-level sections, each ending with a comma. 1 on success, 0 on

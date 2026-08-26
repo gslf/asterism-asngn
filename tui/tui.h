@@ -15,27 +15,46 @@
 #ifndef ASNGN_TUI_H
 #define ASNGN_TUI_H
 
-#ifdef _WIN32
-/* Future work: the Win32 console backend (raw input records +
- * ENABLE_VIRTUAL_TERMINAL_PROCESSING) is not implemented yet; this build
- * targets POSIX terminals only. */
-#error "the asngn TUI targets POSIX terminals; Win32 support is future work"
-#endif
-
 /* Feature-test macros must precede every include (see src/os_posix.c). */
+#ifndef _WIN32
 #ifndef _POSIX_C_SOURCE
 #define _POSIX_C_SOURCE 200809L
 #endif
 #if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
 #define _DARWIN_C_SOURCE 1
 #endif
+#endif /* !_WIN32 */
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#ifndef _WIN32
+#include <pthread.h>
 #include <termios.h>
+#endif
 
 #include "asngn.h"
+
+/* ── portable bits (term.c) ───────────────────────────────────────────── */
+
+/* One mutex for the engine→UI queue. Win32 stores an SRWLOCK in the
+ * pointer slot (term.c asserts the fit) so this header never has to pull
+ * in windows.h for every TUI translation unit. */
+typedef struct {
+#ifdef _WIN32
+  void *h;
+#else
+  pthread_mutex_t m;
+#endif
+} tui_mutex;
+
+void tui_mutex_init(tui_mutex *m);
+void tui_mutex_destroy(tui_mutex *m);
+void tui_mutex_lock(tui_mutex *m);
+void tui_mutex_unlock(tui_mutex *m);
+
+/* Monotonic milliseconds (spinner pacing, frame budget, "ago" stamps). */
+long long tui_now_ms(void);
 
 /* ── palette (theme.c) ────────────────────────────────────────────────── */
 
@@ -149,8 +168,16 @@ typedef struct {
   tui_frame cur, prev;
   tui_colormode colors;
   int raw_active;
+#ifdef _WIN32
+  void *h_in, *h_out;   /* console HANDLEs (GetStdHandle; never closed) */
+  void *wake_ev;        /* manual-reset event: engine callbacks wake poll */
+  unsigned long saved_in_mode, saved_out_mode;
+  unsigned int  saved_out_cp;
+  unsigned short pending_high; /* UTF-16 high surrogate carried per read */
+#else
   int wake_r, wake_w; /* self-pipe: engine callbacks + signals wake poll */
   struct termios saved_tio;
+#endif
   char  *out;
   size_t out_len, out_cap;
   /* stdin bytes not yet decoded: the tail of a read that filled the key
@@ -321,8 +348,17 @@ typedef struct {
   int  destructive;
 } tui_confirm;
 
+typedef struct {
+  int              active;
+  asngn_tool_info *tools; /* asngn_free; NULL when empty */
+  size_t           n;
+  int              cur;   /* cursor index into tools     */
+  int              top;   /* first visible row (scroll)  */
+} tui_perms;
+
 void modal_draw_confirm(struct tui_app *a, tui_frame *f);
 void modal_draw_help(struct tui_app *a, tui_frame *f);
+void modal_draw_perms(struct tui_app *a, tui_frame *f);
 
 /* ── engine → main-loop queue ────────────────────────────────────────── */
 
@@ -339,7 +375,7 @@ typedef struct tui_msg {
 } tui_msg;
 
 typedef struct {
-  pthread_mutex_t mu;
+  tui_mutex mu;
   tui_msg *head, *tail;
   tui_term *term; /* wake target; NULL in --frame-dump */
 } tui_queue;
@@ -374,6 +410,7 @@ typedef struct tui_app {
   int  quit;
 
   tui_confirm  confirm;
+  tui_perms    perms;
   asngn_detail detail; /* submit detail for future turns */
 
   /* cached engine introspection */

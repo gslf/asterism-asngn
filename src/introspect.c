@@ -140,6 +140,72 @@ asngn_err asngn_get_sibling_stats(asngn_ctx *c, asngn_sibling_stats *out) {
   return ASNGN_OK;
 }
 
+/* ── tool registry ────────────────────────────────────────────────────── */
+
+asngn_err asngn_tool_list(asngn_ctx *c, asngn_tool_info **out,
+                          size_t *out_n) {
+  char **ids = NULL;
+  size_t n = 0, i;
+  asngn_tool_info *info;
+  astools_err ae;
+
+  if (c == NULL || out == NULL || out_n == NULL) return ASNGN_ERR_INVALID;
+  *out = NULL;
+  *out_n = 0;
+  if (!c->astools_ok) return ASNGN_OK;
+
+  ae = astools_tool_list(c->astools, &ids, &n);
+  if (ae != ASTOOLS_OK)
+    return asngn_seterr(c, ASNGN_ERR_SIBLING, "astools: %s: %s",
+                        astools_err_name(ae),
+                        astools_last_error(c->astools));
+  if (n == 0) {
+    astools_free(ids);
+    return ASNGN_OK;
+  }
+
+  /* copy at the allocator boundary */
+  info = calloc(n, sizeof *info);
+  if (info == NULL) {
+    for (i = 0; i < n; i++) astools_free(ids[i]);
+    astools_free(ids);
+    return asngn_seterr(c, ASNGN_ERR_NOMEM, "tool list: out of memory");
+  }
+  for (i = 0; i < n; i++) {
+    int en = 0, av = 0;
+    snprintf(info[i].ref, sizeof info[i].ref, "%s", ids[i]);
+    /* a tool dropped by a concurrent registry refresh reads as
+     * disabled + unavailable; the list stays coherent */
+    if (astools_tool_state(c->astools, ids[i], &en, &av) == ASTOOLS_OK) {
+      info[i].enabled = en;
+      info[i].available = av;
+    }
+    astools_free(ids[i]);
+  }
+  astools_free(ids);
+  *out = info;
+  *out_n = n;
+  return ASNGN_OK;
+}
+
+asngn_err asngn_tool_enable(asngn_ctx *c, const char *ref, int on) {
+  astools_err ae;
+  if (c == NULL || ref == NULL) return ASNGN_ERR_INVALID;
+  if (!c->astools_ok)
+    return asngn_seterr(c, ASNGN_ERR_UNSUPPORTED, "astools disabled");
+  ae = astools_tool_enable(c->astools, ref, on);
+  if (ae == ASTOOLS_ERR_NOT_FOUND)
+    return asngn_seterr(c, ASNGN_ERR_NOT_FOUND, "tool '%s' not found",
+                        ref);
+  if (ae != ASTOOLS_OK)
+    return asngn_seterr(c, ASNGN_ERR_SIBLING, "astools: %s: %s",
+                        astools_err_name(ae),
+                        astools_last_error(c->astools));
+  asngn_log(c, ASNGN_LOG_INFO, "astools", "tool %s %s by the operator",
+            ref, on ? "enabled" : "disabled");
+  return ASNGN_OK;
+}
+
 /* ── recall / projects / redaction ────────────────────────────────────── */
 
 asngn_err asngn_recall(asngn_ctx *c, const char *question, char **out) {

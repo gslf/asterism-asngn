@@ -50,7 +50,7 @@ TEST(steps_minimal_grammar) {
       "think     ::= \"THINK | \" text\n"
       "clarify   ::= \"CLARIFY | \" text\n"
       "answer    ::= \"ANSWER\"\n"
-      "text      ::= tchar (tchar)*\n"
+      "text      ::= tchar{1,300}\n"
       "tchar     ::= [^|\\x0A\\x0D]\n");
   ASSERT_TRUE(strstr(g, "recall") == NULL);
   ASSERT_TRUE(strstr(g, "open") == NULL);
@@ -68,7 +68,7 @@ TEST(steps_recall_alternative) {
       "think     ::= \"THINK | \" text\n"
       "clarify   ::= \"CLARIFY | \" text\n"
       "answer    ::= \"ANSWER\"\n"
-      "text      ::= tchar (tchar)*\n"
+      "text      ::= tchar{1,300}\n"
       "tchar     ::= [^|\\x0A\\x0D]\n");
   free(g);
 }
@@ -84,7 +84,7 @@ TEST(steps_blob_handles) {
       "clarify   ::= \"CLARIFY | \" text\n"
       "answer    ::= \"ANSWER\"\n"
       "handle    ::= \"B1\" | \"B2\" | \"B3\"\n"
-      "text      ::= tchar (tchar)*\n"
+      "text      ::= tchar{1,300}\n"
       "tchar     ::= [^|\\x0A\\x0D]\n");
   ASSERT_TRUE(strstr(g, "handle    ::= \"B1\" | \"B2\" | \"B3\"\n") != NULL);
   free(g);
@@ -104,7 +104,7 @@ static const char k_grafted[] =
     "think     ::= \"THINK | \" text\n"
     "clarify   ::= \"CLARIFY | \" text\n"
     "answer    ::= \"ANSWER\"\n"
-    "text      ::= tchar (tchar)*\n"
+    "text      ::= tchar{1,300}\n"
     "tchar     ::= [^|\\x0A\\x0D]\n"
     "astools-call ::= t-x-c-y\n"
     "t-x-c-y ::= \"x.y {}\"\n"

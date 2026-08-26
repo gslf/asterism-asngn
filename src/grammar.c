@@ -11,10 +11,14 @@
  * a rule name is a maximal run of [a-zA-Z0-9-] — that leaves quoted
  * literals, character classes, and comments untouched.
  *
- * Length note: the llama.cpp GBNF dialect we emit has no bounded
- * repetition counts, so `text ::= tchar (tchar)*` is unbounded in the
- * grammar itself; the 300-byte cap of is enforced by
- * asngn_step_parse and by max_tokens on the decision pass.
+ * Length note: `text` is bounded to ASNGN_STEP_TEXT_MAX chars via {m,n}
+ * repetition, so at the limit the only legal continuation is the
+ * terminating newline and the sampler closes the line instead of
+ * rambling into the decide max_tokens cap. The cap still bounds CALL
+ * lines (astools' grafted productions stay unbounded); a line it
+ * truncates lacks the newline root requires and is rejected as
+ * malformed by the control loop; asngn_step_parse re-caps text payloads
+ * at the same limit as defense in depth.
  *
  * Output is deterministic: byte-identical for identical inputs.
  *
@@ -141,8 +145,9 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
     if (e == ASNGN_OK) e = asngn_buf_appendc(&b, '\n');
   }
   if (e == ASNGN_OK)
-    e = asngn_buf_appends(&b, "text      ::= tchar (tchar)*\n"
-                              "tchar     ::= [^|\\x0A\\x0D]\n");
+    e = asngn_buf_printf(&b, "text      ::= tchar{1,%d}\n"
+                             "tchar     ::= [^|\\x0A\\x0D]\n",
+                         ASNGN_STEP_TEXT_MAX);
   if (e == ASNGN_OK && call_on) e = graft_astools(&b, astools_gbnf);
 
   if (e != ASNGN_OK) {

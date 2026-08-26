@@ -32,6 +32,7 @@ const char *asngn_err_name(asngn_err e) {
   case ASNGN_ERR_CANCELLED:   return "ASNGN_ERR_CANCELLED";
   case ASNGN_ERR_BUSY:        return "ASNGN_ERR_BUSY";
   case ASNGN_ERR_PROTOCOL:    return "ASNGN_ERR_PROTOCOL";
+  case ASNGN_ERR_CONTEXT:     return "ASNGN_ERR_CONTEXT";
   case ASNGN_ERR_UNSUPPORTED: return "ASNGN_ERR_UNSUPPORTED";
   case ASNGN_ERR_SIBLING:     return "ASNGN_ERR_SIBLING";
   case ASNGN_ERR_NOMEM:       return "ASNGN_ERR_NOMEM";
@@ -53,6 +54,15 @@ asngn_err asngn_seterr(asngn_ctx *c, asngn_err e, const char *fmt, ...) {
 
 const char *asngn_last_error(const asngn_ctx *c) {
   return c != NULL ? c->errbuf : "";
+}
+
+asngn_err asngn_last_context_diagnostics(
+    asngn_ctx *c, asngn_context_diagnostics *out) {
+  if (c == NULL || out == NULL) return ASNGN_ERR_INVALID;
+  os_mutex_lock(&c->err_mu);
+  *out = c->context_diag;
+  os_mutex_unlock(&c->err_mu);
+  return ASNGN_OK;
 }
 
 /* ── memory management ────────────────────────────────────────────────── */
@@ -145,13 +155,13 @@ static void ctx_locks_destroy(asngn_ctx *c) {
 
 /* Defined with the turn machinery below; used by pin/compact too. */
 static void session_wait_fold_locked(asngn_ctx *c, asngn_session *s);
+static asngn_err startup_readiness(asngn_ctx *c);
 
 /* Join a config path to the engine root when relative. Returns an owned
  * string replacing *slot. */
 static asngn_err root_join(asngn_ctx *c, char **slot) {
   char *joined;
-  if (*slot == NULL || (*slot)[0] == '/' ||
-      ((*slot)[0] != '\0' && (*slot)[1] == ':')) /* win drive */
+  if (*slot == NULL || os_path_is_abs(*slot))
     return ASNGN_OK;
   joined = os_path_join(c->root, *slot);
   if (joined == NULL) return ASNGN_ERR_NOMEM;
@@ -177,6 +187,7 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   c->clock = clk != NULL ? *clk : asngn_clock_system();
   c->log_cb = default_log_cb;
   c->daily_day = asngn_clock_now(&c->clock) / 86400;
+  c->allow_degraded = p->allow_degraded != 0;
 
   asngn_config_defaults(&c->cfg);
   {
@@ -202,12 +213,15 @@ asngn_err asngn_open_with(const asngn_open_params *p,
     e = asngn_seterr(c, e, "engine root %s: cannot create", root_in);
     goto fail;
   }
+
   c->root = os_realpath(root_in);
   if (c->root == NULL) {
     e = asngn_seterr(c, ASNGN_ERR_IO, "engine root %s: cannot resolve",
                      root_in);
     goto fail;
   }
+  e = asngn_workspace_init(c, p);
+  if (e != ASNGN_OK) goto fail;
   c->sessions_dir = os_path_join(c->root, "sessions");
   c->cache_dir = os_path_join(c->root, "cache");
   c->tele_dir = os_path_join(c->root, "telemetry");
@@ -233,6 +247,13 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   e = asngn_tele_init(c);
   if (e != ASNGN_OK) goto fail;
 
+  /* model weights: relative paths resolve under the engine root, like
+   * every other engine-root artifact (the process cwd is arbitrary) */
+  for (i = 0; i < c->cfg.pool_n; i++) {
+    e = root_join(c, &c->cfg.pool[i].path);
+    if (e != ASNGN_OK) goto fail;
+  }
+
   /* model pool, with injected fakes taking their slots up front */
   for (i = 0; i < c->cfg.pool_n; i++) {
     size_t f;
@@ -250,6 +271,8 @@ asngn_err asngn_open_with(const asngn_open_params *p,
 
   /* siblings (degrade on failure) */
   e = asngn_siblings_open(c);
+  if (e != ASNGN_OK) goto fail;
+  e = startup_readiness(c);
   if (e != ASNGN_OK) goto fail;
 
   /* caches */
@@ -285,6 +308,14 @@ asngn_err asngn_open(const asngn_open_params *p, asngn_ctx **out) {
   return asngn_open_with(p, NULL, 0, NULL, NULL, out);
 }
 
+asngn_err asngn_workspace_get(asngn_ctx *c, asngn_workspace_info *out) {
+  asngn_err e;
+  if (c == NULL || out == NULL) return ASNGN_ERR_INVALID;
+  e = asngn_workspace_refresh(c);
+  if (e == ASNGN_OK) *out = c->workspace;
+  return e;
+}
+
 void asngn_close(asngn_ctx *c) {
   size_t i;
   if (c == NULL) return;
@@ -318,6 +349,53 @@ void asngn_close(asngn_ctx *c) {
 
 const char *asngn_session_slug(const asngn_session *s) {
   return s != NULL ? s->slug : NULL;
+}
+
+asngn_err asngn_session_workspace(asngn_session *s,
+                                  asngn_workspace_info *out) {
+  asngn_err e;
+  if (s == NULL || out == NULL) return ASNGN_ERR_INVALID;
+  e = asngn_workspace_refresh(s->ctx);
+  if (e != ASNGN_OK) return e;
+  os_rwlock_wrlock(&s->lock);
+  s->workspace = s->ctx->workspace;
+  *out = s->workspace;
+  os_rwlock_wrunlock(&s->lock);
+  return ASNGN_OK;
+}
+
+static asngn_err startup_readiness(asngn_ctx *c) {
+  bool seen[ASNGN_MAX_POOL] = {false};
+  int r;
+  if (c->cfg.profile != ASNGN_PROFILE_CODING) return ASNGN_OK;
+  if (c->workspace.canonical_root[0] == '\0')
+    return asngn_seterr(c, ASNGN_ERR_CONFIG,
+                        "coding readiness failed: workspace missing");
+  for (r = 0; r < ASNGN_ROLE_COUNT; r++) {
+    int slot = c->role_slot[r];
+    asngn_model_slot *m;
+    if (slot < 0 || (size_t)slot >= c->models_n)
+      return asngn_seterr(c, ASNGN_ERR_MODEL,
+                          "coding readiness failed: role %s is unmapped",
+                          asngn_role_name((asngn_role)r));
+    if (seen[slot]) continue;
+    seen[slot] = true;
+    m = &c->models[slot];
+    if (!m->injected && (m->cfg.path == NULL || !os_file_exists(m->cfg.path))) {
+      if (c->allow_degraded) {
+        asngn_log(c, ASNGN_LOG_WARN, "model",
+                  "coding readiness degraded: model '%s' missing at %s",
+                  m->cfg.id, m->cfg.path != NULL ? m->cfg.path : "(null)");
+      } else {
+        return asngn_seterr(c, ASNGN_ERR_MODEL,
+                            "coding readiness failed: model '%s' missing "
+                            "at %s; pass --allow-degraded to opt in",
+                            m->cfg.id,
+                            m->cfg.path != NULL ? m->cfg.path : "(null)");
+      }
+    }
+  }
+  return asngn_siblings_readiness(c);
 }
 
 static int session_slug_cmp(const void *a, const void *b) {
@@ -541,7 +619,7 @@ asngn_err asngn_session_list(asngn_ctx *c, char ***out_slugs,
 asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
   asngn_ctx *c;
   size_t i, pinned = 0;
-  bool found = false;
+  bool found = false, changed = false;
   if (s == NULL) return ASNGN_ERR_INVALID;
   c = s->ctx;
   session_wait_fold_locked(c, s);
@@ -564,8 +642,12 @@ asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
         }
         s->log[i].pinned = true;
         s->log[i].folded = false; /* pinned turns rejoin the verbatim */
+        changed = true;
       } else if (!on) {
-        s->log[i].pinned = false;
+        if (s->log[i].pinned) {
+          s->log[i].pinned = false;
+          changed = true;
+        }
       }
       break;
     }
@@ -573,6 +655,10 @@ asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
   if (!found) {
     os_rwlock_wrunlock(&s->lock);
     return asngn_seterr(c, ASNGN_ERR_NOT_FOUND, "no turn %zu", turn);
+  }
+  if (!changed) {
+    os_rwlock_wrunlock(&s->lock);
+    return ASNGN_OK;
   }
   {
     /* the lock stays held across the rewrite so a submitted turn cannot

@@ -365,6 +365,14 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   p.top_p = sp->top_p;
   p.max_tokens = max_tokens_override > 0 ? max_tokens_override
                                          : sp->max_tokens;
+  p.repeat_penalty = sp->repeat_penalty;
+
+  /* Final gate for every call, including classifier, judge, compression
+   * and cache adaptation calls that do not use the zoned assembler. */
+  e = asngn_context_validate_text(
+      c, slot, system_prompt, user_prompt,
+      p.max_tokens > 0 ? p.max_tokens : c->cfg.rich_tokens);
+  if (e != ASNGN_OK) return e;
 
   os_mutex_lock(&c->models_mu);
   e = ensure_loaded_locked(c, slot);
@@ -477,6 +485,41 @@ int asngn_models_count_tokens(asngn_ctx *c, int slot, const char *text) {
   os_mutex_unlock(&c->models_mu);
 
   if (n < 0) return count_heuristic(c, text);
+  return n;
+}
+
+int asngn_models_count_prompt(asngn_ctx *c, int slot,
+                              const char *system_prompt,
+                              const char *user_prompt) {
+  asngn_model_slot *s;
+  asngn_err e;
+  int n;
+  if (c == NULL || slot < 0 || (size_t)slot >= c->models_n)
+    return asngn_token_heuristic(system_prompt) +
+           asngn_token_heuristic(user_prompt) + 16;
+  s = &c->models[slot];
+  os_mutex_lock(&c->models_mu);
+  e = ensure_loaded_locked(c, slot);
+  if (e != ASNGN_OK) {
+    os_mutex_unlock(&c->models_mu);
+    return asngn_token_heuristic(system_prompt) +
+           asngn_token_heuristic(user_prompt) + 16;
+  }
+  slot_set_in_use(c, slot, 1);
+  os_mutex_unlock(&c->models_mu);
+  os_mutex_lock(&s->mu);
+  if (s->iface.count_prompt_tokens != NULL)
+    n = s->iface.count_prompt_tokens(s->iface.ud, system_prompt, user_prompt);
+  else
+    n = (s->iface.count_tokens != NULL
+             ? s->iface.count_tokens(s->iface.ud, system_prompt) +
+                   s->iface.count_tokens(s->iface.ud, user_prompt)
+             : asngn_token_heuristic(system_prompt) +
+                   asngn_token_heuristic(user_prompt)) + 16;
+  os_mutex_unlock(&s->mu);
+  os_mutex_lock(&c->models_mu);
+  slot_set_in_use(c, slot, 0);
+  os_mutex_unlock(&c->models_mu);
   return n;
 }
 

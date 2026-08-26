@@ -1,7 +1,7 @@
 /*
  * asngn.h — Asterism Engine ("asngn")
  *
- * A quality-per-token agentic engine for small LLMs.
+ * An outcome-gated agentic coding engine for small local LLMs.
  * Public C API of libasngn.
  *
  * Contract notes:
@@ -52,6 +52,7 @@ typedef enum {
   ASNGN_ERR_CANCELLED,   /* cancelled by the caller                         */
   ASNGN_ERR_BUSY,        /* a turn is already running / not done yet        */
   ASNGN_ERR_PROTOCOL,    /* malformed step / model protocol output          */
+  ASNGN_ERR_CONTEXT,     /* prompt exceeds the model's global context budget */
   ASNGN_ERR_UNSUPPORTED, /* disabled feature or unsupported operation       */
   ASNGN_ERR_SIBLING,     /* asper / astools failure (see asngn_last_error)  */
   ASNGN_ERR_NOMEM        /* allocation failure                              */
@@ -78,13 +79,41 @@ enum {
 typedef struct {
   const char *engine_root; /* store directory; created if missing          */
   const char *config_path; /* optional config.xcdn; NULL = defaults        */
+  const char *workspace_root; /* explicit coding workspace; NULL=config    */
+  const char *project_id;     /* stable project id; NULL=derived           */
+  const char *build_adapter;  /* cmake/npm/cargo/...; NULL=auto-detect      */
+  int         allow_degraded; /* explicit opt-in to missing coding deps     */
 } asngn_open_params;
+
+#define ASNGN_WORKSPACE_PATH_MAX 1024
+typedef struct {
+  char canonical_root[ASNGN_WORKSPACE_PATH_MAX];
+  char repository_root[ASNGN_WORKSPACE_PATH_MAX];
+  char head[65];
+  char branch[128];
+  char project_id[65];
+  char ignore_rules[256];
+  char build_adapter[32];
+  char fingerprint[65];
+} asngn_workspace_info;
+
+asngn_err asngn_workspace_get(asngn_ctx *c, asngn_workspace_info *out);
 
 asngn_err   asngn_open(const asngn_open_params *p, asngn_ctx **out);
 /* Flush, close siblings, join workers, release everything. NULL: no-op. */
 void        asngn_close(asngn_ctx *c);
 /* UTF-8 message for the most recent error on this context; ctx-owned. */
 const char *asngn_last_error(const asngn_ctx *c);
+
+/* Diagnostics for the most recent ASNGN_ERR_CONTEXT. `overhead` includes
+ * chat-template tokens and zone headings/separators not attributable to a
+ * payload. All values are tokens. */
+typedef struct {
+  size_t n_ctx, output_reserve, safety_margin, prompt_budget, prompt_total;
+  size_t system, memory, catalog, summary, verbatim, working, overhead;
+} asngn_context_diagnostics;
+asngn_err asngn_last_context_diagnostics(
+    asngn_ctx *c, asngn_context_diagnostics *out);
 
 /* ---- sessions ---------------------------------------------------------- */
 
@@ -110,6 +139,8 @@ asngn_err asngn_session_list (asngn_ctx *c, char ***out_slugs,
                               size_t *out_n);
 /* Slug of an open session; session-owned, valid until close. */
 const char *asngn_session_slug(const asngn_session *s);
+asngn_err asngn_session_workspace(asngn_session *s,
+                                  asngn_workspace_info *out);
 asngn_err asngn_session_pin    (asngn_session *s, size_t turn, int on);
 asngn_err asngn_session_compact(asngn_session *s);    /* fold + compact    */
 
@@ -204,6 +235,21 @@ typedef struct {
   size_t    tool_invocations, tool_ok, tool_failed, tool_denied;
 } asngn_sibling_stats;
 asngn_err asngn_get_sibling_stats(asngn_ctx *c, asngn_sibling_stats *out);
+
+/* One resolved tool of the astools registry. */
+typedef struct {
+  char ref[64];   /* tool id                                          */
+  int  enabled;   /* host toggle AND pinning gate                     */
+  int  available; /* runnable on this platform                        */
+} asngn_tool_info;
+/* Every resolved tool, sorted by id; *out is one allocation released
+ * with asngn_free. *out = NULL, *out_n = 0 when astools is disabled. */
+asngn_err asngn_tool_list(asngn_ctx *c, asngn_tool_info **out,
+                          size_t *out_n);
+/* Enable or disable a tool ("fs" or "fs@1.2.0") for CALL steps. Under
+ * pinning "enforce" an enable only takes effect once the lockfile
+ * verifies; re-read the state with asngn_tool_list. */
+asngn_err asngn_tool_enable(asngn_ctx *c, const char *ref, int on);
 
 /* Direct Asper recall, bypassing the loop (/memory). Answer rendered
  * with citations; asngn_free. */

@@ -81,6 +81,23 @@ TEST(heuristic_question_only_direct) {
   ASSERT_EQ_INT(p.klass, ASNGN_CLASS_SIMPLE);
 }
 
+TEST(heuristic_conceptual_repo_question_direct) {
+  asngn_route_profile p;
+  asngn_route_heuristic("what is a repository?", true, false, &p);
+  ASSERT_EQ_INT(p.mode, ASNGN_MODE_DIRECT);
+  asngn_route_heuristic("cos'e un file?", true, false, &p);
+  ASSERT_EQ_INT(p.mode, ASNGN_MODE_DIRECT);
+}
+
+TEST(heuristic_local_repo_question_plans) {
+  asngn_route_profile p;
+  asngn_route_heuristic("what files are in this repo?", true, false, &p);
+  ASSERT_EQ_INT(p.mode, ASNGN_MODE_PLAN);
+  asngn_route_heuristic("quali file ci sono nella cartella corrente?", true,
+                        false, &p);
+  ASSERT_EQ_INT(p.mode, ASNGN_MODE_PLAN);
+}
+
 TEST(tier_ladder_up) {
   asngn_ctx *c = ctx_defaults();
   ASSERT_TRUE(c != NULL);
@@ -115,6 +132,8 @@ TEST_LIST = {
   TEST_ENTRY(heuristic_recent_escalation_complex),
   TEST_ENTRY(heuristic_depth_ask_rich),
   TEST_ENTRY(heuristic_question_only_direct),
+  TEST_ENTRY(heuristic_conceptual_repo_question_direct),
+  TEST_ENTRY(heuristic_local_repo_question_plans),
   TEST_ENTRY(tier_ladder_up),
   TEST_ENTRY(tier_ladder_down),
 };

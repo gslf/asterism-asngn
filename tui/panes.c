@@ -19,11 +19,7 @@
 #include <time.h>
 
 /* monotonic ms for the live-phase clock (mirrors main.c's now_ms) */
-static long long ev_now_ms(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
+static long long ev_now_ms(void) { return tui_now_ms(); }
 
 #include "xcdn.h"
 
@@ -273,12 +269,43 @@ void tui_events_ingest(tui_app *a, const char *line_xcdn) {
   xcdn_document_free(doc);
 }
 
+/* asngn_log hands the callback the full formatted record
+ * ("<RFC3339> LEVEL SUBSYS  message"). The trace pane has ~23 columns:
+ * showing the record verbatim renders nothing but the date. Split off
+ * the head — keep the subsystem for context, keep the message as the
+ * row text, and drop the timestamp/level (the row color already says
+ * WARN vs ERROR). Tolerates a bare message with no head. */
+static const char *log_split_head(const char *msg, char *subsys,
+                                  size_t subsys_sz) {
+  const char *p = msg, *tok;
+  size_t i, n;
+  subsys[0] = '\0';
+  for (i = 0; i < 4; i++)
+    if (p[i] < '0' || p[i] > '9') return msg; /* no timestamp head */
+  if (p[4] != '-') return msg;
+  while (*p != '\0' && *p != ' ') p++; /* timestamp */
+  while (*p == ' ') p++;
+  while (*p != '\0' && *p != ' ') p++; /* level */
+  while (*p == ' ') p++;
+  tok = p; /* subsystem */
+  while (*p != '\0' && *p != ' ') p++;
+  n = (size_t)(p - tok);
+  if (n >= subsys_sz) n = subsys_sz - 1;
+  memcpy(subsys, tok, n);
+  subsys[n] = '\0';
+  while (*p == ' ') p++;
+  return p;
+}
+
 void tui_events_log(tui_app *a, int level, const char *msg) {
   tui_ev *e;
   char name[40];
+  char subsys[16];
   uint64_t back, lo;
 
-  snprintf(name, sizeof name, "%.39s", msg != NULL ? msg : "");
+  msg = log_split_head(msg != NULL ? msg : "", subsys, sizeof subsys);
+  if (msg[0] == '\0') return; /* no message body: nothing worth a row */
+  snprintf(name, sizeof name, "%.39s", msg);
 
   /* The astools registry re-scan re-emits the same warning set every
    * few seconds; a repeated line bumps an "xN" counter on its earlier
@@ -287,7 +314,9 @@ void tui_events_log(tui_app *a, int level, const char *msg) {
   if (lo < a->evs.turn_seq) lo = a->evs.turn_seq;
   for (back = a->evs.seq; back > lo; back--) {
     tui_ev *prev = &a->evs.ev[(back - 1) % TUI_EV_CAP];
-    if (strcmp(prev->kind, "log") == 0 && strcmp(prev->name, name) == 0) {
+    if (strcmp(prev->kind, "log") == 0 &&
+        strcmp(prev->name, name) == 0 &&
+        strcmp(prev->tier, subsys) == 0) {
       prev->repeats++;
       snprintf(prev->extra, sizeof prev->extra, "x%d",
                prev->repeats + 1);
@@ -299,6 +328,7 @@ void tui_events_log(tui_app *a, int level, const char *msg) {
   e = ev_push(&a->evs);
   snprintf(e->kind, sizeof e->kind, "log");
   memcpy(e->name, name, sizeof name);
+  snprintf(e->tier, sizeof e->tier, "%s", subsys);
   if (level <= ASNGN_LOG_ERROR) e->red = 1;
   else e->amber = 1;
   a->dirty = 1;
@@ -320,9 +350,25 @@ static void draw_ev_line(tui_app *a, tui_frame *f, int x, int y, int w,
   if (e->red) name_fg = TFG_RED;
   cx += d_put(f, cx, y, th->marker, TFG_ACCENT, TBG_DEFAULT, 0);
   cx += d_put(f, cx, y, " ", TFG_DEFAULT, TBG_DEFAULT, 0);
+  if (e->kind[0] == 'l') { /* log line: subsys, then full-width message */
+    int avail;
+    if (e->tier[0] != '\0') {
+      cx += d_putn(f, cx, y, e->tier, 6, TFG_DIM, TBG_DEFAULT, 0);
+      cx += d_put(f, cx, y, " ", TFG_DEFAULT, TBG_DEFAULT, 0);
+    }
+    avail = x + w - cx;
+    if (e->repeats > 0) avail -= (int)strlen(e->extra) + 1;
+    if (avail > 0)
+      cx += d_putn(f, cx, y, e->name, avail, name_fg, TBG_DEFAULT, 0);
+    if (e->repeats > 0 && cx < x + w) {
+      cx += d_put(f, cx, y, " ", TFG_DEFAULT, TBG_DEFAULT, 0);
+      d_putn(f, cx, y, e->extra, x + w - cx, TFG_DIM, TBG_DEFAULT, 0);
+    }
+    return;
+  }
   cx += d_putn(f, cx, y, e->name, w > 14 ? 12 : w - 4, name_fg,
                TBG_DEFAULT, 0);
-  if (e->kind[0] != 'l') { /* not a log line: columns */
+  { /* event row: fixed columns */
     int col = x + 15;
     if (col > cx + 1) cx = col;
     else cx += 1;
@@ -503,7 +549,7 @@ static void pane_tools(tui_app *a, tui_frame *f, int x, int y, int w,
       const tui_ev *e = ev_at(&a->evs, i);
       if (e == NULL || strcmp(e->kind, "tool_call") != 0) continue;
       if (np == 16) {
-        memmove(picks, picks + 1, 15 * sizeof picks[0]);
+        memmove((void *)picks, picks + 1, 15 * sizeof picks[0]);
         np--;
       }
       picks[np++] = e;

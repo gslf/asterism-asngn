@@ -57,10 +57,19 @@ static int env_is_utf8(const char *name) {
 }
 
 int tui_locale_utf8(void) {
+#ifdef _WIN32
+  /* term.c switches the console output code page to UTF-8; only an
+   * explicit non-UTF-8 locale env opts back into the ASCII glyph set. */
+  int r = env_is_utf8("LC_ALL");
+  if (r < 0) r = env_is_utf8("LC_CTYPE");
+  if (r < 0) r = env_is_utf8("LANG");
+  return r != 0;
+#else
   int r = env_is_utf8("LC_ALL");
   if (r < 0) r = env_is_utf8("LC_CTYPE");
   if (r < 0) r = env_is_utf8("LANG");
   return r == 1;
+#endif
 }
 
 /* ── glyph sets ───────────────────────────────────────────────────────── */

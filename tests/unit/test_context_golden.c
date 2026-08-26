@@ -33,7 +33,7 @@ static int fx_write_config(fx *f, const char *extra) {
   ok = fprintf(fp,
                "#asngn_config {\n"
                "  integration: { asper: { enable: false }, "
-               "astls: { enable: false } },\n"
+               "astools: { enable: false } },\n"
                "  validation: { judge: \"off\" },\n"
                "  routing: { classifier: \"heuristic\" },\n"
                "  models: { pool: [\n"
@@ -294,11 +294,41 @@ TEST(summary_zone) {
   fx_drop(&f);
 }
 
+TEST(global_budget_reports_zones) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_turn_state t;
+  asngn_prompt p;
+  asngn_context_diagnostics d;
+  char msg[] = "messaggio che deve rientrare nel budget globale";
+  int slot;
+
+  ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
+  ASSERT_OK(asngn_session_open(f.c, "budget", &s));
+  fx_probe_state(&f, s, msg, &t, &slot);
+  ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
+  f.c->models[slot].cfg.ctx = 96;
+  ASSERT_EQ_INT(asngn_context_validate(f.c, slot, &p, 64),
+                ASNGN_ERR_CONTEXT);
+  ASSERT_OK(asngn_last_context_diagnostics(f.c, &d));
+  ASSERT_EQ_INT((long long)d.n_ctx, 96);
+  ASSERT_EQ_INT((long long)d.prompt_budget, 0);
+  ASSERT_TRUE(d.prompt_total > 0);
+  ASSERT_TRUE(d.system > 0);
+  ASSERT_TRUE(d.working > 0);
+  ASSERT_TRUE(strstr(asngn_last_error(f.c), "working=") != NULL);
+  asngn_prompt_free(&p);
+  fx_probe_dispose(&t);
+  asngn_session_close(s);
+  fx_drop(&f);
+}
+
 TEST_LIST = {
   TEST_ENTRY(empty_session_golden),
   TEST_ENTRY(assemble_deterministic),
   TEST_ENTRY(verbatim_budget_pin_first),
   TEST_ENTRY(summary_zone),
+  TEST_ENTRY(global_budget_reports_zones),
 };
 
 RUN_ALL_TESTS()

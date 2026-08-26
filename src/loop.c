@@ -202,9 +202,35 @@ oom:
   return NULL;
 }
 
+/* Push one call outcome, prefixed with the originating call so the
+ * models can tell WHICH arguments produced which RESULT/ERROR — without
+ * the echo, an answer pass facing one failed and one successful call of
+ * the same command cannot attribute the data to the right arguments. */
+static asngn_err call_push_outcome(asngn_ctx *c, asngn_turn_state *t,
+                                   const char *ref, const char *cmd,
+                                   const char *args, const char *line) {
+  asngn_buf b;
+  asngn_err e;
+  asngn_buf_init(&b);
+  e = asngn_buf_printf(&b, "CALL %s.%s %s -> %s", ref, cmd,
+                       args != NULL ? args : "{}", line);
+  if (e == ASNGN_OK) {
+    char *masked = ctx_text(t->s, b.data);
+    if (masked != NULL) {
+      e = work_push_fenced(c, t, masked);
+      free(masked);
+    } else {
+      e = ASNGN_ERR_NOMEM;
+    }
+  }
+  asngn_buf_free(&b);
+  return e;
+}
+
 static asngn_err call_push_error(asngn_ctx *c, asngn_turn_state *t,
                                  const char *ref, const char *cmd,
-                                 const char *code, const char *message) {
+                                 const char *args, const char *code,
+                                 const char *message) {
   struct astools_result_s r;
   char *line = NULL;
   asngn_err e;
@@ -215,14 +241,14 @@ static asngn_err call_push_error(asngn_ctx *c, asngn_turn_state *t,
   if (c->astools != NULL &&
       astools_call_format(c->astools, ref, cmd, &r, &line) == ASTOOLS_OK &&
       line != NULL) {
-    e = work_push_fenced(c, t, line);
+    e = call_push_outcome(c, t, ref, cmd, args, line);
     astools_free(line);
   } else {
     asngn_buf b;
     asngn_buf_init(&b);
     e = asngn_buf_printf(&b, "ERROR %s.%s {code: \"%s\",message: \"%s\"}",
                          ref, cmd, code, message);
-    if (e == ASNGN_OK) e = work_push_fenced(c, t, b.data);
+    if (e == ASNGN_OK) e = call_push_outcome(c, t, ref, cmd, args, b.data);
     asngn_buf_free(&b);
   }
   return e;
@@ -330,27 +356,44 @@ static int call_confirm(asngn_ctx *c, asngn_turn_state *t, const char *ref,
 static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
                            const char *line) {
   asngn_session *s = t->s;
-  char *ref = NULL, *cmd = NULL, *args = NULL;
+  char *ref = NULL, *cmd = NULL, *args = NULL, *canon_args = NULL;
   asngn_tool_note note;
-  uint8_t key[32];
+  uint8_t key[32], cache_key[32];
   asngn_err e = ASNGN_OK;
   astools_err ae;
   bool cached_hit = false;
   int64_t t0 = asngn_clock_mono_ms(&c->clock);
 
   if (c->astools == NULL || !c->astools_ok || t->opts.no_tools)
-    return call_push_error(c, t, "tool", "call", "asngn/no-tools",
+    return call_push_error(c, t, "tool", "call", NULL, "asngn/no-tools",
                            "tools are disabled for this turn");
 
   ae = astools_call_parse(c->astools, line, &ref, &cmd, &args);
   if (ae != ASTOOLS_OK)
-    return call_push_error(c, t, "tool", "call", "astools/invalid-args",
-                           "malformed call line");
+    return call_push_error(c, t, "tool", "call", NULL,
+                           "astools/invalid-args", "malformed call line");
+
+  canon_args = call_args_canonical(args);
+  if (canon_args == NULL) {
+    e = ASNGN_ERR_NOMEM;
+    goto out;
+  }
+  {
+    uint8_t args_hash[32];
+    char args_hex[65];
+    /* Log callbacks receive DEBUG records even when the file sink does not.
+     * Tool arguments routinely contain credentials, so neither sink may see
+     * the payload itself. */
+    asngn_sha256(canon_args, strlen(canon_args), args_hash);
+    asngn_sha256_hex(args_hash, 32, args_hex);
+    asngn_log(c, ASNGN_LOG_DEBUG, "loop", "call %s.%s args_sha256=%s",
+              ref, cmd, args_hex);
+  }
 
   /* plan gate: args validated before any confirmation UI */
   ae = astools_validate_args(c->astools, ref, cmd, args);
   if (ae != ASTOOLS_OK) {
-    e = call_push_error(c, t, ref, cmd, "astools/invalid-args",
+    e = call_push_error(c, t, ref, cmd, args, "astools/invalid-args",
                         astools_last_error(c->astools));
     goto out;
   }
@@ -361,22 +404,37 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     note.destructive = true;
   }
 
-  /* identical-call guard: sha256(tool, version, command,
-   * canonical args) */
+  /* The per-turn identical-call key is stable across workspace mutations;
+   * the persistent cache key additionally carries the live workspace
+   * fingerprint, so external editor/build changes invalidate cached reads. */
   {
     asngn_buf kb;
-    char *canon = call_args_canonical(args);
+    uint8_t workspace_hash[32];
+    char workspace_hex[65];
     asngn_buf_init(&kb);
-    if (canon == NULL ||
-        asngn_buf_printf(&kb, "%s|%s|%s|%s", ref, note.version, cmd,
-                         canon) != ASNGN_OK) {
-      free(canon);
+    if (asngn_buf_printf(&kb, "%s|%s|%s|%s", ref, note.version, cmd,
+                         canon_args) != ASNGN_OK) {
       asngn_buf_free(&kb);
       e = ASNGN_ERR_NOMEM;
       goto out;
     }
-    free(canon);
     asngn_sha256(kb.data, kb.len, key);
+    asngn_buf_free(&kb);
+    asngn_workspace_hash(c, workspace_hash);
+    asngn_sha256_hex(workspace_hash, sizeof workspace_hash, workspace_hex);
+    asngn_buf_init(&kb);
+    if (asngn_buf_appends(&kb, workspace_hex) != ASNGN_OK) {
+      asngn_buf_free(&kb);
+      e = ASNGN_ERR_NOMEM;
+      goto out;
+    }
+    {
+      asngn_sha256_ctx hc;
+      asngn_sha256_init(&hc);
+      asngn_sha256_update(&hc, key, sizeof key);
+      asngn_sha256_update(&hc, kb.data, kb.len);
+      asngn_sha256_final(&hc, cache_key);
+    }
     asngn_buf_free(&kb);
   }
   {
@@ -391,17 +449,24 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
         t->osc_cycles++;
       memcpy(t->osc_b, t->osc_a, 32);
       memcpy(t->osc_a, key, 32);
+      t->repeat_calls++;
+      t->futile_row++;
+      /* a model that just repeated a call tends to repeat it again:
+       * withhold the CALL alternative for one pass so the next decision
+       * must answer or think instead */
+      t->call_mute = true;
       asngn_tele_emit(c, "guard", t->span_root, NULL, s->slug,
                       t->led.turn, "{guard: \"identical_call\"}");
       os_rwlock_wrlock(&c->lock);
       c->stats.guard_trips++;
       os_rwlock_wrunlock(&c->lock);
-      e = call_push_error(c, t, ref, cmd, "asngn/repeat",
+      e = call_push_error(c, t, ref, cmd, args, "asngn/repeat",
                           "already ran; result above");
       goto out;
     }
     memcpy(t->osc_b, t->osc_a, 32);
     memcpy(t->osc_a, key, 32);
+    t->repeat_calls = 0; /* a fresh call shows the model adapted */
   }
   /* remember the key now, so identical retries — including of denied,
    * capped, or cached calls — are blocked and cannot spam the
@@ -419,21 +484,25 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
 
   /* tool-call cap */
   if (t->tool_calls >= c->cfg.max_tool_calls) {
+    t->futile_row++;
     asngn_tele_emit(c, "guard", t->span_root, NULL, s->slug, t->led.turn,
                     "{guard: \"tool_cap\"}");
     os_rwlock_wrlock(&c->lock);
     c->stats.guard_trips++;
     os_rwlock_wrunlock(&c->lock);
-    e = call_push_error(c, t, ref, cmd, "asngn/tool-cap",
+    e = call_push_error(c, t, ref, cmd, args, "asngn/tool-cap",
                         "tool budget for this turn is spent; answer with "
                         "what you have");
     goto out;
   }
+  /* past the walls: whatever happens next (cache replay, deny, error,
+   * dispatch) gives the model fresh information — not a futile step */
+  t->futile_row = 0;
 
   /* tool-result cache: read_only AND idempotent commands only */
   if (c->cfg.tool_cache && note.read_only && note.idempotent) {
     char *hit = NULL;
-    if (asngn_toolcache_get(c, key, &hit) && hit != NULL) {
+    if (asngn_toolcache_get(c, cache_key, &hit) && hit != NULL) {
       struct astools_result_s r;
       char *out_line = NULL;
       memset(&r, 0, sizeof r);
@@ -441,11 +510,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
       r.result_xcdn = hit;
       if (astools_call_format(c->astools, ref, cmd, &r, &out_line) ==
               ASTOOLS_OK && out_line != NULL) {
-        char *masked = ctx_text(s, out_line);
-        if (masked != NULL) {
-          e = work_push_fenced(c, t, masked);
-          free(masked);
-        }
+        e = call_push_outcome(c, t, ref, cmd, args, out_line);
         astools_free(out_line);
       }
       free(hit);
@@ -453,6 +518,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
       /* a replayed result still makes this a tool-touched turn:
        * its answer must never become verbatim-reusable */
       t->tools_used = true;
+      t->tool_ok_seen = true; /* the cache only stores ok results */
       {
         char lbl[132];
         char **nl;
@@ -477,7 +543,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
   {
     const char *deny_code = NULL;
     if (!call_confirm(c, t, ref, cmd, args, &note, &deny_code)) {
-      e = call_push_error(c, t, ref, cmd, deny_code,
+      e = call_push_error(c, t, ref, cmd, args, deny_code,
                           "the operator did not approve this call");
       goto out;
     }
@@ -503,6 +569,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     ae = astools_invoke(c->astools, ref, cmd, args, deadline_ms, &r);
     t->tool_calls++;
     t->tools_used = true;
+    if (ae == ASTOOLS_OK && r.ok) t->tool_ok_seen = true;
     {
       char lbl[132];
       char **nl;
@@ -526,7 +593,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
                          : ae == ASTOOLS_ERR_CANCELLED
                              ? "astools/cancelled"
                              : "astools/failed";
-      e = call_push_error(c, t, ref, cmd, code,
+      e = call_push_error(c, t, ref, cmd, args, code,
                           astools_last_error(c->astools));
       astools_result_free(&r);
       goto telem;
@@ -547,31 +614,39 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
       size_t nm = 0;
       if (asngn_redact(r.result_xcdn, strlen(r.result_xcdn), &masked,
                        &nm) == ASNGN_OK && masked != NULL) {
-        asngn_toolcache_put(c, key, masked);
+        asngn_toolcache_put(c, cache_key, masked);
         free(masked);
       } else {
-        asngn_toolcache_put(c, key, r.result_xcdn);
+        asngn_toolcache_put(c, cache_key, r.result_xcdn);
       }
     }
 
     if (astools_call_format(c->astools, ref, cmd, &r, &out_line) ==
             ASTOOLS_OK && out_line != NULL) {
-      char *masked = ctx_text(s, out_line);
-      if (masked != NULL) {
-        char lbl[132];
-        char *digested = NULL;
-        snprintf(lbl, sizeof lbl, "%s.%s", ref, cmd);
-        if (asngn_digest_item(c, s, t, lbl, masked, strlen(masked),
-                              &t->led.sv_digest, &t->led.gt_aux,
-                              &digested) == ASNGN_OK &&
-            digested != NULL) {
-          e = work_push_fenced(c, t, digested);
-          free(digested);
-        } else {
-          e = work_push_fenced(c, t, masked);
+      asngn_buf ob;
+      asngn_buf_init(&ob);
+      /* echo the originating call so the outcome stays attributable */
+      if (asngn_buf_printf(&ob, "CALL %s.%s %s -> %s", ref, cmd,
+                           args != NULL ? args : "{}",
+                           out_line) == ASNGN_OK) {
+        char *masked = ctx_text(s, ob.data);
+        if (masked != NULL) {
+          char lbl[132];
+          char *digested = NULL;
+          snprintf(lbl, sizeof lbl, "%s.%s", ref, cmd);
+          if (asngn_digest_item(c, s, t, lbl, masked, strlen(masked),
+                                &t->led.sv_digest, &t->led.gt_aux,
+                                &digested) == ASNGN_OK &&
+              digested != NULL) {
+            e = work_push_fenced(c, t, digested);
+            free(digested);
+          } else {
+            e = work_push_fenced(c, t, masked);
+          }
+          free(masked);
         }
-        free(masked);
       }
+      asngn_buf_free(&ob);
       astools_free(out_line);
     }
   telem:
@@ -590,6 +665,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
 out:
   (void)cached_hit;
 
+  free(canon_args);
   astools_free(ref);
   astools_free(cmd);
   astools_free(args);
@@ -598,11 +674,13 @@ out:
 
 /* ── decision passes and the step loop ───────────────────────────────── */
 
+/* call_ok already folds in the one-pass mute; call_muted says the mute
+ * is why CALL is missing, so the instruction can explain it. */
 static asngn_err step_instruction(asngn_ctx *c, asngn_turn_state *t,
+                                  bool call_ok, bool call_muted,
                                   char **out) {
   asngn_buf b;
   asngn_err e;
-  bool call_ok = c->astools_ok && !t->opts.no_tools;
   bool recall_ok = c->asper_ok;
   asngn_buf_init(&b);
   e = asngn_buf_appends(&b,
@@ -621,8 +699,32 @@ static asngn_err step_instruction(asngn_ctx *c, asngn_turn_state *t,
   if (e == ASNGN_OK)
     e = asngn_buf_appends(&b,
                           "THINK | <one-line note>  # note to yourself\n"
-                          "CLARIFY | <question>  # ask the user and stop\n"
+                          "CLARIFY | <question>  # only if blocked: ask "
+                          "the user and stop\n"
                           "ANSWER  # write the final answer now\n");
+  if (e == ASNGN_OK && call_muted)
+    e = asngn_buf_appends(&b,
+                          "The last CALL repeated one already run; its "
+                          "outcome is shown above. Take a different "
+                          "step.\n");
+  /* the closing lines carry the most weight with greedy decoders: show
+   * the worked CALL example only before any tool has run; once results
+   * exist push toward ANSWER — but only when something actually
+   * succeeded, else push toward fixing the call instead */
+  if (e == ASNGN_OK && call_ok && !t->tools_used)
+    e = asngn_buf_appends(&b,
+                          "Prefer acting: CALL the tool that gets what "
+                          "the task needs, then ANSWER from its RESULT. "
+                          "Example first step for \"what is in that "
+                          "folder?\":\nCALL fs.list {path: \"<dir>\"}\n");
+  else if (e == ASNGN_OK && t->tools_used && t->tool_ok_seen)
+    e = asngn_buf_appends(&b,
+                          "Tool results are above. If they already "
+                          "answer the user, choose ANSWER now.\n");
+  else if (e == ASNGN_OK && t->tools_used && call_ok)
+    e = asngn_buf_appends(&b,
+                          "Every call so far failed. Re-read the user "
+                          "message and issue one corrected CALL.\n");
   if (e != ASNGN_OK) {
     asngn_buf_free(&b);
     return e;
@@ -647,6 +749,7 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
     int slot = decide_on_generator ? t->gen_slot : plan_slot;
     int tin = 0, tout = 0;
     int attempts = 0;
+    bool call_muted, call_now;
 
     if (t->steps >= c->cfg.max_steps || turn_expired(c, t) ||
         t->osc_cycles > 2) {
@@ -665,11 +768,13 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       return ASNGN_OK;
     }
 
-    e = step_instruction(c, t, &instr);
+    call_muted = t->call_mute;
+    t->call_mute = false; /* one pass only */
+    call_now = c->astools_ok && !t->opts.no_tools && !call_muted;
+    e = step_instruction(c, t, call_now, call_muted, &instr);
     if (e != ASNGN_OK) return e;
-    e = asngn_grammar_steps(c, c->astools_ok && !t->opts.no_tools,
-                            c->asper_ok, s->blobs_n, t->astools_gbnf,
-                            &gbnf);
+    e = asngn_grammar_steps(c, call_now, c->asper_ok, s->blobs_n,
+                            t->astools_gbnf, &gbnf);
     if (e != ASNGN_OK) {
       free(instr);
       return e;
@@ -685,6 +790,15 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       return e;
     }
     led_zone_add(&t->led, &prompt);
+    e = asngn_context_validate(
+        c, slot, &prompt,
+        c->cfg.s_decide.max_tokens > 0 ? c->cfg.s_decide.max_tokens : 96);
+    if (e != ASNGN_OK) {
+      asngn_prompt_free(&prompt);
+      free(instr);
+      free(gbnf);
+      return e;
+    }
     e = watched_generate(c, t, slot, ASNGN_TASK_DECIDE,
                          prompt.system_text, prompt.user_text, gbnf, 0,
                          NULL, NULL, &line, &tin, &tout);
@@ -705,7 +819,13 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
     }
 
     memset(&st, 0, sizeof st);
-    if (asngn_step_parse(c, line, &st) != ASNGN_OK) {
+    /* The step grammar completes only through the trailing newline
+     * (root ::= step "\n"), so a line without one is a generation the
+     * decide token cap cut off mid-ramble, never a finished decision.
+     * Parsing the fragment would ship truncated CLARIFY/THINK text as
+     * if the model had meant it; treat it as a malformed pass instead. */
+    if (strchr(line, '\n') == NULL ||
+        asngn_step_parse(c, line, &st) != ASNGN_OK) {
       free(line);
       if (attempts == 0) {
         attempts = 1;
@@ -748,6 +868,7 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       t->thinks_total++;
       t->thinks_row++;
       if (t->thinks_row > c->cfg.think_limit || t->thinks_total > 4) {
+        t->futile_row++;
         asngn_tele_emit(c, "guard", t->span_root, NULL, s->slug,
                         t->led.turn, "{guard: \"think_limit\"}");
         os_rwlock_wrlock(&c->lock);
@@ -757,6 +878,7 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
                               "or answer");
         t->thinks_row = 0;
       } else {
+        t->futile_row = 0;
         asngn_buf b;
         asngn_buf_init(&b);
         if (asngn_buf_printf(&b, "THINK: %s", st.text) == ASNGN_OK)
@@ -766,7 +888,37 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       break;
     case ASNGN_STEP_RECALL: {
       char *block = NULL;
+      uint8_t rkey[32];
       t->thinks_row = 0;
+      /* recall guard: an identical question, or a fourth recall in one
+       * turn, only floods the working zone (trimming out tool results)
+       * without adding information — same failure mode as THINK loops */
+      asngn_sha256(st.text != NULL ? st.text : "",
+                   st.text != NULL ? strlen(st.text) : 0, rkey);
+      {
+        size_t ri;
+        bool seen = false;
+        for (ri = 0; ri < t->recall_keys_n; ri++) {
+          if (memcmp(rkey, t->recall_keys[ri], 32) == 0) {
+            seen = true;
+            break;
+          }
+        }
+        if (seen || t->recalls_total >= 3) {
+        t->futile_row++;
+        asngn_tele_emit(c, "guard", t->span_root, NULL, s->slug,
+                        t->led.turn, "{guard: \"recall_limit\"}");
+        os_rwlock_wrlock(&c->lock);
+        c->stats.guard_trips++;
+        os_rwlock_wrunlock(&c->lock);
+        asngn_work_push(c, t, "[notice] memory already consulted \xE2\x80"
+                              "\x94 act or answer");
+        break;
+        }
+      }
+      t->futile_row = 0;
+      memcpy(t->recall_keys[t->recall_keys_n++], rkey, 32);
+      t->recalls_total++;
       if (asngn_siblings_recall(c, st.text, &block) == ASNGN_OK &&
           block != NULL) {
         char *masked = ctx_text(s, block);
@@ -792,6 +944,7 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
     case ASNGN_STEP_OPEN: {
       t->thinks_row = 0;
       if (st.blob_n < 1 || (size_t)st.blob_n > s->blobs_n) {
+        t->futile_row++;
         asngn_work_push(c, t, "[notice] no such blob");
       } else {
         asngn_blob *b = &s->blobs[st.blob_n - 1];
@@ -805,9 +958,11 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
         free_chars = free_tok * 4;
         if (asngn_digest_open_slice(c, s, b, free_chars, &slice) ==
                 ASNGN_OK && slice != NULL) {
+          t->futile_row = 0;
           work_push_fenced(c, t, slice);
           free(slice);
         } else {
+          t->futile_row++;
           asngn_work_push(c, t, "[notice] blob exhausted");
         }
       }
@@ -821,10 +976,38 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
         free(line);
         return e;
       }
+      /* A model that re-issues the same rejected call is stalled just
+       * like one emitting malformed passes: hand the decisions to the
+       * generator tier instead of burning the step budget. The fresh
+       * tier gets a full-option pass — with CALL muted it could only
+       * answer from the failures the smaller model left behind. */
+      if (t->repeat_calls >= 2 && !decide_on_generator) {
+        decide_on_generator = true;
+        t->call_mute = false;
+        asngn_log(c, ASNGN_LOG_WARN, "loop",
+                  "identical call repeated; escalating decisions to the "
+                  "generator tier");
+      }
       break;
     }
     asngn_step_free(&st);
     free(line);
+    /* two consecutive guard-blocked steps with a successful result in
+     * hand: the model is spinning on walls (repeat CALLs, over-limit
+     * RECALL/THINK), not progressing — answer from what it has. Without
+     * a good result the loop keeps going: the model may still fix its
+     * call, and max_steps bounds the worst case. */
+    if (t->futile_row >= 2 && t->tool_ok_seen) {
+      asngn_tele_emit(c, "guard", t->span_root, NULL, s->slug,
+                      t->led.turn, "{guard: \"futile_steps\"}");
+      os_rwlock_wrlock(&c->lock);
+      c->stats.guard_trips++;
+      os_rwlock_wrunlock(&c->lock);
+      asngn_work_push(c, t, "[notice] no further progress \xE2\x80\x94 "
+                            "answering with what you have");
+      t->forced_answer = true;
+      return ASNGN_OK;
+    }
   }
   return t->cancel ? ASNGN_ERR_CANCELLED : ASNGN_OK;
 }
@@ -866,6 +1049,12 @@ static asngn_err answer_once(asngn_ctx *c, asngn_turn_state *t,
   free(sys_aug);
   if (e != ASNGN_OK) return e;
   led_zone_add(&t->led, &prompt);
+
+  e = asngn_context_validate(c, t->gen_slot, &prompt, cap);
+  if (e != ASNGN_OK) {
+    asngn_prompt_free(&prompt);
+    return e;
+  }
 
   e = watched_generate(c, t, t->gen_slot, ASNGN_TASK_ANSWER,
                        prompt.system_text, prompt.user_text, NULL, cap,
@@ -1102,7 +1291,14 @@ asngn_err asngn_loop_run(asngn_ctx *c, asngn_turn_state *t) {
   }
 
   /* ── CACHE ──────────────────────────────────────────────────────── */
-  if (!t->opts.no_cache && !t->continuation && c->cfg.cache_enable) {
+  {
+    asngn_route_profile pre;
+    bool coding_task;
+    asngn_route_heuristic(t->user_msg, c->astools_ok && !t->opts.no_tools,
+                          false, &pre);
+    coding_task = pre.mode == ASNGN_MODE_PLAN;
+  if (!coding_task && !t->opts.no_cache && !t->continuation &&
+      c->cfg.cache_enable) {
     double bias = asngn_pressure(c, s) >= 1.0 ? 0.02 : 0.0;
     if (asngn_cache_probe(c, s, t->user_msg, bias, &probe) == ASNGN_OK) {
       if (probe.outcome == ASNGN_CACHE_HIT && probe.answer != NULL) {
@@ -1216,6 +1412,7 @@ asngn_err asngn_loop_run(asngn_ctx *c, asngn_turn_state *t) {
         snprintf(t->led.cache, sizeof t->led.cache, "miss");
       }
     }
+  }
   }
 
   /* ── ROUTE / STEP LOOP / ANSWER ─────────────────────────────────── */

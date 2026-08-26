@@ -63,6 +63,7 @@
 #define os_hardware_threads  asngn_x_hardware_threads
 #define os_sleep_ms          asngn_x_sleep_ms
 #define os_path_join         asngn_x_path_join
+#define os_path_is_abs       asngn_x_path_is_abs
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,6 +171,7 @@ void    os_sleep_ms(int ms);
 /* Path join with '/' (also fine on Windows APIs used here). Returns
  * malloc'd string. */
 char   *os_path_join(const char *a, const char *b);
+int     os_path_is_abs(const char *path);
 
 #ifdef __cplusplus
 }

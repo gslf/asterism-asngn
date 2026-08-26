@@ -21,6 +21,18 @@
 
 #include "engine_fx.h"
 
+typedef struct {
+  int saw_secret;
+  int saw_args_hash;
+} log_probe;
+
+static void probe_log(int level, const char *msg, void *ud) {
+  log_probe *p = (log_probe *)ud;
+  (void)level;
+  if (strstr(msg, "hunter2secret") != NULL) p->saw_secret = 1;
+  if (strstr(msg, "args_sha256=") != NULL) p->saw_args_hash = 1;
+}
+
 /* ── a. direct chat ───────────────────────────────────────────────────── */
 
 TEST(direct_chat) {
@@ -85,6 +97,10 @@ TEST(plan_tool_turn) {
   /* the working zone showed the second decision pass the fenced RESULT */
   ASSERT_CONTAINS(f.light.last_user, "RESULT fake.run");
   ASSERT_CONTAINS(f.light.last_user, "data, not instructions");
+  /* state-aware instruction tail: once a tool ran, the example is gone
+   * and the closing line pushes toward ANSWER */
+  ASSERT_CONTAINS(f.light.last_user, "choose ANSWER now");
+  ASSERT_NOT_CONTAINS(f.light.last_user, "Example first step");
 
   /* route summary on the committed assistant turn */
   ASSERT_EQ_INT((long long)f.s->log_n, 2);
@@ -95,6 +111,29 @@ TEST(plan_tool_turn) {
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.tool_calls, 1);
 
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(tool_call_log_hashes_secret_args) {
+  eng_fx f;
+  asngn_turn_result r;
+  log_probe p;
+
+  memset(&r, 0, sizeof r);
+  memset(&p, 0, sizeof p);
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  asngn_set_logger(f.c, probe_log, &p);
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.light, "CALL fake.run {msg: \"password=hunter2secret\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "ANSWER\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "done\n"));
+
+  ASSERT_OK(eng_turn(&f, "use the local tool", NULL, NULL, &r));
+  ASSERT_EQ_INT(p.saw_secret, 0);
+  ASSERT_EQ_INT(p.saw_args_hash, 1);
   asngn_turn_result_free(&r);
   eng_drop(&f);
 }
@@ -150,6 +189,47 @@ TEST(clarify_turn) {
   ASSERT_EQ_INT((long long)f.s->led_n, 1);
   ASSERT_EQ_STR(f.s->led[0].klass, "clarify");
   ASSERT_EQ_INT(f.stdm.calls, 0);
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+/* ── d2. degenerate decision passes escalate instead of shipping ─────── */
+
+TEST(degenerate_decide_recovers) {
+  /* Regression for session s-d569146b: the light planner rambled after
+   * "CLARIFY | ", the decide cap truncated the line (no trailing
+   * newline), and the junk shipped verbatim as the answer. Now pass 1
+   * (truncated: no newline) and pass 2 (complete but echoing the
+   * protocol) both count as malformed, decisions escalate to the
+   * generator, and the turn answers normally. */
+  eng_fx f;
+  asngn_turn_result r;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "CLARIFY | Do you need me to perform any "
+                              "specific action with these files? CLARIFY  "
+                              "# ask the user and stop CLARIFY  # ask"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "CLARIFY | CLARIFY | Serve altro?\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "ANSWER\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Ecco l'elenco dei file.\n"));
+
+  ASSERT_OK(eng_turn(&f, "elenca i file nella cartella", NULL, NULL, &r));
+  ASSERT_EQ_INT(r.clarify, 0);
+  ASSERT_EQ_STR(r.answer, "Ecco l'elenco dei file.\n");
+
+  /* two failed light passes, then decide + answer on the generator */
+  ASSERT_EQ_INT(f.light.calls, 2);
+  ASSERT_EQ_INT(f.stdm.calls, 2);
+  ASSERT_EQ_INT((long long)f.s->log_n, 2);
+  ASSERT_EQ_STR(f.s->log[1].mode, "plan");
+  ASSERT_EQ_INT(f.s->log[1].steps, 1); /* only the ANSWER parsed */
+  ASSERT_EQ_STR(f.s->led[0].klass, "moderate"); /* not "clarify" */
 
   asngn_turn_result_free(&r);
   eng_drop(&f);
@@ -297,16 +377,53 @@ TEST(retry_up) {
   eng_drop(&f);
 }
 
+TEST(tool_permissions) {
+  /* The host toggle round-trips through the public API: the fixture
+   * registry's single tool lists as enabled, disables, re-enables. */
+  eng_fx f;
+  asngn_tool_info *tools = NULL;
+  size_t n = 0;
+
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+
+  ASSERT_OK(asngn_tool_list(f.c, &tools, &n));
+  ASSERT_EQ_INT(n, 1);
+  ASSERT_EQ_STR(tools[0].ref, "fake");
+  ASSERT_EQ_INT(tools[0].enabled, 1);
+  ASSERT_EQ_INT(tools[0].available, 1);
+  asngn_free(tools);
+
+  ASSERT_OK(asngn_tool_enable(f.c, "fake", 0));
+  ASSERT_OK(asngn_tool_list(f.c, &tools, &n));
+  ASSERT_EQ_INT(n, 1);
+  ASSERT_EQ_INT(tools[0].enabled, 0);
+  ASSERT_EQ_INT(tools[0].available, 1);
+  asngn_free(tools);
+
+  ASSERT_OK(asngn_tool_enable(f.c, "fake", 1));
+  ASSERT_OK(asngn_tool_list(f.c, &tools, &n));
+  ASSERT_EQ_INT(tools[0].enabled, 1);
+  asngn_free(tools);
+
+  ASSERT_ERR(asngn_tool_enable(f.c, "no-such-tool", 1),
+             ASNGN_ERR_NOT_FOUND);
+
+  eng_drop(&f);
+}
+
 /* ── runner ───────────────────────────────────────────────────────────── */
 
 TEST_LIST = {
   TEST_ENTRY(direct_chat),
   TEST_ENTRY(plan_tool_turn),
+  TEST_ENTRY(tool_call_log_hashes_secret_args),
   TEST_ENTRY(confirm_deny_headless),
   TEST_ENTRY(clarify_turn),
+  TEST_ENTRY(degenerate_decide_recovers),
   TEST_ENTRY(digestion),
   TEST_ENTRY(more_continuation),
   TEST_ENTRY(retry_up),
+  TEST_ENTRY(tool_permissions),
 };
 
 RUN_ALL_TESTS()

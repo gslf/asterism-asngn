@@ -1,0 +1,5 @@
+# local-name	size	sha256	pinned-url	postprocess
+qwen2.5-0.5b-instruct-q4_k_m.gguf	491400032	74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db	https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/9217f5db79a29953eb74d5343926648285ec7e67/qwen2.5-0.5b-instruct-q4_k_m.gguf	-
+qwen2.5-1.5b-instruct-q4_k_m.gguf	1117320736	6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e	https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/91cad51170dc346986eccefdc2dd33a9da36ead9/qwen2.5-1.5b-instruct-q4_k_m.gguf	-
+qwen2.5-7b-instruct-q4_k_m.gguf	4683074240	65b8fcd92af6b4fefa935c625d1ac27ea29dcb6ee14589c55a8f115ceaaa1423	https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/resolve/8911e8a47f92bac19d6f5c64a2e2095bd2f7d031/Qwen2.5-7B-Instruct-Q4_K_M.gguf	-
+multilingual-e5-small-q8_0.gguf	131624960	0a34067a40f25d3149b36885faa62bee0e5284d0f9edc102acfc00e115d953e8	https://huggingface.co/cstr/multilingual-e5-small-GGUF/resolve/178420da727e544c2689e89b6648b205ad176eda/multilingual-e5-small-q8_0.gguf	tokenizer.ggml.token_type_count=2

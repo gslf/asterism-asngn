@@ -15,9 +15,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Text payloads are one line of 1-300 chars. */
-#define ASNGN_STEP_TEXT_MAX 300
-
 /* ---- names and ownership ------------------------------------------------- */
 
 const char *asngn_step_name(asngn_step_kind k) {
@@ -64,6 +61,7 @@ static const char *match_kw(const char *p, const char *end, const char *kw) {
 static asngn_err parse_text_step(asngn_ctx *c, const char *q, const char *end,
                                  asngn_step_kind kind, asngn_step *out) {
   const char *r;
+  const char *kind_name;
   size_t n;
 
   while (q < end && (*q == ' ' || *q == '\t')) q++;
@@ -76,6 +74,16 @@ static asngn_err parse_text_step(asngn_ctx *c, const char *q, const char *end,
   if (q >= end)
     return asngn_seterr(c, ASNGN_ERR_PROTOCOL, "step: %s payload is empty",
                         asngn_step_name(kind));
+  /* A repeated structural prefix at the beginning is a model echo, not
+   * question text. Protocol words elsewhere in the payload remain valid. */
+  kind_name = asngn_step_name(kind);
+  r = match_kw(q, end, kind_name);
+  if (r != NULL) {
+    while (r < end && (*r == ' ' || *r == '\t')) r++;
+    if (r < end && *r == '|')
+      return asngn_seterr(c, ASNGN_ERR_PROTOCOL,
+                          "step: repeated %s prefix", kind_name);
+  }
   for (r = q; r < end; r++)
     if (*r == '\n' || *r == '\r')
       return asngn_seterr(c, ASNGN_ERR_PROTOCOL,

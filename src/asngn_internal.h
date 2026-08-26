@@ -127,7 +127,7 @@ asngn_err asngn_seterr(asngn_ctx *c, asngn_err e, const char *fmt, ...);
 asngn_err asngn_log_open(asngn_ctx *c);  /* no-op when logging.path unset */
 void      asngn_log_close(asngn_ctx *c);
 /* subsys: session context cache route loop model safety judge telemetry
- * tui mcp asper astls. Callback sink gets every record; the file
+ * tui mcp asper astools. Callback sink gets every record; the file
  * sink is gated by cfg.log_level. Never fails the caller. */
 void asngn_log(asngn_ctx *c, int level, const char *subsys,
                const char *fmt, ...);
@@ -205,6 +205,8 @@ typedef enum { ASNGN_CONFIRM_PROMPT = 0, ASNGN_CONFIRM_DENY,
 typedef enum { ASNGN_SCOPE_SESSION = 0, ASNGN_SCOPE_GLOBAL } asngn_cache_scope;
 typedef enum { ASNGN_CATALOG_INDEX = 0, ASNGN_CATALOG_SUMMARY,
                ASNGN_CATALOG_FULL } asngn_catalog_level;
+typedef enum { ASNGN_PROFILE_GENERAL = 0, ASNGN_PROFILE_CODING }
+    asngn_profile;
 typedef enum { ASNGN_THEME_ASTERISM = 0, ASNGN_THEME_PLAIN } asngn_theme;
 typedef enum { ASNGN_TRUECOLOR_AUTO = 0, ASNGN_TRUECOLOR_ON,
                ASNGN_TRUECOLOR_OFF } asngn_truecolor;
@@ -218,18 +220,22 @@ typedef struct {
   int   threads;
   bool  embedding;
   int   dim;
+  int   gpu_layers; /* layers offloaded to VRAM; -1 = all (default), 0 =
+                       CPU only. No-op in CPU-only llama builds. */
 } asngn_pool_entry;
 
 typedef struct {
   double temp;
   double top_p;
-  int    max_tokens; /* 0 = task default */
+  int    max_tokens;      /* 0 = task default */
+  double repeat_penalty;  /* <= 1.0 = off; breaks greedy phrase loops */
 } asngn_sampling;
 
 typedef struct {
   /* engine */
   char *root;                /* engine root (resolved), owned */
   char *base_prompt;
+  asngn_profile profile;
   /* models */
   asngn_pool_entry pool[ASNGN_MAX_POOL];
   size_t pool_n;
@@ -247,6 +253,7 @@ typedef struct {
   int terse_tokens, normal_tokens, rich_tokens;
   /* context */
   int summary_tokens, verbatim_tokens, working_tokens, fold_tokens;
+  int safety_margin; /* reserved beyond requested completion tokens */
   int digest_threshold_chars, digest_tokens;
   int pinned_max;
   /* cache */
@@ -303,8 +310,9 @@ void      asngn_config_free(asngn_config *cfg);
 
 typedef struct {
   double temp;
-  double top_p;   /* <= 0: greedy chain without top_p */
+  double top_p;           /* <= 0: greedy chain without top_p */
   int    max_tokens;
+  double repeat_penalty;  /* <= 1.0 = off */
 } asngn_gen_params;
 
 /* Backend vtable: scripted fakes and llama.cpp sit behind the same
@@ -322,6 +330,10 @@ typedef struct asngn_model_iface {
                         char **out_text, int *out_tokens_in,
                         int *out_tokens_out);
   int  (*count_tokens)(void *ud, const char *text); /* < 0 on error */
+  /* Exact chat-template-aware prompt count; optional for injected legacy
+   * backends, where the engine uses a conservative fallback. */
+  int  (*count_prompt_tokens)(void *ud, const char *system_prompt,
+                              const char *user_prompt);
   asngn_err (*embed)(void *ud, const char *text, float *out); /* dim floats,
                         L2-normalized; only on embedding models */
   void (*destroy)(void *ud);
@@ -371,6 +383,9 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
  * (UTF-8 bytes / 4, min 1) when the slot is unavailable (fallback for
  * degraded contexts only). */
 int       asngn_models_count_tokens(asngn_ctx *c, int slot, const char *text);
+int       asngn_models_count_prompt(asngn_ctx *c, int slot,
+                                    const char *system_prompt,
+                                    const char *user_prompt);
 /* Embed with the embedder role; out has embedder dim floats. */
 asngn_err asngn_models_embed(asngn_ctx *c, const char *text, float *out);
 int       asngn_models_embed_dim(asngn_ctx *c); /* <= 0 when unavailable */
@@ -417,6 +432,8 @@ struct asngn_session {
   size_t      turns;        /* committed turn pairs counter          */
   uint64_t    world_epoch;
   char       *project;      /* active Asper project or NULL          */
+  asngn_workspace_info workspace; /* immutable session binding       */
+  bool        workspace_loaded;
   bool        redact_context;
   /* transcript, fully resident */
   asngn_turn *log;
@@ -460,6 +477,11 @@ asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
                                  const char *label, const char *text,
                                  size_t len, asngn_blob **out);
 void      asngn_session_clear_blobs(asngn_session *s); /* delete files  */
+
+/* ── workspace (workspace.c) ──────────────────────────────────────────── */
+asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p);
+asngn_err asngn_workspace_refresh(asngn_ctx *c);
+void      asngn_workspace_hash(asngn_ctx *c, uint8_t out[32]);
 
 /* ── ledger (ledger.c) ────────────────────────────────────────────────── */
 
@@ -529,6 +551,13 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
                                  const char *memory_block,
                                  const char *instruction,
                                  int count_slot, asngn_prompt *out);
+asngn_err asngn_context_validate(asngn_ctx *c, int count_slot,
+                                 const asngn_prompt *prompt,
+                                 int output_reserve);
+asngn_err asngn_context_validate_text(asngn_ctx *c, int count_slot,
+                                      const char *system_text,
+                                      const char *user_text,
+                                      int output_reserve);
 
 /* ── folding (fold.c) ─────────────────────────────────────────────────── */
 
@@ -698,6 +727,11 @@ double asngn_session_qpt(const asngn_session *s);
 
 /* ── step protocol (steps.c, grammar.c) ───────────────────────────────── */
 
+/* Step text payloads (THINK/RECALL/CLARIFY) are one line of at most this
+ * many bytes; the step grammar bounds its `text` rule to the same count
+ * so the sampler is forced onto the terminating newline at the limit. */
+#define ASNGN_STEP_TEXT_MAX 300
+
 typedef enum { ASNGN_STEP_CALL = 0, ASNGN_STEP_RECALL, ASNGN_STEP_OPEN,
                ASNGN_STEP_THINK, ASNGN_STEP_CLARIFY,
                ASNGN_STEP_ANSWER } asngn_step_kind;
@@ -774,6 +808,7 @@ asngn_err asngn_siblings_recall(asngn_ctx *c, const char *question,
                                 char **out_block); /* rendered w/ cites  */
 asngn_err asngn_siblings_project(asngn_ctx *c, const char *slug);
 asngn_err asngn_siblings_project_sync(asngn_ctx *c, const char *want);
+asngn_err asngn_siblings_readiness(asngn_ctx *c);
 
 /* ── control loop (loop.c) ────────────────────────────────────────────── */
 
@@ -807,11 +842,19 @@ typedef struct asngn_turn_state {
   char          *astools_gbnf;
   /* step accounting + guards */
   int            steps, tool_calls, thinks_row, thinks_total;
+  int            recalls_total;
+  uint8_t        recall_keys[3][32]; /* unique RECALL questions this turn */
+  size_t         recall_keys_n;
   uint8_t      (*call_keys)[32];
   size_t         call_keys_n, call_keys_cap;
   uint8_t        osc_a[32], osc_b[32];
   int            osc_cycles;
+  int            repeat_calls; /* consecutive identical-call rejections */
+  int            futile_row;   /* consecutive guard-blocked steps       */
+  bool           call_mute;    /* withhold CALL from the next decision
+                                * pass (set when a repeat was blocked) */
   bool           tools_used;
+  bool           tool_ok_seen; /* at least one call succeeded this turn */
   char         **tools_list;    /* labels for the cache entry        */
   size_t         tools_list_n;
   bool           forced_answer; /* guard/step exhaustion             */
@@ -870,9 +913,12 @@ struct asngn_ctx {
 
   char         *root;          /* resolved engine root, owned        */
   char         *sessions_dir, *cache_dir, *tele_dir;
+  asngn_workspace_info workspace;
+  bool          allow_degraded;
 
   /* error */
   char          errbuf[512];
+  asngn_context_diagnostics context_diag;
   os_mutex      err_mu;
 
   /* logging */

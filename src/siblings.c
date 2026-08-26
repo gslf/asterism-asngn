@@ -4,7 +4,7 @@
  * asngn owns the sibling lifecycle: both siblings are opened during
  * asngn_open against directories under the engine root and closed at
  * asngn_close; their log callbacks are funneled into asngn's logging
- * under the subsystem tags "asper" and "astls". Both integrations are
+ * under the subsystem tags "asper" and "astools". Both integrations are
  * optional and degrade: a sibling that fails to open leaves the
  * engine running with the corresponding zones and steps absent.
  *
@@ -34,12 +34,13 @@
 /* ═══════════════════════ helpers ═══════════════════════ */
 
 /* Join a configured sibling path onto the engine root: absolute paths
- * (leading '/') pass through, "." is the engine root itself, everything
- * else is root-relative. Returns a malloc'd string; NULL on OOM (or when
- * path is NULL). */
+ * (leading '/', or a Windows drive prefix) pass through, "." is the
+ * engine root itself, everything else is root-relative. Returns a
+ * malloc'd string; NULL on OOM (or when path is NULL). */
 static char *sib_join(const asngn_ctx *c, const char *path) {
   if (!path) return NULL;
-  if (path[0] == '/') return asngn_strdup(path);
+  if (os_path_is_abs(path))
+    return asngn_strdup(path);
   if (strcmp(path, ".") == 0) return asngn_strdup(c->root);
   return os_path_join(c->root, path);
 }
@@ -69,7 +70,8 @@ static const char *sib_strip_prefix(const char *msg) {
   while (*p == ' ') p++;
   for (i = 0; LEVELS[i] != NULL; i++) {
     size_t n = strlen(LEVELS[i]);
-    if (strncmp(p, LEVELS[i], n) == 0 && p[n] == ' ') {
+    if (strncmp(p, LEVELS[i], n) == 0 &&
+        (p[n] == ' ' || p[n] == '\0')) {
       p += n;
       while (*p == ' ') p++;
       return p;
@@ -78,16 +80,24 @@ static const char *sib_strip_prefix(const char *msg) {
   return msg;
 }
 
+/* A record whose body is empty after stripping carries no signal; keep
+ * it out of the WARN/ERROR band so it never reaches the trace pane. */
+static void sib_log(asngn_ctx *c, int level, const char *subsys,
+                    const char *msg) {
+  const char *m = msg != NULL ? sib_strip_prefix(msg) : "";
+  const char *q;
+  int lv = sib_level(level);
+  for (q = m; *q == ' '; q++) {}
+  if (*q == '\0' && lv <= ASNGN_LOG_WARN) lv = ASNGN_LOG_INFO;
+  asngn_log(c, lv, subsys, "%s", m);
+}
+
 static void sib_asper_log(int level, const char *msg, void *ud) {
-  asngn_ctx *c = (asngn_ctx *)ud;
-  asngn_log(c, sib_level(level), "asper", "%s",
-            msg ? sib_strip_prefix(msg) : "");
+  sib_log((asngn_ctx *)ud, level, "asper", msg);
 }
 
 static void sib_astools_log(int level, const char *msg, void *ud) {
-  asngn_ctx *c = (asngn_ctx *)ud;
-  asngn_log(c, sib_level(level), "astls", "%s",
-            msg ? sib_strip_prefix(msg) : "");
+  sib_log((asngn_ctx *)ud, level, "astools", msg);
 }
 
 static astools_catalog_level sib_catalog_level(asngn_catalog_level l) {
@@ -135,7 +145,9 @@ static asngn_err sib_open_asper(asngn_ctx *c) {
     memset(&p, 0, sizeof(p));
     p.memory_root = root;
     p.config_path = conf;
-    ae = asper_open(&p, &c->asper);
+    /* Asper's relative model paths (the shared weights files) resolve
+     * under the engine root, exactly like asngn's own pool paths. */
+    ae = asper_open_at(&p, c->root, &c->asper);
     if (ae != ASPER_OK) {
       /* No context was created, so there is no asper_last_error to read:
        * the stable code name is all we have. */
@@ -159,7 +171,7 @@ static asngn_err sib_open_astools(asngn_ctx *c) {
   asngn_err e;
 
   root = sib_join(c, c->cfg.astools_root);
-  work = sib_join(c, c->cfg.astools_workspace);
+  work = asngn_strdup(c->workspace.canonical_root);
   if (c->cfg.astools_config) conf = sib_join(c, c->cfg.astools_config);
   if (!root || !work || (c->cfg.astools_config && !conf)) {
     free(root);
@@ -171,7 +183,7 @@ static asngn_err sib_open_astools(asngn_ctx *c) {
   e = os_mkdir_p(root);
   if (e == ASNGN_OK) e = os_mkdir_p(work);
   if (e != ASNGN_OK) {
-    asngn_log(c, ASNGN_LOG_ERROR, "astls",
+    asngn_log(c, ASNGN_LOG_ERROR, "astools",
               "cannot create registry/workspace under %s; tools disabled "
               "(degraded)",
               c->root);
@@ -191,7 +203,7 @@ static asngn_err sib_open_astools(asngn_ctx *c) {
     ae = astools_open(&p, &c->astools);
     if (ae != ASTOOLS_OK) {
       c->astools = NULL;
-      asngn_log(c, ASNGN_LOG_ERROR, "astls",
+      asngn_log(c, ASNGN_LOG_ERROR, "astools",
                 "astools_open failed: %s; tools disabled (degraded)",
                 astools_err_name(ae));
     } else {
@@ -222,6 +234,40 @@ asngn_err asngn_siblings_open(asngn_ctx *c) {
     if (e != ASNGN_OK) return e;
   }
   return ASNGN_OK;
+}
+
+asngn_err asngn_siblings_readiness(asngn_ctx *c) {
+  asper_readiness mr;
+  astools_readiness tr;
+  const char *why = NULL;
+  if (c == NULL) return ASNGN_ERR_INVALID;
+  memset(&mr, 0, sizeof mr);
+  memset(&tr, 0, sizeof tr);
+  if (!c->asper_ok || c->asper == NULL)
+    why = "Asper is unavailable";
+  else if (asper_get_readiness(c->asper, &mr) != ASPER_OK ||
+           !mr.store_ok || !mr.embedder_ok || !mr.curator_ok)
+    why = "Asper store, embedder, or curator is not ready";
+  else if (!c->astools_ok || c->astools == NULL)
+    why = "astools is unavailable";
+  else if (astools_get_readiness(c->astools, &tr) != ASTOOLS_OK ||
+           !tr.workspace_bound)
+    why = "astools has no canonical workspace";
+  else if ((tr.workspace_access & 2) == 0)
+    why = "astools lacks a read-write workspace grant";
+  else if (tr.sandbox_level < 1)
+    why = "astools sandbox is disabled";
+  else if (tr.tools_enabled == 0)
+    why = "astools has no enabled tools";
+  if (why == NULL) return ASNGN_OK;
+  if (c->allow_degraded) {
+    asngn_log(c, ASNGN_LOG_WARN, "session",
+              "coding readiness degraded: %s (--allow-degraded)", why);
+    return ASNGN_OK;
+  }
+  return asngn_seterr(c, ASNGN_ERR_SIBLING,
+                      "coding readiness failed: %s; pass "
+                      "--allow-degraded to opt in", why);
 }
 
 void asngn_siblings_close(asngn_ctx *c) {

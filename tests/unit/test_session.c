@@ -32,7 +32,7 @@ static int fx_write_config(fx *f, const char *extra) {
   ok = fprintf(fp,
                "#asngn_config {\n"
                "  integration: { asper: { enable: false }, "
-               "astls: { enable: false } },\n"
+               "astools: { enable: false } },\n"
                "  validation: { judge: \"off\" },\n"
                "  routing: { classifier: \"heuristic\" },\n"
                "  models: { pool: [\n"
@@ -49,7 +49,7 @@ static int fx_write_config(fx *f, const char *extra) {
   return ok;
 }
 
-static int fx_open_ctx(fx *f) {
+static int fx_open_ctx_at(fx *f, const char *workspace) {
   asngn_model_iface ifaces[4];
   const char *ids[4] = { "nano", "light", "std", "embed" };
   asngn_clock clk;
@@ -63,11 +63,14 @@ static int fx_open_ctx(fx *f) {
   memset(&p, 0, sizeof p);
   p.engine_root = f->root;
   p.config_path = f->cfg;
+  p.workspace_root = workspace;
   if (asngn_open_with(&p, ifaces, 4, ids, &clk, &f->c) != ASNGN_OK)
     return 0;
   asngn_set_logger(f->c, NULL, NULL);
   return 1;
 }
+
+static int fx_open_ctx(fx *f) { return fx_open_ctx_at(f, NULL); }
 
 static int fx_setup(fx *f, const char *extra) {
   memset(f, 0, sizeof *f);
@@ -285,6 +288,60 @@ TEST(pin_limit) {
   fx_drop(&f);
 }
 
+TEST(workspace_is_bound_and_live_fingerprinted) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_workspace_info before, after, bound;
+  char *path;
+  static const char body[] = "changed outside the engine\n";
+
+  ASSERT_TRUE(fx_setup(&f, "  cache: { enable: false },\n"));
+  ASSERT_OK(asngn_workspace_get(f.c, &before));
+  ASSERT_TRUE(before.canonical_root[0] != '\0');
+  ASSERT_TRUE(before.project_id[0] != '\0');
+  ASSERT_TRUE(before.fingerprint[0] != '\0');
+  path = os_path_join(before.canonical_root, "editor-change.txt");
+  ASSERT_TRUE(path != NULL);
+  ASSERT_OK(os_write_file(path, body, sizeof body - 1));
+  ASSERT_OK(asngn_workspace_get(f.c, &after));
+  ASSERT_TRUE(strcmp(before.fingerprint, after.fingerprint) != 0);
+  ASSERT_OK(asngn_session_open(f.c, "workspace", &s));
+  ASSERT_OK(asngn_session_workspace(s, &bound));
+  ASSERT_OK(asngn_workspace_get(f.c, &after));
+  ASSERT_EQ_STR(bound.canonical_root, after.canonical_root);
+  ASSERT_EQ_STR(bound.fingerprint, after.fingerprint);
+  asngn_session_close(s);
+  free(path);
+  fx_drop(&f);
+}
+
+TEST(workspace_discovers_repository_identity) {
+  fx f;
+  asngn_workspace_info info;
+  char *git = NULL, *refs = NULL, *head = NULL, *branch = NULL, *nested = NULL;
+  static const char oid[] = "0123456789abcdef0123456789abcdef01234567\n";
+
+  ASSERT_TRUE(fx_setup(&f, "  cache: { enable: false },\n"));
+  asngn_close(f.c); f.c = NULL;
+  git = os_path_join(f.root, ".git");
+  refs = git != NULL ? os_path_join(git, "refs/heads") : NULL;
+  head = git != NULL ? os_path_join(git, "HEAD") : NULL;
+  branch = refs != NULL ? os_path_join(refs, "main") : NULL;
+  nested = os_path_join(f.root, "src/module");
+  ASSERT_TRUE(git && refs && head && branch && nested);
+  ASSERT_OK(os_mkdir_p(refs));
+  ASSERT_OK(os_mkdir_p(nested));
+  ASSERT_OK(os_write_file(head, "ref: refs/heads/main\n", 21));
+  ASSERT_OK(os_write_file(branch, oid, sizeof oid - 1));
+  ASSERT_TRUE(fx_open_ctx_at(&f, nested));
+  ASSERT_OK(asngn_workspace_get(f.c, &info));
+  ASSERT_EQ_STR(info.repository_root, f.root);
+  ASSERT_EQ_STR(info.branch, "main");
+  ASSERT_EQ_STR(info.head, "0123456789abcdef0123456789abcdef01234567");
+  free(git); free(refs); free(head); free(branch); free(nested);
+  fx_drop(&f);
+}
+
 TEST_LIST = {
   TEST_ENTRY(create_layout_and_busy),
   TEST_ENTRY(generated_and_invalid_slugs),
@@ -293,6 +350,8 @@ TEST_LIST = {
   TEST_ENTRY(transcript_roundtrip),
   TEST_ENTRY(pin_persists),
   TEST_ENTRY(pin_limit),
+  TEST_ENTRY(workspace_is_bound_and_live_fingerprinted),
+  TEST_ENTRY(workspace_discovers_repository_identity),
 };
 
 RUN_ALL_TESTS()

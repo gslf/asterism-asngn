@@ -60,8 +60,11 @@ TEST(defaults_spot_check) {
   /* sampling defaults */
   ASSERT_EQ_DBL(cfg.s_classify.temp, 0.0, 1e-9);
   ASSERT_EQ_INT(cfg.s_classify.max_tokens, 24);
+  ASSERT_EQ_DBL(cfg.s_classify.repeat_penalty, 0.0, 1e-9);
+  ASSERT_EQ_DBL(cfg.s_decide.repeat_penalty, 1.15, 1e-9);
   ASSERT_EQ_DBL(cfg.s_answer.temp, 0.4, 1e-9);
   ASSERT_EQ_DBL(cfg.s_answer.top_p, 0.9, 1e-9);
+  ASSERT_EQ_DBL(cfg.s_answer.repeat_penalty, 0.0, 1e-9);
   ASSERT_EQ_INT(cfg.s_answer.max_tokens, 0);
   ASSERT_EQ_DBL(cfg.s_judge.temp, 0.0, 1e-9);
   ASSERT_EQ_INT(cfg.s_judge.max_tokens, 32);
@@ -78,6 +81,7 @@ TEST(defaults_spot_check) {
   ASSERT_EQ_INT(cfg.summary_tokens, 600);
   ASSERT_EQ_INT(cfg.verbatim_tokens, 1600);
   ASSERT_EQ_INT(cfg.working_tokens, 800);
+  ASSERT_EQ_INT(cfg.safety_margin, 64);
   ASSERT_EQ_INT(cfg.pinned_max, 8);
 
   /* cache thresholds and TTLs */
@@ -127,7 +131,8 @@ TEST(overlay_overrides) {
     "      { id: \"vec\", path: \"models/vec.gguf\", embedding: true,"
     " dim: 128 },\n"
     "    ],\n"
-    "    sampling: { answer: { temp: 0.7 } },\n"
+    "    sampling: { answer: { temp: 0.7 },"
+    " decide: { repeat_penalty: 1.3 } },\n"
     "  },\n"
     "  integration: { astls: { catalog_chars: 1234 } },\n"
     "  routing: { max_escalations: 0 },\n"
@@ -158,6 +163,8 @@ TEST(overlay_overrides) {
   ASSERT_EQ_INT(cfg.pool[1].dim, 128);
   ASSERT_EQ_DBL(cfg.s_answer.temp, 0.7, 1e-9);
   ASSERT_EQ_DBL(cfg.s_answer.top_p, 0.9, 1e-9);     /* untouched        */
+  ASSERT_EQ_DBL(cfg.s_decide.repeat_penalty, 1.3, 1e-9);
+  ASSERT_EQ_INT(cfg.s_decide.max_tokens, 96);       /* untouched        */
   ASSERT_EQ_INT(cfg.catalog_chars, 1234);
   ASSERT_EQ_INT(cfg.max_escalations, 0);            /* 0 is allowed     */
 
@@ -173,6 +180,9 @@ TEST(hard_errors_are_config) {
     /* adapt > hit fails the cross-check */
     "#asngn_config { cache: { hit_threshold: 0.9, adapt_threshold: 0.95 } }\n",
     "#asngn_config { detail: { default: \"gigantic\" } }\n",
+    /* (0,1) would reward repetition */
+    "#asngn_config { models: { sampling: { decide: "
+    "{ repeat_penalty: 0.5 } } } }\n",
   };
   char dir[256], path[300];
   asngn_ctx *c = bare_ctx();

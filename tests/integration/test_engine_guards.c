@@ -65,6 +65,46 @@ TEST(identical_call) {
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.tool_calls, 1);
 
+  /* the pass after the blocked repeat had CALL muted: no CALL protocol
+   * line, and the instruction explains why */
+  ASSERT_NOT_CONTAINS(f.light.last_user, "CALL <tool>.<command>");
+  ASSERT_CONTAINS(f.light.last_user, "Take a different step");
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+/* ── b2. futile steps after a good result force the answer ────────────── */
+
+TEST(futile_steps) {
+  /* One successful CALL, then the model spins: an identical RECALL
+   * repeated twice is two consecutive guard-blocked steps with a good
+   * result in hand — the loop forces the answer pass instead of burning
+   * the step budget (asper is disabled in the fixture, so the fresh
+   * RECALL yields nothing but still counts as progress). */
+  eng_fx f;
+  asngn_turn_result r;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "CALL fake.run {msg: \"a\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "RECALL | cosa so di a?\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "RECALL | cosa so di a?\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "RECALL | cosa so di a?\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "THINK | mai raggiunto\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Risposta dai risultati.\n"));
+
+  ASSERT_OK(eng_turn(&f, "usa il tool fake e rispondi", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "Risposta dai risultati.\n");
+
+  /* CALL + RECALL + 2 blocked RECALLs = 4 steps; the 5th decision never
+   * ran (the futile guard ended the loop first) */
+  ASSERT_EQ_INT(f.s->log[1].steps, 4);
+  ASSERT_EQ_INT(f.light.calls, 4);
+  ASSERT_CONTAINS(f.stdm.last_user, "no further progress");
+
   asngn_turn_result_free(&r);
   eng_drop(&f);
 }
@@ -211,6 +251,7 @@ TEST(cancel_turn) {
 TEST_LIST = {
   TEST_ENTRY(think_limit),
   TEST_ENTRY(identical_call),
+  TEST_ENTRY(futile_steps),
   TEST_ENTRY(step_budget),
   TEST_ENTRY(tool_cap),
   TEST_ENTRY(input_gate),

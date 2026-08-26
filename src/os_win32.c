@@ -15,7 +15,9 @@
 #if defined(_WIN32)
 
 #define _CRT_RAND_S
+#ifndef _CRT_SECURE_NO_WARNINGS
 #define _CRT_SECURE_NO_WARNINGS
+#endif
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -490,6 +492,16 @@ static asngn_err os_list_kind(const char *path, int want_dirs,
     *out_names = names;
     *out_n = n;
     return ASNGN_OK;
+}
+
+asngn_err os_list_dir(const char *path, char ***out_names, size_t *out_n)
+{
+    return os_list_kind(path, 0, out_names, out_n);
+}
+
+asngn_err os_list_dirs(const char *path, char ***out_names, size_t *out_n)
+{
+    return os_list_kind(path, 1, out_names, out_n);
 }
 
 FILE *os_fopen(const char *path, const char *mode)

@@ -22,7 +22,7 @@ static char *cfg_dup(const char *s) { return asngn_strdup(s); }
 
 static void cfg_pool_entry(asngn_pool_entry *e, const char *id,
                            const char *path, int ctx, int threads,
-                           bool embedding, int dim) {
+                           bool embedding, int dim, int gpu_layers) {
   memset(e, 0, sizeof *e);
   snprintf(e->id, sizeof e->id, "%s", id);
   e->path = cfg_dup(path);
@@ -30,6 +30,7 @@ static void cfg_pool_entry(asngn_pool_entry *e, const char *id,
   e->threads = threads;
   e->embedding = embedding;
   e->dim = dim;
+  e->gpu_layers = gpu_layers;
 }
 
 void asngn_config_defaults(asngn_config *cfg) {
@@ -37,19 +38,20 @@ void asngn_config_defaults(asngn_config *cfg) {
 
   cfg->root = cfg_dup(".");
   cfg->base_prompt = cfg_dup("You are a capable, honest local assistant.");
+  cfg->profile = ASNGN_PROFILE_GENERAL;
 
   cfg_pool_entry(&cfg->pool[0], "nano",
                  "models/qwen2.5-0.5b-instruct-q4_k_m.gguf", 4096, 4,
-                 false, 0);
+                 false, 0, -1);
   cfg_pool_entry(&cfg->pool[1], "light",
                  "models/qwen2.5-1.5b-instruct-q4_k_m.gguf", 8192, 4,
-                 false, 0);
+                 false, 0, -1);
   cfg_pool_entry(&cfg->pool[2], "std",
                  "models/qwen2.5-7b-instruct-q4_k_m.gguf", 8192, 6,
-                 false, 0);
+                 false, 0, -1);
   cfg_pool_entry(&cfg->pool[3], "embed",
                  "models/multilingual-e5-small-q8_0.gguf", 512, 4,
-                 true, 384);
+                 true, 384, -1);
   cfg->pool_n = 4;
 
   snprintf(cfg->role_router, sizeof cfg->role_router, "nano");
@@ -62,17 +64,23 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->max_resident = 3;
 
   cfg->s_classify.temp = 0.0; cfg->s_classify.top_p = 0.0;
-  cfg->s_classify.max_tokens = 24;
+  cfg->s_classify.max_tokens = 24; cfg->s_classify.repeat_penalty = 0.0;
   cfg->s_decide.temp = 0.0; cfg->s_decide.top_p = 0.0;
   cfg->s_decide.max_tokens = 96;
+  /* greedy decode under a grammar can lock into repeating a legal
+   * phrase; a mild recent-token penalty breaks the loop */
+  cfg->s_decide.repeat_penalty = 1.15;
   cfg->s_answer.temp = 0.4; cfg->s_answer.top_p = 0.9;
   cfg->s_answer.max_tokens = 0; /* per detail level */
+  cfg->s_answer.repeat_penalty = 0.0;
   cfg->s_compress.temp = 0.2; cfg->s_compress.top_p = 0.9;
   cfg->s_compress.max_tokens = 0; /* fold/digest tokens */
+  cfg->s_compress.repeat_penalty = 0.0;
   cfg->s_adapt.temp = 0.3; cfg->s_adapt.top_p = 0.9;
   cfg->s_adapt.max_tokens = 0; /* per detail level */
+  cfg->s_adapt.repeat_penalty = 0.0;
   cfg->s_judge.temp = 0.0; cfg->s_judge.top_p = 0.0;
-  cfg->s_judge.max_tokens = 32;
+  cfg->s_judge.max_tokens = 32; cfg->s_judge.repeat_penalty = 0.0;
 
   cfg->classifier = ASNGN_CLASSIFIER_HYBRID;
   cfg->max_escalations = 2;
@@ -85,6 +93,7 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->summary_tokens = 600;
   cfg->verbatim_tokens = 1600;
   cfg->working_tokens = 800;
+  cfg->safety_margin = 64;
   cfg->fold_tokens = 200;
   cfg->digest_threshold_chars = 2048;
   cfg->digest_tokens = 256;
@@ -168,6 +177,9 @@ static const enum_map CLASSIFIER_MAP[] = {
   { "heuristic", ASNGN_CLASSIFIER_HEURISTIC },
   { "model", ASNGN_CLASSIFIER_MODEL },
   { "hybrid", ASNGN_CLASSIFIER_HYBRID }, { NULL, 0 } };
+static const enum_map PROFILE_MAP[] = {
+  { "general", ASNGN_PROFILE_GENERAL },
+  { "coding", ASNGN_PROFILE_CODING }, { NULL, 0 } };
 static const enum_map DETAIL_MAP[] = {
   { "auto", ASNGN_DETAIL_AUTO }, { "terse", ASNGN_DETAIL_TERSE },
   { "normal", ASNGN_DETAIL_NORMAL }, { "rich", ASNGN_DETAIL_RICH },
@@ -223,6 +235,7 @@ typedef struct {
 static const cfg_key CFG_KEYS[] = {
   { "engine", "root",        K_STR, OFF(root), 0, NULL },
   { "engine", "base_prompt", K_STR, OFF(base_prompt), 0, NULL },
+  { "engine", "profile",     K_ENUM, OFF(profile), 0, PROFILE_MAP },
 
   { "models", "max_resident", K_INT, OFF(max_resident), 0, NULL },
 
@@ -238,6 +251,7 @@ static const cfg_key CFG_KEYS[] = {
   { "context", "summary_tokens",   K_INT, OFF(summary_tokens), 0, NULL },
   { "context", "verbatim_tokens",  K_INT, OFF(verbatim_tokens), 0, NULL },
   { "context", "working_tokens",   K_INT, OFF(working_tokens), 0, NULL },
+  { "context", "safety_margin",    K_INT, OFF(safety_margin), 0, NULL },
   { "context", "fold_tokens",      K_INT, OFF(fold_tokens), 0, NULL },
   { "context", "digest_threshold_chars", K_INT,
     OFF(digest_threshold_chars), 0, NULL },
@@ -445,7 +459,7 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
     const xcdn_node_t *en = xcdn_array_get(v, i);
     const xcdn_value_t *eo = en != NULL ? en->value : NULL;
     const char *id, *path;
-    int64_t ctx = 4096, threads = 4, dim = 0;
+    int64_t ctx = 4096, threads = 4, dim = 0, gpu_layers = -1;
     bool embedding = false;
     const xcdn_value_t *f;
     size_t j;
@@ -467,8 +481,11 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
     f = asngn_xfield(eo, "dim");
     if (f != NULL && (!asngn_xint(f, &dim) || dim < 1)) goto bad_entry;
     if (embedding && dim == 0) goto bad_entry;
+    f = asngn_xfield(eo, "gpu_layers");
+    if (f != NULL && (!asngn_xint(f, &gpu_layers) || gpu_layers < -1))
+      goto bad_entry;
     cfg_pool_entry(&fresh[i], id, path, (int)ctx, (int)threads, embedding,
-                   (int)dim);
+                   (int)dim, (int)gpu_layers);
     if (fresh[i].path == NULL) {
       for (j = 0; j <= i; j++) free(fresh[j].path);
       return ASNGN_ERR_NOMEM;
@@ -521,7 +538,8 @@ static asngn_err cfg_apply_roles(asngn_ctx *c, asngn_config *cfg,
   return ASNGN_OK;
 }
 
-/* models.sampling: task -> { temp, top_p, max_tokens } overrides. */
+/* models.sampling: task -> { temp, top_p, max_tokens, repeat_penalty }
+ * overrides. */
 static asngn_err cfg_apply_sampling(asngn_ctx *c, asngn_config *cfg,
                                     const xcdn_value_t *v) {
   static const struct { const char *name; size_t off; } TASKS[] = {
@@ -571,6 +589,16 @@ static asngn_err cfg_apply_sampling(asngn_ctx *c, asngn_config *cfg,
                                 "out of range", key);
           s->max_tokens = (int)iv;
         }
+        f = asngn_xfield(o, "repeat_penalty");
+        if (f != NULL) {
+          /* 0 (or 1) = off; values below 1 would reward repetition */
+          if (!asngn_xnum(f, &d) || d < 0.0 || d > 2.0 ||
+              (d > 0.0 && d < 1.0))
+            return asngn_seterr(c, ASNGN_ERR_CONFIG,
+                                "config: models.sampling.%s."
+                                "repeat_penalty: out of range", key);
+          s->repeat_penalty = d;
+        }
         known = true;
         break;
       }
@@ -582,7 +610,7 @@ static asngn_err cfg_apply_sampling(asngn_ctx *c, asngn_config *cfg,
   return ASNGN_OK;
 }
 
-/* integration.asper / integration.astls (also accepted: "astools"). */
+/* integration.asper / integration.astools (legacy alias: "astls"). */
 static asngn_err cfg_apply_integration(asngn_ctx *c, asngn_config *cfg,
                                        const char *sub,
                                        const xcdn_value_t *v) {
@@ -594,6 +622,9 @@ static asngn_err cfg_apply_integration(asngn_ctx *c, asngn_config *cfg,
               sub);
     return ASNGN_OK;
   }
+  if (strcmp(sub, "astls") == 0)
+    asngn_log(c, ASNGN_LOG_WARN, "config",
+              "integration.astls is deprecated; use integration.astools");
   if (v == NULL || v->type != XCDN_VAL_OBJECT)
     return cfg_type_err(c, "integration", sub, "object", v);
   for (i = 0; i < xcdn_object_len(v); i++) {

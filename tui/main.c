@@ -24,17 +24,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#ifdef _WIN32
+#include <io.h>
+#define asngn_tty_in() _isatty(_fileno(stdin))
+#define asngn_tty_out() _isatty(_fileno(stdout))
+#else
 #include <unistd.h>
+#define asngn_tty_in() isatty(STDIN_FILENO)
+#define asngn_tty_out() isatty(STDOUT_FILENO)
+#endif
 
 #include "asngn_internal.h" /* see the exception note above */
 
 /* ── small utilities ──────────────────────────────────────────────────── */
 
-static long long now_ms(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
-}
+static long long now_ms(void) { return tui_now_ms(); }
 
 static void refresh_stats(tui_app *a) {
   if (a->ctx == NULL) return;
@@ -116,8 +120,8 @@ static void render_header(tui_app *a, tui_frame *f) {
            a->tier_last[0] != '\0' ? a->tier_last : "-", th->bullet);
   x += d_put(f, x, 0, buf, TFG_DIM, TBG_DEFAULT, 0);
   header_budget(a, f, &x);
-  snprintf(buf, sizeof buf, " %s QpT %.1f ", th->bullet,
-           a->stats_ok ? a->stats.qpt_rolling : 0.0);
+  snprintf(buf, sizeof buf, " %s tok %zu ", th->bullet,
+           a->stats_ok ? a->stats.tokens_prompt + a->stats.tokens_gen : 0);
   x += d_put(f, x, 0, buf, TFG_DIM, TBG_DEFAULT, 0);
 }
 
@@ -260,6 +264,10 @@ void tui_render_frame(tui_app *a, tui_frame *f, int *cx, int *cy) {
 
   if (a->help_on) {
     modal_draw_help(a, f);
+    *cx = *cy = -1;
+  }
+  if (a->perms.active) {
+    modal_draw_perms(a, f);
     *cx = *cy = -1;
   }
   if (a->confirm.active) {
@@ -536,6 +544,66 @@ static void cmd_cache(tui_app *a, const char *arg) {
                  a->stats.cache_misses);
 }
 
+/* ── tool permissions overlay (/perms) ───────────────────────────────── */
+
+/* Re-read the registry into the overlay, keeping the cursor on the same
+ * tool when it survives the refresh. */
+static void perms_refresh(tui_app *a) {
+  tui_perms *p = &a->perms;
+  asngn_tool_info *tools = NULL;
+  size_t n = 0, i;
+  char keep[64];
+  keep[0] = '\0';
+  if (p->cur >= 0 && (size_t)p->cur < p->n)
+    snprintf(keep, sizeof keep, "%s", p->tools[p->cur].ref);
+  if (asngn_tool_list(a->ctx, &tools, &n) != ASNGN_OK) {
+    chat_systemf(&a->chat, "tool list failed: %s",
+                 asngn_last_error(a->ctx));
+    return;
+  }
+  asngn_free(p->tools);
+  p->tools = tools;
+  p->n = n;
+  if (keep[0] != '\0')
+    for (i = 0; i < n; i++)
+      if (strcmp(tools[i].ref, keep) == 0) p->cur = (int)i;
+  if (p->cur >= (int)n) p->cur = (int)n - 1;
+  if (p->cur < 0) p->cur = 0;
+  if (p->top > p->cur) p->top = p->cur;
+}
+
+static void perms_open(tui_app *a) {
+  if (!a->sib_ok || !a->sib.astools_ok) {
+    chat_systemf(&a->chat, "astools disabled %s no tools to manage",
+                 a->theme.bullet);
+    return;
+  }
+  perms_refresh(a);
+  a->perms.active = 1;
+}
+
+static void perms_toggle(tui_app *a) {
+  tui_perms *p = &a->perms;
+  char ref[64];
+  int want;
+  if (p->cur < 0 || (size_t)p->cur >= p->n) return;
+  snprintf(ref, sizeof ref, "%s", p->tools[p->cur].ref);
+  want = !p->tools[p->cur].enabled;
+  if (asngn_tool_enable(a->ctx, ref, want) != ASNGN_OK) {
+    chat_systemf(&a->chat, "tool %s: %s", ref,
+                 asngn_last_error(a->ctx));
+    return;
+  }
+  perms_refresh(a);
+  if (want && (size_t)p->cur < p->n &&
+      strcmp(p->tools[p->cur].ref, ref) == 0 &&
+      !p->tools[p->cur].enabled)
+    chat_systemf(&a->chat, "tool %s held disabled by pinning %s "
+                 "approve its lockfile entry first", ref,
+                 a->theme.bullet);
+  refresh_stats(a);
+}
+
 static void cmd_export(tui_app *a) {
   char *text = NULL;
   if (busy_guard(a)) return;
@@ -656,6 +724,8 @@ static void handle_slash(tui_app *a, char *line) {
   } else if (strcmp(cmd, "/tools") == 0) {
     a->pane = PANE_TOOLS;
     a->sidebar_on = 1;
+  } else if (strcmp(cmd, "/perms") == 0) {
+    perms_open(a);
   } else if (strcmp(cmd, "/stats") == 0) {
     a->pane = PANE_STATS;
     a->sidebar_on = 1;
@@ -683,8 +753,8 @@ static void handle_slash(tui_app *a, char *line) {
 
 static const char *const SLASH_CMDS[] = {
     "/cache", "/compact", "/detail", "/export", "/help", "/memory",
-    "/more", "/pin", "/project", "/quit", "/redact", "/retry",
-    "/session", "/stats", "/tools",
+    "/more", "/perms", "/pin", "/project", "/quit", "/redact",
+    "/retry", "/session", "/stats", "/tools",
 };
 
 static void complete_from(tui_app *a, const char *partial,
@@ -826,6 +896,38 @@ static void handle_key(tui_app *a, const tui_key *k) {
                k->kind == TK_CTRL_D) {
       resolve_confirm(a, 0, 0); /* escape hatches deny */
     }
+    return;
+  }
+  if (a->perms.active) { /* arrows move, Space/Enter toggles, Esc closes */
+    switch (k->kind) {
+    case TK_UP:
+      if (a->perms.cur > 0) a->perms.cur--;
+      break;
+    case TK_DOWN:
+      if (a->perms.cur + 1 < (int)a->perms.n) a->perms.cur++;
+      break;
+    case TK_HOME:
+      a->perms.cur = 0;
+      break;
+    case TK_END:
+      if (a->perms.n > 0) a->perms.cur = (int)a->perms.n - 1;
+      break;
+    case TK_ENTER:
+      perms_toggle(a);
+      break;
+    case TK_CHAR:
+      if (k->utf8[0] == ' ') perms_toggle(a);
+      else if (k->utf8[0] == 'q') a->perms.active = 0;
+      break;
+    case TK_ESC:
+    case TK_CTRL_C:
+    case TK_CTRL_D:
+      a->perms.active = 0;
+      break;
+    default:
+      break;
+    }
+    a->structural = 1;
     return;
   }
   if (a->help_on) {
@@ -1028,6 +1130,7 @@ static char *read_stdin_all(void) {
 }
 
 static int run_once(const char *root, const char *config,
+                    const char *workspace, int allow_degraded,
                     const char *session, asngn_detail detail,
                     int confirm_override, const char *message) {
   asngn_open_params p;
@@ -1053,6 +1156,8 @@ static int run_once(const char *root, const char *config,
   memset(&p, 0, sizeof p);
   p.engine_root = root;
   p.config_path = config;
+  p.workspace_root = workspace;
+  p.allow_degraded = allow_degraded;
   e = asngn_open(&p, &c);
   if (e != ASNGN_OK) {
     fprintf(stderr, "asngn: open failed: %s\n", asngn_err_name(e));
@@ -1076,6 +1181,8 @@ static int run_once(const char *root, const char *config,
   }
 
   memset(&opts, 0, sizeof opts);
+  memset(&r, 0, sizeof r); /* only read under e == ASNGN_OK, but flow
+                            * analysis cannot see that (C4701) */
   opts.detail = detail;
   stream.bytes = 0;
   e = asngn_submit(s, message, &opts, cb_token_stdout, &stream, &t);
@@ -1103,6 +1210,7 @@ static int run_once(const char *root, const char *config,
 /* ── interactive mode ─────────────────────────────────────────────────── */
 
 static int run_interactive(const char *root, const char *config,
+                           const char *workspace, int allow_degraded,
                            const char *session, asngn_detail detail,
                            int confirm_override) {
   asngn_open_params p;
@@ -1113,7 +1221,7 @@ static int run_interactive(const char *root, const char *config,
   /* refuse pipes before the engine spins up */
   {
     const char *tm = getenv("TERM");
-    if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO) ||
+    if (!asngn_tty_in() || !asngn_tty_out() ||
         (tm != NULL && strcmp(tm, "dumb") == 0)) {
       fprintf(stderr,
               "asngn: the interactive TUI needs a terminal "
@@ -1134,6 +1242,8 @@ static int run_interactive(const char *root, const char *config,
   memset(&p, 0, sizeof p);
   p.engine_root = root;
   p.config_path = config;
+  p.workspace_root = workspace;
+  p.allow_degraded = allow_degraded;
   e = asngn_open(&p, &a.ctx);
   if (e != ASNGN_OK) {
     fprintf(stderr, "asngn: open failed: %s\n", asngn_err_name(e));
@@ -1271,6 +1381,7 @@ static int run_interactive(const char *root, const char *config,
     size_t i;
     for (i = 0; i < a.pending_n; i++) free(a.pending[i]);
   }
+  asngn_free(a.perms.tools);
   chat_free(&a.chat);
   ed_free(&a.ed);
   return 0;
@@ -1281,6 +1392,7 @@ static int run_interactive(const char *root, const char *config,
 static void usage(FILE *out) {
   fprintf(out,
           "usage: asngn [--root <dir>] [--config <file>] "
+          "[--workspace <dir>] [--allow-degraded] "
           "[--session <slug>]\n"
           "             [--detail terse|normal|rich|auto] "
           "[--confirm prompt|deny|allow]\n"
@@ -1309,11 +1421,13 @@ static const char *arg_value(int argc, char **argv, int *i,
 int main(int argc, char **argv) {
   const char *root = ".";
   const char *config = NULL;
+  const char *workspace = NULL;
   const char *session = NULL;
   const char *once = NULL;
   asngn_detail detail = ASNGN_DETAIL_AUTO;
   int confirm_override = -1;
   int frame_dump = 0;
+  int allow_degraded = 0;
   int i;
 
   for (i = 1; i < argc; i++) {
@@ -1322,6 +1436,8 @@ int main(int argc, char **argv) {
       root = v;
     } else if ((v = arg_value(argc, argv, &i, "--config")) != NULL) {
       config = v;
+    } else if ((v = arg_value(argc, argv, &i, "--workspace")) != NULL) {
+      workspace = v;
     } else if ((v = arg_value(argc, argv, &i, "--session")) != NULL) {
       session = v;
     } else if ((v = arg_value(argc, argv, &i, "--detail")) != NULL) {
@@ -1346,6 +1462,8 @@ int main(int argc, char **argv) {
       }
     } else if ((v = arg_value(argc, argv, &i, "--once")) != NULL) {
       once = v;
+    } else if (strcmp(argv[i], "--allow-degraded") == 0) {
+      allow_degraded = 1;
     } else if (strcmp(argv[i], "--frame-dump") == 0) {
       frame_dump = 1; /* hidden: golden-frame hook */
     } else if (strcmp(argv[i], "--version") == 0) {
@@ -1363,8 +1481,10 @@ int main(int argc, char **argv) {
 
   if (frame_dump) return run_frame_dump();
   if (once != NULL)
-    return run_once(root, config, session, detail, confirm_override,
+    return run_once(root, config, workspace, allow_degraded,
+                    session, detail, confirm_override,
                     once);
-  return run_interactive(root, config, session, detail,
+  return run_interactive(root, config, workspace, allow_degraded,
+                         session, detail,
                          confirm_override);
 }

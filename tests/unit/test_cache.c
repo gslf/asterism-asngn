@@ -41,7 +41,7 @@ static int fx_write_config(fx *f) {
   ok = fprintf(fp,
                "#asngn_config {\n"
                "  integration: { asper: { enable: false }, "
-               "astls: { enable: false } },\n"
+               "astools: { enable: false } },\n"
                "  validation: { judge: \"off\" },\n"
                "  routing: { classifier: \"heuristic\" },\n"
                "  cache: { enable: true },\n"

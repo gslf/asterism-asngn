@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  integrated-build-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-gcc, os: ubuntu-latest, cc: gcc, cxx: g++ }
+          - { name: linux-clang, os: ubuntu-latest, cc: clang, cxx: clang++ }
+          - { name: macos-clang, os: macos-latest, cc: clang, cxx: clang++ }
+          - { name: windows-msvc, os: windows-latest, cc: cl, cxx: cl }
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: asterism-asngn
+      - uses: actions/checkout@v4
+        with:
+          repository: gslf/asterism-asper
+          path: asterism-asper
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: gslf/asterism-astools
+          path: asterism-astools
+          submodules: recursive
+      - name: Check shared xCDN pin
+        shell: pwsh
+        run: |
+          $asper = git -C asterism-asper/deps/xcdn-c rev-parse HEAD
+          $astools = git -C asterism-astools/deps/xcdn-c rev-parse HEAD
+          if ($asper -ne $astools) { throw "xCDN pins differ: $asper != $astools" }
+      - name: Configure Asper
+        working-directory: asterism-asper
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASPER_WITH_LLAMA=OFF -DASPER_BUILD_MCP=ON
+      - name: Build and test Asper
+        working-directory: asterism-asper
+        run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure
+      - name: Configure astools
+        working-directory: asterism-astools
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASTOOLS_BUILD_MCP=ON
+      - name: Build and test astools
+        working-directory: asterism-astools
+        run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure
+      - name: Configure asngn
+        working-directory: asterism-asngn
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASNGN_WITH_LLAMA=OFF
+      - name: Build asngn
+        working-directory: asterism-asngn
+        run: cmake --build build --config Release -j 4
+      - name: Test asngn
+        working-directory: asterism-asngn
+        run: ctest --test-dir build -C Release --output-on-failure
+
+  linux-sanitizers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: asterism-asngn }
+      - uses: actions/checkout@v4
+        with:
+          repository: gslf/asterism-asper
+          path: asterism-asper
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: gslf/asterism-astools
+          path: asterism-astools
+          submodules: recursive
+      - run: cmake -B build -DASNGN_WITH_LLAMA=OFF -DASNGN_SANITIZERS=ON
+        working-directory: asterism-asngn
+      - run: cmake --build build -j 4
+        working-directory: asterism-asngn
+      - run: ctest --test-dir build --output-on-failure
+        working-directory: asterism-asngn

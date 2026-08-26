@@ -158,6 +158,29 @@ TEST(think_capped_on_utf8_boundary) {
   bare_ctx_free(c);
 }
 
+TEST(clarify_allows_protocol_words_as_content) {
+  asngn_ctx *c = bare_ctx();
+  asngn_step st;
+  ASSERT_TRUE(c != NULL);
+  ASSERT_OK(asngn_step_parse(c, "CLARIFY | Should I CALL the API?", &st));
+  asngn_step_free(&st);
+  ASSERT_OK(asngn_step_parse(c, "CLARIFY | Use ANSWER as the label?", &st));
+  asngn_step_free(&st);
+  ASSERT_OK(asngn_step_parse(c, "CLARIFY | Should I use CALLBACKS?", &st));
+  asngn_step_free(&st);
+  /* ordinary questions are untouched */
+  ASSERT_OK(asngn_step_parse(c, "CLARIFY | Quale file devo modificare?",
+                             &st));
+  asngn_step_free(&st);
+  ASSERT_EQ_INT(asngn_step_parse(c, "CLARIFY | CLARIFY | Serve altro?", &st),
+                ASNGN_ERR_PROTOCOL);
+  /* THINK / RECALL text stays internal and permissive */
+  ASSERT_OK(asngn_step_parse(c, "THINK | next step: ANSWER", &st));
+  ASSERT_EQ_INT(st.kind, ASNGN_STEP_THINK);
+  asngn_step_free(&st);
+  bare_ctx_free(c);
+}
+
 TEST(malformed_lines_are_protocol_errors) {
   asngn_ctx *c = bare_ctx();
   asngn_step st;
@@ -186,6 +209,7 @@ TEST_LIST = {
   TEST_ENTRY(call_simple),
   TEST_ENTRY(call_versioned_ref_and_brace_in_string),
   TEST_ENTRY(think_capped_on_utf8_boundary),
+  TEST_ENTRY(clarify_allows_protocol_words_as_content),
   TEST_ENTRY(malformed_lines_are_protocol_errors),
 };
 

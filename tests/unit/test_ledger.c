@@ -31,7 +31,7 @@ static int fx_write_config(fx *f, const char *extra) {
   ok = fprintf(fp,
                "#asngn_config {\n"
                "  integration: { asper: { enable: false }, "
-               "astls: { enable: false } },\n"
+               "astools: { enable: false } },\n"
                "  validation: { judge: \"off\" },\n"
                "  routing: { classifier: \"heuristic\" },\n"
                "  models: { pool: [\n"
@@ -207,23 +207,21 @@ TEST(qpt_window_and_feedback) {
   ASSERT_TRUE(fx_turn(&f, s, "Prima domanda", "Risposta uno.\n"));
   ASSERT_EQ_INT((long long)s->led_n, 1);
 
-  /* no judge: q = 0.5; QpT = q / (total / 1000), computed by hand */
+  /* no judge/outcome: quality is unknown and QpT stays zero */
   total = asngn_ledger_total_tokens(&s->led[0]);
   ASSERT_TRUE(total > 0);
-  ASSERT_EQ_DBL(asngn_session_qpt(s),
-                0.5 / ((double)total / 1000.0), 1e-9);
-  ASSERT_EQ_DBL(asngn_session_qpt(s), asngn_qpt(0.5, total), 1e-12);
+  ASSERT_EQ_DBL(asngn_session_qpt(s), 0.0, 1e-12);
 
-  /* +1 feedback lifts q to 0.5 + 0.3 = 0.8 and raises QpT */
+  /* +1 feedback supplies a binary successful outcome */
   before = asngn_session_qpt(s);
   ASSERT_OK(asngn_feedback(s, s->led[0].turn, 1));
-  ASSERT_EQ_DBL(asngn_session_qpt(s), asngn_qpt(0.8, total), 1e-9);
+  ASSERT_EQ_DBL(asngn_session_qpt(s), asngn_qpt(1.0, total), 1e-9);
   ASSERT_TRUE(asngn_session_qpt(s) > before);
 
-  /* -1 feedback drops it below the neutral value */
+  /* -1 feedback supplies a binary unsuccessful outcome */
   ASSERT_OK(asngn_feedback(s, s->led[0].turn, -1));
-  ASSERT_EQ_DBL(asngn_session_qpt(s), asngn_qpt(0.2, total), 1e-9);
-  ASSERT_TRUE(asngn_session_qpt(s) < before);
+  ASSERT_EQ_DBL(asngn_session_qpt(s), 0.0, 1e-9);
+  ASSERT_EQ_DBL(asngn_session_qpt(s), before, 1e-12);
   asngn_session_close(s);
   fx_drop(&f);
 }

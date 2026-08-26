@@ -66,15 +66,59 @@ static const char *route_ci_strstr(const char *hay, const char *needle) {
  * so "crea" does not fire inside "create" — "create" itself matches first
  * as its own entry. */
 static const char *const route_verbs[] = {
-  "fix",     "write",     "create", "rename",  "delete", "refactor",
-  "implement", "build",   "run",    "install", "update", "esegui",
-  "scrivi",  "crea",      NULL
+  "fix",     "write",     "create", "rename",  "delete",  "refactor",
+  "implement", "build",   "run",    "install", "update",  "list",
+  "read",    "show",      "open",   "search",  "find",    "save",
+  "copy",    "move",      "remove", "edit",    "use",     "esegui",
+  "scrivi",  "crea",      "elenca", "lista",   "leggi",   "mostra",
+  "apri",    "cerca",     "trova",  "salva",   "copia",   "sposta",
+  "rimuovi", "cancella",  "elimina", "modifica", "aggiungi", "usa",
+  "genera",  "compila",   "rinomina", NULL
 };
 
 /* astools tool-name prefixes; a mention strongly suggests tool work. */
 static const char *const route_tools[] = {
   "fs.", "grep.", "git.", "proc.", "edit.", "env.", "sys.", NULL
 };
+
+/* Workspace nouns (whole-word, case-insensitive). With tools available,
+ * a question about files or the workspace needs the step loop even
+ * without an imperative ("quali file ci sono nella root?") — answering
+ * it direct can only hallucinate. Over-calling PLAN costs one decision
+ * pass; under-calling it costs a wrong answer. */
+static const char *const route_nouns[] = {
+  "file",      "files",  "workspace", "cartella", "cartelle",
+  "directory", "folder", "folders",   "repo",     "repository",
+  NULL
+};
+
+/* Whole-word case-insensitive match: both neighbors non-alphanumeric. */
+static bool route_has_noun(const char *msg) {
+  size_t t;
+  for (t = 0; route_nouns[t] != NULL; t++) {
+    const char *needle = route_nouns[t];
+    const char *p = msg;
+    while ((p = route_ci_strstr(p, needle)) != NULL) {
+      size_t nl = strlen(needle);
+      if ((p == msg || !route_is_alnum(p[-1])) && !route_is_alnum(p[nl]))
+        return true;
+      p++;
+    }
+  }
+  return false;
+}
+
+static bool route_has_local_anchor(const char *msg) {
+  static const char *const anchors[] = {
+      "workspace", "this repo", "current repo", "local repo",
+      "questa repo", "questo repo", "nel repo", "nella repo",
+      "this directory", "current directory", "questa cartella",
+      "directory corrente", "cartella corrente", NULL};
+  size_t i;
+  for (i = 0; anchors[i] != NULL; i++)
+    if (route_ci_strstr(msg, anchors[i]) != NULL) return true;
+  return false;
+}
 
 /* True when an imperative verb opens the message or any sentence.
  * "Sentence start" = first non-space byte of the message, or the first
@@ -177,8 +221,8 @@ static size_t route_count_questions(const char *msg) {
  *  MODE  ├────────────────────────────────────────────────────────────┤
  *        │ PLAN     when tools are available this turn and the        │
  *        │          message has an imperative verb at a sentence      │
- *        │          start, or mentions a file path / tool name, or    │
- *        │          contains a fence.                                 │
+ *        │          start, or mentions a file path / tool name /      │
+ *        │          workspace noun, or contains a fence.              │
  *        │ DIRECT   otherwise (no tools ⇒ always DIRECT).             │
  *  DETAIL├────────────────────────────────────────────────────────────┤
  *        │ RICH     when len > 600, or fence, or the message asks     │
@@ -207,7 +251,8 @@ void asngn_route_heuristic(const char *message, bool tools_available,
   math = route_has_math(message, len);
   questions = route_count_questions(message);
   imperative = route_has_imperative(message);
-  pathtool = route_mentions_path_or_tool(message);
+  pathtool = route_mentions_path_or_tool(message) ||
+             (route_has_noun(message) && route_has_local_anchor(message));
 
   if (len > 900 || fence || (math && len > 300) || recent_escalation)
     out->klass = ASNGN_CLASS_COMPLEX;
@@ -375,10 +420,17 @@ asngn_err asngn_route_classify(asngn_ctx *c, asngn_session *s,
   if (message == NULL) message = "";
 
   tools_available = c->astools_ok && !t->opts.no_tools;
-  /* TODO: recent escalation history should be read from the last
-   * few ledger entries of the session; deliberately false until the loop
-   * writes them — the heuristic stays conservative without it. */
   recent_escalation = false;
+  {
+    size_t first = s->led_n > 3 ? s->led_n - 3 : 0;
+    size_t i;
+    for (i = first; i < s->led_n; i++) {
+      if (s->led[i].escalations > 0) {
+        recent_escalation = true;
+        break;
+      }
+    }
+  }
 
   asngn_route_heuristic(message, tools_available, recent_escalation, &heur);
   *out = heur;

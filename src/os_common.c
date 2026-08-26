@@ -53,6 +53,18 @@ char *os_path_join(const char *a, const char *b)
     return s;
 }
 
+int os_path_is_abs(const char *path) {
+  if (!path || path[0] == '\0') return 0;
+#ifdef _WIN32
+  if (path[0] == '/' || path[0] == '\\') return 1;
+  return (((path[0] >= 'A' && path[0] <= 'Z') ||
+           (path[0] >= 'a' && path[0] <= 'z')) &&
+          path[1] == ':' && (path[2] == '/' || path[2] == '\\'));
+#else
+  return path[0] == '/';
+#endif
+}
+
 /* ---- whole-file read / write -------------------------------------------- */
 
 asngn_err os_read_file(const char *path, char **out, size_t *out_len)

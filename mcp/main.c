@@ -43,19 +43,23 @@
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
 static const char USAGE[] =
-    "usage: asngn-mcp --root <dir> [--config <file>]\n"
+    "usage: asngn-mcp --root <dir> [--config <file>] "
+    "[--workspace <dir>] [--allow-degraded]\n"
     "       asngn-mcp --help | --version\n";
 
 static const char HELP[] =
     "asngn-mcp - MCP stdio server for the Asterism Engine (asngn)\n"
     "\n"
-    "usage: asngn-mcp --root <dir> [--config <file>]\n"
+    "usage: asngn-mcp --root <dir> [--config <file>] "
+    "[--workspace <dir>] [--allow-degraded]\n"
     "       asngn-mcp --help | --version\n"
     "\n"
     "options:\n"
     "  --root <dir>     engine root directory (created if missing);"
     " required\n"
     "  --config <file>  optional xCDN configuration file (#asngn_config)\n"
+    "  --workspace <dir> canonical coding workspace (overrides config)\n"
+    "  --allow-degraded  explicitly allow missing coding dependencies\n"
     "  --help           print this help and exit\n"
     "  --version        print the version and exit\n"
     "\n"
@@ -68,6 +72,10 @@ static const char HELP[] =
 static const char OOM_RESPONSE[] =
     "{\"jsonrpc\":\"2.0\",\"id\":null,"
     "\"error\":{\"code\":-32603,\"message\":\"out of memory\"}}";
+
+#define MCP_LEGACY_VERSION "2025-06-18"
+#define MCP_MODERN_VERSION "2026-07-28"
+static int mcp_modern_response;
 
 /* ═══════════════════════ server state ═══════════════════════ */
 
@@ -102,12 +110,33 @@ static void send_value(jx_value *resp) {
 }
 
 /* want == 0: notification — consume the owned arguments, emit nothing. */
+static int decorate_modern_result(jx_value *result) {
+  jx_value *meta, *info;
+  int ok;
+  if (!result || jx_typeof(result) != JX_OBJECT) return 0;
+  meta = jx_object();
+  info = jx_object();
+  ok = meta != NULL && info != NULL;
+  ok &= jx_object_set(info, "name", jx_string("asngn-mcp")) == 0;
+  ok &= jx_object_set(info, "version", jx_string(asngn_version())) == 0;
+  ok &= jx_object_set(meta, "io.modelcontextprotocol/serverInfo", info) == 0;
+  ok &= jx_object_set(result, "resultType", jx_string("complete")) == 0;
+  ok &= jx_object_set(result, "_meta", meta) == 0;
+  return ok;
+}
+
 static void send_result(int want, jx_value *id, jx_value *result) {
   jx_value *resp;
   int ok;
   if (!want) {
     jx_free(id);
     jx_free(result);
+    return;
+  }
+  if (mcp_modern_response && !decorate_modern_result(result)) {
+    jx_free(id);
+    jx_free(result);
+    emit_line(OOM_RESPONSE);
     return;
   }
   resp = jx_object();
@@ -714,6 +743,29 @@ static int tool_engine_stats(server_state *st, const jx_value *args,
 
 /* ═══════════════════════ tool table ════════════════════════════ */
 
+static int tool_workspace_info(server_state *st, const jx_value *args,
+                               jx_value **out, const char **msg) {
+  asngn_workspace_info w;
+  jx_value *o;
+  int ok;
+  asngn_err e;
+  (void)args; (void)msg;
+  memset(&w, 0, sizeof w);
+  e = asngn_workspace_get(st->ctx, &w);
+  if (e != ASNGN_OK) return engine_fail(st, e, out);
+  o = jx_object(); ok = o != NULL;
+  ok &= jx_object_set(o, "canonical_root", jx_string(w.canonical_root)) == 0;
+  ok &= jx_object_set(o, "repository_root", jx_string(w.repository_root)) == 0;
+  ok &= jx_object_set(o, "head", jx_string(w.head)) == 0;
+  ok &= jx_object_set(o, "branch", jx_string(w.branch)) == 0;
+  ok &= jx_object_set(o, "project_id", jx_string(w.project_id)) == 0;
+  ok &= jx_object_set(o, "ignore_rules", jx_string(w.ignore_rules)) == 0;
+  ok &= jx_object_set(o, "build_adapter", jx_string(w.build_adapter)) == 0;
+  ok &= jx_object_set(o, "fingerprint", jx_string(w.fingerprint)) == 0;
+  if (!ok) { jx_free(o); return TOOL_OOM; }
+  *out = o; return TOOL_OK;
+}
+
 typedef struct {
   const char *name;
   const char *desc;
@@ -748,6 +800,11 @@ static const tool_def TOOLS[] = {
      "\"description\":\"+1 good, -1 poor, 0 clears\"}},"
      "\"required\":[\"session\",\"turn\",\"signal\"]}",
      tool_agent_feedback},
+    {"workspace_info",
+     "Return the selected canonical workspace, repository identity, build "
+     "adapter and live content fingerprint.",
+     "{\"type\":\"object\",\"properties\":{}}",
+     tool_workspace_info},
     {"session_list",
      "List known session slugs.",
      "{\"type\":\"object\",\"properties\":{}}",
@@ -812,7 +869,7 @@ static jx_value *initialize_result(void) {
   jx_value *res = jx_object();
   jx_value *caps, *si;
   int ok = (res != NULL);
-  ok &= jx_object_set(res, "protocolVersion", jx_string("2025-06-18")) == 0;
+  ok &= jx_object_set(res, "protocolVersion", jx_string(MCP_LEGACY_VERSION)) == 0;
   caps = jx_object();
   ok &= jx_object_set(caps, "tools", jx_object()) == 0;
   ok &= jx_object_set(res, "capabilities", caps) == 0;
@@ -820,6 +877,27 @@ static jx_value *initialize_result(void) {
   ok &= jx_object_set(si, "name", jx_string("asngn-mcp")) == 0;
   ok &= jx_object_set(si, "version", jx_string(asngn_version())) == 0;
   ok &= jx_object_set(res, "serverInfo", si) == 0;
+  if (!ok) {
+    jx_free(res);
+    return NULL;
+  }
+  return res;
+}
+
+static jx_value *discover_result(void) {
+  jx_value *res = jx_object();
+  jx_value *versions = jx_array();
+  jx_value *caps = jx_object();
+  int ok = res != NULL && versions != NULL && caps != NULL;
+  ok &= jx_array_push(versions, jx_string(MCP_MODERN_VERSION)) == 0;
+  ok &= jx_array_push(versions, jx_string(MCP_LEGACY_VERSION)) == 0;
+  ok &= jx_object_set(caps, "tools", jx_object()) == 0;
+  ok &= jx_object_set(res, "supportedVersions", versions) == 0;
+  ok &= jx_object_set(res, "capabilities", caps) == 0;
+  ok &= jx_object_set(res, "instructions",
+                      jx_string("Local Asterism agent tools.")) == 0;
+  ok &= jx_object_set(res, "ttlMs", jx_int(3600000)) == 0;
+  ok &= jx_object_set(res, "cacheScope", jx_string("private")) == 0;
   if (!ok) {
     jx_free(res);
     return NULL;
@@ -923,7 +1001,7 @@ static void handle_tools_call(server_state *st, int want, jx_value *rid,
 }
 
 static void handle_request(server_state *st, jx_value *req) {
-  const jx_value *idv, *ver, *methv;
+  const jx_value *idv, *ver, *methv, *protocolv = NULL;
   const char *method;
   jx_value *rid;
   int has_id;
@@ -948,14 +1026,50 @@ static void handle_request(server_state *st, jx_value *req) {
     return;
   }
   method = jx_string_value(methv);
+  {
+    const jx_value *params = jx_object_get(req, "params");
+    const jx_value *meta = params && jx_typeof(params) == JX_OBJECT
+                               ? jx_object_get(params, "_meta")
+                               : NULL;
+    protocolv = meta && jx_typeof(meta) == JX_OBJECT
+                    ? jx_object_get(meta,
+                        "io.modelcontextprotocol/protocolVersion")
+                    : NULL;
+    mcp_modern_response = protocolv && jx_typeof(protocolv) == JX_STRING &&
+                          strcmp(jx_string_value(protocolv),
+                                 MCP_MODERN_VERSION) == 0;
+  }
   /* "notifications/..." methods are ignored only as true notifications
    * (no id); an id-carrying request must get a response, so it falls
    * through to the normal dispatch (=> -32601 when unknown). */
   if (!has_id && strncmp(method, "notifications/", 14) == 0) return;
 
   rid = jx_clone(idv); /* NULL (=> null id) when absent or on OOM */
+  if (protocolv && !mcp_modern_response &&
+      strcmp(method, "server/discover") != 0) {
+    send_error(has_id, rid, -32022, "unsupported MCP protocol version", NULL);
+    return;
+  }
   if (strcmp(method, "initialize") == 0) {
+    const jx_value *params = jx_object_get(req, "params");
+    const jx_value *pv = params && jx_typeof(params) == JX_OBJECT
+                             ? jx_object_get(params, "protocolVersion")
+                             : NULL;
+    mcp_modern_response = 0;
+    if (pv && (jx_typeof(pv) != JX_STRING ||
+               strcmp(jx_string_value(pv), MCP_LEGACY_VERSION) != 0)) {
+      send_error(has_id, rid, -32022, "unsupported MCP protocol version", NULL);
+      return;
+    }
     jx_value *res = initialize_result();
+    if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
+    else send_result(has_id, rid, res);
+    return;
+  }
+  if (strcmp(method, "server/discover") == 0) {
+    jx_value *res;
+    mcp_modern_response = 1;
+    res = discover_result();
     if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
     else send_result(has_id, rid, res);
     return;
@@ -1028,7 +1142,8 @@ static int line_blank(const char *s, size_t n) {
 /* ═══════════════════════ main ═══════════════════════ */
 
 int main(int argc, char **argv) {
-  const char *root = NULL, *config = NULL;
+  const char *root = NULL, *config = NULL, *workspace = NULL;
+  int allow_degraded = 0;
   asngn_open_params params;
   server_state st;
   asngn_err e;
@@ -1060,6 +1175,16 @@ int main(int argc, char **argv) {
       config = argv[i];
     } else if (strncmp(a, "--config=", 9) == 0) {
       config = a + 9;
+    } else if (strcmp(a, "--workspace") == 0) {
+      if (++i >= argc) {
+        fprintf(stderr, "asngn-mcp: --workspace requires a value\n%s", USAGE);
+        return 2;
+      }
+      workspace = argv[i];
+    } else if (strncmp(a, "--workspace=", 12) == 0) {
+      workspace = a + 12;
+    } else if (strcmp(a, "--allow-degraded") == 0) {
+      allow_degraded = 1;
     } else {
       fprintf(stderr, "asngn-mcp: unknown argument \"%s\"\n%s", a, USAGE);
       return 2;
@@ -1074,6 +1199,8 @@ int main(int argc, char **argv) {
   memset(&params, 0, sizeof params);
   params.engine_root = root;
   params.config_path = config;
+  params.workspace_root = workspace;
+  params.allow_degraded = allow_degraded;
   e = asngn_open(&params, &st.ctx);
   if (e != ASNGN_OK || !st.ctx) {
     fprintf(stderr, "asngn-mcp: cannot open engine at \"%s\": %s\n",

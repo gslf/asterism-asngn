@@ -150,6 +150,11 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
   size_t i;
   bool ok = obj != NULL && pins != NULL;
 
+  /* Persist the current worktree identity, not merely the fingerprint from
+   * session open; editor/build changes are first-class workspace state. */
+  if (asngn_workspace_refresh(c) == ASNGN_OK)
+    s->workspace = c->workspace;
+
   asngn_buf_init(&buf);
   for (i = 0; ok && i < s->log_n; i++)
     if (s->log[i].pinned)
@@ -163,6 +168,25 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
   ok = ok && asngn_xobj_put(obj, "project",
                             s->project != NULL ? mk_str(s->project)
                                                : xcdn_value_null());
+  if (ok) {
+    xcdn_value_t *w = xcdn_value_object();
+    ok = w != NULL;
+    ok = ok && asngn_xobj_put(w, "root", mk_str(s->workspace.canonical_root));
+    ok = ok && asngn_xobj_put(w, "repository_root",
+                              mk_str(s->workspace.repository_root));
+    ok = ok && asngn_xobj_put(w, "head", mk_str(s->workspace.head));
+    ok = ok && asngn_xobj_put(w, "branch", mk_str(s->workspace.branch));
+    ok = ok && asngn_xobj_put(w, "project_id",
+                              mk_str(s->workspace.project_id));
+    ok = ok && asngn_xobj_put(w, "ignore_rules",
+                              mk_str(s->workspace.ignore_rules));
+    ok = ok && asngn_xobj_put(w, "build_adapter",
+                              mk_str(s->workspace.build_adapter));
+    ok = ok && asngn_xobj_put(w, "fingerprint",
+                              mk_str(s->workspace.fingerprint));
+    if (ok) ok = asngn_xobj_put(obj, "workspace", w);
+    else if (w != NULL) xcdn_value_free(w);
+  }
   if (ok) {
     xcdn_node_t *pn = xcdn_node_new(pins);
     if (pn != NULL) {
@@ -213,6 +237,21 @@ static void sess_apply_manifest(asngn_session *s, const xcdn_node_t *node) {
   if (v != NULL && v->type == XCDN_VAL_STRING) {
     free(s->project);
     s->project = asngn_strdup(v->data.string);
+  }
+  v = asngn_xfield(obj, "workspace");
+  if (v != NULL && v->type == XCDN_VAL_OBJECT) {
+#define WS_COPY(field, key) do { const char *ws_ = asngn_xstr(asngn_xfield(v, key)); \
+  if (ws_ != NULL) snprintf(s->workspace.field, sizeof s->workspace.field, "%s", ws_); } while (0)
+    WS_COPY(canonical_root, "root");
+    WS_COPY(repository_root, "repository_root");
+    WS_COPY(head, "head");
+    WS_COPY(branch, "branch");
+    WS_COPY(project_id, "project_id");
+    WS_COPY(ignore_rules, "ignore_rules");
+    WS_COPY(build_adapter, "build_adapter");
+    WS_COPY(fingerprint, "fingerprint");
+#undef WS_COPY
+    s->workspace_loaded = s->workspace.canonical_root[0] != '\0';
   }
   v = asngn_xfield(obj, "redact_context");
   if (v != NULL && asngn_xbool(v, &b)) s->redact_context = b;
@@ -514,6 +553,7 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   os_rwlock_init(&s->lock);
   s->created_at = asngn_clock_now(&c->clock);
   s->redact_context = c->cfg.redact_context;
+  s->workspace = c->workspace;
   s->summary = asngn_strdup("");
   s->dir = os_path_join(c->sessions_dir, slug);
   if (s->dir == NULL || s->summary == NULL) {
@@ -544,6 +584,15 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
     xcdn_document_t *d = (xcdn_document_t *)mdoc;
     if (d->values_len > 0) sess_apply_manifest(s, d->values[0]);
   }
+  if (s->workspace_loaded &&
+      strcmp(s->workspace.canonical_root, c->workspace.canonical_root) != 0) {
+    e = asngn_seterr(c, ASNGN_ERR_CONFIG,
+                     "session %s belongs to workspace %s, not %s", slug,
+                     s->workspace.canonical_root,
+                     c->workspace.canonical_root);
+    goto fail;
+  }
+  s->workspace = c->workspace;
 
   /* transcript */
   e = sess_load_transcript(s);

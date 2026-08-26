@@ -115,6 +115,14 @@ static int fake_model_count_tokens(void *ud, const char *text) {
   return fake_count(text);
 }
 
+static int fake_model_count_prompt_tokens(void *ud, const char *system_text,
+                                          const char *user_text) {
+  (void)ud;
+  /* Eight tokens model the fixed two-message template and assistant
+   * generation marker used by the real backend. */
+  return fake_count(system_text) + fake_count(user_text) + 8;
+}
+
 static asngn_err fake_model_embed(void *ud, const char *text, float *out) {
   (void)ud;
   if (!text || !out) return ASNGN_ERR_INVALID;
@@ -128,6 +136,7 @@ asngn_model_iface fake_model_iface(fake_model *fm) {
   it.ud = fm;
   it.generate = fake_model_generate;
   it.count_tokens = fake_model_count_tokens;
+  it.count_prompt_tokens = fake_model_count_prompt_tokens;
   it.embed = fake_model_embed;
   it.destroy = fake_noop_destroy;
   return it;

@@ -31,8 +31,14 @@ double asngn_qpt(double q, size_t total_tokens) {
 }
 
 static double led_quality(const asngn_ledger_entry *e) {
-  double q = e->has_judge ? e->judge : 0.5;
-  if (e->has_user_fb) q += 0.3 * (double)e->user_fb;
+  /* Unknown quality is never invented as a neutral 0.5. QpT is a
+   * backwards-compatible diagnostic; external outcome gates own coding
+   * task success. Explicit feedback can provide a binary result when no
+   * judge ran. */
+  double q = e->has_judge ? e->judge
+                          : (e->has_user_fb && e->user_fb > 0 ? 1.0 : 0.0);
+  if (e->has_judge && e->has_user_fb)
+    q += 0.3 * (double)e->user_fb;
   if (q < 0.0) q = 0.0;
   if (q > 1.0) q = 1.0;
   return q;

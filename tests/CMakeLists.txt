@@ -60,6 +60,20 @@ foreach(test_name ${ASNGN_TEST_PROGRAMS})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()
 
+if(TARGET asngn-mcp)
+  add_test(NAME test_mcp_protocol
+    COMMAND ${CMAKE_COMMAND}
+      "-DMCP_EXE=$<TARGET_FILE:asngn-mcp>"
+      "-DMCP_ROOT_FLAG=--root"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/mcp_smoke.cmake")
+  set_tests_properties(test_mcp_protocol PROPERTIES TIMEOUT 60)
+endif()
+
+add_test(NAME test_model_manifest
+  COMMAND ${CMAKE_COMMAND}
+    "-DMANIFEST=${CMAKE_CURRENT_SOURCE_DIR}/../scripts/models.manifest.tsv"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/model_manifest_smoke.cmake")
+
 # test_json compiles the MCP-only codec directly (it is not in libasngn).
 if(TARGET test_json)
   target_sources(test_json PRIVATE ../src/json.c)

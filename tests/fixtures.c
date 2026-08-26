@@ -203,7 +203,7 @@ int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
                         "  },\n"
                         "  integration: {\n"
                         "    asper: { enable: false },\n"
-                        "    astls: {\n"
+                        "    astools: {\n"
                         "      enable: true,\n"
                         "      root: \"");
   if (e == ASNGN_OK) e = append_escaped(&b, registry_root);

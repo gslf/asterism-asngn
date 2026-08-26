@@ -1,0 +1,53 @@
+name: real-model-smoke
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+jobs:
+  cpu-gguf-turn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: asterism-asngn
+      - uses: actions/checkout@v4
+        with:
+          repository: gslf/asterism-asper
+          path: asterism-asper
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: gslf/asterism-astools
+          path: asterism-astools
+          submodules: recursive
+      - name: Cache verified GGUF sources
+        uses: actions/cache@v4
+        with:
+          path: asterism-asngn/demo/models
+          key: gguf-${{ hashFiles('asterism-asngn/scripts/models.manifest.tsv') }}
+      - name: Build CPU runtime
+        working-directory: asterism-asngn
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DASNGN_WITH_LLAMA=ON -DGGML_NATIVE=OFF
+          cmake --build build -j 4
+      - name: Fetch and verify pinned models
+        working-directory: asterism-asngn
+        run: scripts/fetch-models.sh demo --repair --install-tools
+      - name: Run blocking coding quality suite
+        working-directory: asterism-asngn
+        run: |
+          python3 tests/quality/run_quality.py \
+            --asngn ./build/asngn --engine-root ./demo \
+            --report ./build/quality-report.json \
+            --artifacts ./build/quality-artifacts
+      - name: Upload quality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coding-quality-report
+          path: |
+            asterism-asngn/build/quality-report.json
+            asterism-asngn/build/quality-artifacts

@@ -41,12 +41,17 @@
 #elif defined(__GNUC__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wpedantic"
+#elif defined(_MSC_VER)
+#pragma warning(push)
+#pragma warning(disable : 4201) /* nameless struct/union */
 #endif
 #include "llama.h"
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
 #pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#pragma warning(pop)
 #endif
 
 #if !defined(ASNGN_NO_THREADS)
@@ -115,6 +120,7 @@ static void mll_backend_init(void) {
 /* ---- backend state ------------------------------------------------------ */
 
 #define MLL_N_BATCH 512   /* prompt evaluation chunk size (generative)   */
+#define MLL_PENALTY_LAST_N 64 /* repeat-penalty window (tokens)          */
 #define MLL_EMBED_CTX 512 /* default embedding window when cfg->ctx <= 0 */
 
 typedef struct {
@@ -321,6 +327,18 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     }
     llama_sampler_chain_add(chain, grammar);
   }
+  if (p->repeat_penalty > 1.0) {
+    /* after the grammar mask so -inf survives the scaling: recent legal
+     * tokens are penalized, which breaks greedy phrase loops */
+    struct llama_sampler *pen = llama_sampler_init_penalties(
+        llama_vocab_n_tokens(u->vocab), MLL_PENALTY_LAST_N,
+        (float)p->repeat_penalty, 0.0f, 0.0f);
+    if (pen == NULL) {
+      e = ASNGN_ERR_NOMEM;
+      goto out;
+    }
+    llama_sampler_chain_add(chain, pen);
+  }
   if (p->temp <= 0.0) {
     struct llama_sampler *greedy = llama_sampler_init_greedy();
     if (greedy == NULL) {
@@ -425,6 +443,22 @@ static int mll_count_tokens(void *ud, const char *text) {
   return n < 0 ? (int)-n : (int)n;
 }
 
+static int mll_count_prompt_tokens(void *ud, const char *system_prompt,
+                                   const char *user_prompt) {
+  mll_ud *u = (mll_ud *)ud;
+  char *prompt = NULL;
+  llama_token *tok = NULL;
+  int32_t n_tok = 0;
+  asngn_err e = mll_apply_template(
+      u->chat_template, system_prompt != NULL ? system_prompt : "",
+      user_prompt != NULL ? user_prompt : "", &prompt);
+  if (e != ASNGN_OK) return -1;
+  e = mll_tokenize(u->vocab, prompt, true, true, &tok, &n_tok);
+  free(tok);
+  free(prompt);
+  return e == ASNGN_OK ? (int)n_tok : -1;
+}
+
 /* ---- embedding ---------------------------------------------------------- */
 
 static asngn_err mll_embed(void *ud, const char *text, float *out) {
@@ -512,7 +546,9 @@ asngn_err asngn_model_llama_create(asngn_ctx *c, const asngn_pool_entry *ent,
   u->embedding = ent->embedding;
 
   mparams = llama_model_default_params();
-  mparams.n_gpu_layers = 0;
+  /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps the
+   * model on the CPU. CPU-only builds ignore the value entirely. */
+  mparams.n_gpu_layers = ent->gpu_layers;
   u->model = llama_model_load_from_file(ent->path, mparams);
   if (u->model == NULL) {
     e = asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s': failed to load %s",
@@ -588,6 +624,7 @@ asngn_err asngn_model_llama_create(asngn_ctx *c, const asngn_pool_entry *ent,
 
   out->ud = u;
   out->count_tokens = mll_count_tokens;
+  out->count_prompt_tokens = mll_count_prompt_tokens;
   out->destroy = mll_destroy;
   if (u->embedding)
     out->embed = mll_embed;

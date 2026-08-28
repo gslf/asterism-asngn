@@ -530,6 +530,7 @@ void asngn_session_free(asngn_session *s) {
   free(s->blobs);
   for (i = 0; i < s->allow_n; i++) free(s->allow[i]);
   free(s->allow);
+  free(s->led);
   free(s->summary);
   free(s->project);
   free(s->last_user_msg);

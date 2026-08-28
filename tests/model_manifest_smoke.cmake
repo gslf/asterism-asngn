@@ -1,3 +1,7 @@
+if(POLICY CMP0057)
+  cmake_policy(SET CMP0057 NEW)
+endif()
+
 if(NOT DEFINED MANIFEST OR NOT EXISTS "${MANIFEST}")
   message(FATAL_ERROR "model manifest is missing")
 endif()

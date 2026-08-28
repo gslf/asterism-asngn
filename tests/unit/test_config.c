@@ -194,8 +194,7 @@ TEST(hard_errors_are_config) {
     "#asngn_config { cache: { hit_threshold: 0.9, adapt_threshold: 0.95 } }\n",
     "#asngn_config { detail: { default: \"gigantic\" } }\n",
     /* (0,1) would reward repetition */
-    "#asngn_config { models: { sampling: { decide: "
-    "{ repeat_penalty: 0.5 } } } }\n",
+    "#asngn_config { models: { sampling: { decide: { repeat_penalty: 0.5 } } } }\n",
   };
   char dir[256], path[300];
   asngn_ctx *c = bare_ctx();

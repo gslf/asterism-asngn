@@ -294,8 +294,8 @@ TEST(verbatim_skips_oversized_recent_turn) {
       "user", "assistant", "user", "assistant"};
   static const char *const texts[] = {
       "old", "ok", "new",
-      "This newest response is deliberately much too large for the tiny "
-      "verbatim budget and must not hide every older turn."};
+      ("This newest response is deliberately much too large for the tiny "
+       "verbatim budget and must not hide every older turn.")};
 
   ASSERT_TRUE(fx_setup(&f,
                        "  cache: { enable: false },\n"

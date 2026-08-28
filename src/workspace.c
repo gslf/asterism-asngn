@@ -87,8 +87,8 @@ static void hash_tree(asngn_sha256_ctx *h, ws_scan *scan, const char *root,
   if (dir == NULL || depth > 64) { free(dir); return; }
   if (os_list_dir(dir, &files, &nf) != ASNGN_OK) nf = 0;
   if (os_list_dirs(dir, &dirs, &nd) != ASNGN_OK) nd = 0;
-  qsort(files, nf, sizeof *files, name_cmp);
-  qsort(dirs, nd, sizeof *dirs, name_cmp);
+  if (nf > 1) qsort(files, nf, sizeof *files, name_cmp);
+  if (nd > 1) qsort(dirs, nd, sizeof *dirs, name_cmp);
   for (i = 0; i < nf; i++) {
     char *rel = relative[0] != '\0' ? os_path_join(relative, files[i])
                                      : asngn_strdup(files[i]);

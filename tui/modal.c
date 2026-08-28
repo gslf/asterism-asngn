@@ -233,7 +233,7 @@ void modal_draw_sessions(tui_app *a, tui_frame *f) {
     int sel = p->top + i == p->cur;
     int y = by + 2 + i;
     int cx = bx + 2;
-    char meta[96];
+    char meta[192];
     cx += d_put(f, cx, y, sel ? th->marker : " ", TFG_ACCENT,
                 TBG_DEFAULT, 0);
     cx += d_put(f, cx, y, " ", TFG_DIM, TBG_DEFAULT, 0);
@@ -243,7 +243,8 @@ void modal_draw_sessions(tui_app *a, tui_frame *f) {
     if (r->unreadable)
       snprintf(meta, sizeof meta, "  (unreadable)");
     else
-      snprintf(meta, sizeof meta, "  %zu turns %s %s tok %s %s%s%s%s",
+      snprintf(meta, sizeof meta,
+               "  %zu turns %.3s %.15s tok %.3s %.31s%s%.64s%s",
                r->turns, th->bullet, r->tok, th->bullet, r->age,
                r->project[0] != '\0' ? " [" : "",
                r->project[0] != '\0' ? r->project : "",

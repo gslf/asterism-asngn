@@ -371,7 +371,7 @@ typedef struct {
   char   slug[72];
   size_t turns;
   char   tok[16];     /* formatted spent tokens        */
-  char   age[16];     /* "3h ago" / "now" / "empty"    */
+  char   age[32];     /* "3h ago" / "now" / "empty"    */
   char   project[65]; /* "" = none                     */
   int    current;
   int    unreadable;  /* peek failed: shown dimmed     */

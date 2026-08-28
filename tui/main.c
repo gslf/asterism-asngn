@@ -1042,7 +1042,7 @@ static void handle_key(tui_app *a, const tui_key *k) {
             snprintf(p->confirm_del, sizeof p->confirm_del, "%s",
                      r->slug);
             snprintf(p->note, sizeof p->note,
-                     "d again deletes %s (irreversible)", r->slug);
+                     "d again deletes %.64s (irreversible)", r->slug);
           }
         }
       } else if (k->utf8[0] == 'q') {

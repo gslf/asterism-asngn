@@ -367,6 +367,7 @@ TEST(workspace_discovers_repository_identity) {
   fx f;
   asngn_workspace_info info;
   char *git = NULL, *refs = NULL, *head = NULL, *branch = NULL, *nested = NULL;
+  char *expected_root = NULL;
   static const char oid[] = "0123456789abcdef0123456789abcdef01234567\n";
 
   ASSERT_TRUE(fx_setup(&f, "  cache: { enable: false },\n"));
@@ -383,9 +384,12 @@ TEST(workspace_discovers_repository_identity) {
   ASSERT_OK(os_write_file(branch, oid, sizeof oid - 1));
   ASSERT_TRUE(fx_open_ctx_at(&f, nested));
   ASSERT_OK(asngn_workspace_get(f.c, &info));
-  ASSERT_EQ_STR(info.repository_root, f.root);
+  expected_root = os_realpath(f.root);
+  ASSERT_TRUE(expected_root != NULL);
+  ASSERT_EQ_STR(info.repository_root, expected_root);
   ASSERT_EQ_STR(info.branch, "main");
   ASSERT_EQ_STR(info.head, "0123456789abcdef0123456789abcdef01234567");
+  free(expected_root);
   free(git); free(refs); free(head); free(branch); free(nested);
   fx_drop(&f);
 }

@@ -42,7 +42,10 @@ static int fx_write_config(fx *f, const char *extra) {
                "    { id: \"std\", path: \"none.gguf\" },\n"
                "    { id: \"embed\", path: \"none.gguf\", "
                "embedding: true, dim: 16 },\n"
-               "  ] },\n"
+               /* compressor on its own fake: background folds must not
+                * race the light queue now that SIMPLE DIRECT turns
+                * generate on the light tier (frugal start) */
+               "  ], roles: { compressor: \"nano\" } },\n"
                "%s"
                "}\n",
                extra != NULL ? extra : "") > 0;
@@ -92,14 +95,16 @@ static void fx_drop(fx *f) {
   asngn_test_rmtree(f->root);
 }
 
-/* One scripted DIRECT turn (heuristic classifier, judge off, cache off). */
+/* One scripted DIRECT turn (heuristic classifier, judge off, cache
+ * off). SIMPLE DIRECT turns start one tier below the generator, so
+ * replies are scripted on the light fake. */
 static int fx_turn(fx *f, asngn_session *s, const char *msg,
                    const char *reply) {
   asngn_task *task = NULL;
   asngn_turn_result res;
   asngn_err e;
 
-  if (!fake_model_push(&f->stdm, reply)) return 0;
+  if (!fake_model_push(&f->light, reply)) return 0;
   if (asngn_submit(s, msg, NULL, NULL, NULL, &task) != ASNGN_OK) return 0;
   memset(&res, 0, sizeof res);
   e = asngn_task_wait(task, 30000, &res);
@@ -136,11 +141,11 @@ TEST(empty_session_golden) {
   asngn_session *s = NULL;
   asngn_turn_state t;
   asngn_prompt p;
-  char msg[] = "terza domanda";
+  char msg[] = "third question";
   int slot;
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
-  ASSERT_OK(asngn_session_open(f.c, "vuota", &s));
+  ASSERT_OK(asngn_session_open(f.c, "empty", &s));
   fx_probe_state(&f, s, msg, &t, &slot);
   ASSERT_TRUE(slot >= 0);
 
@@ -149,7 +154,7 @@ TEST(empty_session_golden) {
   ASSERT_EQ_STR(p.system_text,
                 "You are a capable, honest local assistant.");
   ASSERT_EQ_STR(p.user_text,
-                "## This turn\nuser: terza domanda\n\nINSTR\n");
+                "## This turn\nuser: third question\n\nINSTR\n");
   ASSERT_TRUE(p.tok_system > 0);
   ASSERT_EQ_INT((long long)p.tok_memory, 0);
   ASSERT_EQ_INT((long long)p.tok_catalog, 0);
@@ -167,13 +172,13 @@ TEST(assemble_deterministic) {
   asngn_session *s = NULL;
   asngn_turn_state t;
   asngn_prompt p1, p2;
-  char msg[] = "terza domanda";
+  char msg[] = "third question";
   int slot;
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
   ASSERT_OK(asngn_session_open(f.c, "gold", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "prima domanda", "Risposta uno.\n"));
-  ASSERT_TRUE(fx_turn(&f, s, "seconda domanda", "Risposta due.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "first question", "Response one.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "second question", "Response two.\n"));
   fx_probe_state(&f, s, msg, &t, &slot);
   ASSERT_TRUE(slot >= 0);
 
@@ -190,21 +195,21 @@ TEST(assemble_deterministic) {
                                    "You are a capable, honest local "
                                    "assistant."));
   ASSERT_TRUE(strstr(p1.user_text, "## Conversation\n") != NULL);
-  ASSERT_TRUE(strstr(p1.user_text, "user: prima domanda\n") != NULL);
-  ASSERT_TRUE(strstr(p1.user_text, "assistant: Risposta uno.\n") != NULL);
-  ASSERT_TRUE(strstr(p1.user_text, "user: seconda domanda\n") != NULL);
-  ASSERT_TRUE(strstr(p1.user_text, "assistant: Risposta due.\n") != NULL);
+  ASSERT_TRUE(strstr(p1.user_text, "user: first question\n") != NULL);
+  ASSERT_TRUE(strstr(p1.user_text, "assistant: Response one.\n") != NULL);
+  ASSERT_TRUE(strstr(p1.user_text, "user: second question\n") != NULL);
+  ASSERT_TRUE(strstr(p1.user_text, "assistant: Response two.\n") != NULL);
   ASSERT_TRUE(strstr(p1.user_text,
-                     "## This turn\nuser: terza domanda\n") != NULL);
+                     "## This turn\nuser: third question\n") != NULL);
   ASSERT_TRUE(strstr(p1.user_text, "INSTR") != NULL);
   ASSERT_TRUE(p1.tok_verbatim > 0);
 
   /* working items appear after a push, and the working count grows */
-  ASSERT_OK(asngn_work_push(f.c, &t, "nota operativa"));
+  ASSERT_OK(asngn_work_push(f.c, &t, "operational note"));
   ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p2));
   ASSERT_TRUE(strcmp(p1.user_text, p2.user_text) != 0);
-  ASSERT_TRUE(strstr(p2.user_text, "nota operativa") != NULL);
-  ASSERT_TRUE(strstr(p1.user_text, "nota operativa") == NULL);
+  ASSERT_TRUE(strstr(p2.user_text, "operational note") != NULL);
+  ASSERT_TRUE(strstr(p1.user_text, "operational note") == NULL);
   ASSERT_TRUE(p2.tok_working > p1.tok_working);
   ASSERT_EQ_STR(p1.system_text, p2.system_text);
   asngn_prompt_free(&p1);
@@ -219,33 +224,46 @@ TEST(verbatim_budget_pin_first) {
   asngn_session *s = NULL;
   asngn_turn_state t;
   asngn_prompt p;
-  char msg[] = "quarta domanda";
+  asngn_turn tr;
+  char msg[] = "fourth question";
   int slot;
+  size_t i;
   static const char LONGA[] =
-      "Questa risposta contiene molte parole in fila cosi che la sua "
-      "resa superi largamente il budget verbatim minuscolo del test.\n";
+      "This response strings together many words in a row so that its "
+      "rendering far exceeds the tiny verbatim budget of the test.\n";
   static const char LONGB[] =
-      "Anche questa seconda risposta occupa parecchi token e quindi non "
-      "puo mai entrare in un budget di appena otto token totali.\n";
+      "This other response also occupies quite a few tokens and can "
+      "therefore never fit a budget of just eight tokens in total.\n";
 
   /* tiny verbatim budget: 8 tokens (~32 rendered bytes) */
   ASSERT_TRUE(fx_setup(&f,
                        "  cache: { enable: false },\n"
                        "  context: { verbatim_tokens: 8 },\n"));
   ASSERT_OK(asngn_session_open(f.c, "tight", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "k1", LONGA));
-  ASSERT_TRUE(fx_turn(&f, s,
-                      "questa seconda domanda contiene molte piu parole "
-                      "della prima", LONGB));
+  for (i = 0; i < 4; i++) {
+    static const char *const roles[] = {
+        "user", "assistant", "user", "assistant"};
+    const char *texts[] = {
+        "k1", LONGA,
+        "this second question contains many more words than the first",
+        LONGB};
+    memset(&tr, 0, sizeof tr);
+    tr.n = i + 1;
+    snprintf(tr.role, sizeof tr.role, "%s", roles[i]);
+    tr.text = (char *)texts[i];
+    tr.at = 1755150000 + (long long)i;
+    ASSERT_OK(asngn_session_append_turn(s, &tr));
+  }
   fx_probe_state(&f, s, msg, &t, &slot);
   ASSERT_TRUE(slot >= 0);
 
-  /* every line overflows the budget (newest first, whole items only):
-   * nothing fits, so the zone vanishes together with its heading */
+  /* Oversized recent turns are skipped rather than terminating the search;
+   * the tiny old user turn still fits as a whole item. */
   ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
-  ASSERT_TRUE(strstr(p.user_text, "## Conversation") == NULL);
-  ASSERT_EQ_INT((long long)p.tok_verbatim, 0);
-  ASSERT_TRUE(strstr(p.user_text, "## This turn\nuser: quarta domanda\n")
+  ASSERT_TRUE(strstr(p.user_text, "## Conversation\nuser: k1\n") != NULL);
+  ASSERT_TRUE(strstr(p.user_text, LONGB) == NULL);
+  ASSERT_TRUE(p.tok_verbatim > 0 && p.tok_verbatim <= 8);
+  ASSERT_TRUE(strstr(p.user_text, "## This turn\nuser: fourth question\n")
               != NULL);
   asngn_prompt_free(&p);
 
@@ -255,8 +273,81 @@ TEST(verbatim_budget_pin_first) {
   ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
   ASSERT_TRUE(strstr(p.user_text, "## Conversation\nuser: k1\n") != NULL);
   ASSERT_TRUE(strstr(p.user_text, "assistant:") == NULL);
-  ASSERT_TRUE(strstr(p.user_text, "seconda domanda") == NULL);
+  ASSERT_TRUE(strstr(p.user_text, "second question") == NULL);
   ASSERT_TRUE(p.tok_verbatim > 0);
+  asngn_prompt_free(&p);
+  fx_probe_dispose(&t);
+  asngn_session_close(s);
+  fx_drop(&f);
+}
+
+TEST(verbatim_skips_oversized_recent_turn) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_turn_state t;
+  asngn_prompt p;
+  asngn_turn tr;
+  char msg[] = "current";
+  int slot;
+  size_t i;
+  static const char *const roles[] = {
+      "user", "assistant", "user", "assistant"};
+  static const char *const texts[] = {
+      "old", "ok", "new",
+      "This newest response is deliberately much too large for the tiny "
+      "verbatim budget and must not hide every older turn."};
+
+  ASSERT_TRUE(fx_setup(&f,
+                       "  cache: { enable: false },\n"
+                       "  context: { verbatim_tokens: 8 },\n"));
+  ASSERT_OK(asngn_session_open(f.c, "skip-large", &s));
+  for (i = 0; i < 4; i++) {
+    memset(&tr, 0, sizeof tr);
+    tr.n = i + 1;
+    snprintf(tr.role, sizeof tr.role, "%s", roles[i]);
+    tr.text = (char *)texts[i];
+    tr.at = 1755150000 + (long long)i;
+    ASSERT_OK(asngn_session_append_turn(s, &tr));
+  }
+  fx_probe_state(&f, s, msg, &t, &slot);
+  ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
+
+  ASSERT_TRUE(strstr(p.user_text, "## Conversation\n") != NULL);
+  ASSERT_TRUE(strstr(p.user_text, "user: new\n") != NULL);
+  ASSERT_TRUE(strstr(p.user_text, "deliberately much too large") == NULL);
+  ASSERT_TRUE(p.tok_verbatim <= 8);
+
+  asngn_prompt_free(&p);
+  fx_probe_dispose(&t);
+  asngn_session_close(s);
+  fx_drop(&f);
+}
+
+TEST(working_budget_counts_mandatory_prompt) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_turn_state t;
+  asngn_prompt p;
+  char msg[] = "q";
+  int slot;
+
+  ASSERT_TRUE(fx_setup(&f,
+                       "  cache: { enable: false },\n"
+                       "  context: { working_tokens: 20 },\n"));
+  ASSERT_OK(asngn_session_open(f.c, "working-hard-cap", &s));
+  fx_probe_state(&f, s, msg, &t, &slot);
+  ASSERT_OK(asngn_work_push(
+      f.c, &t,
+      "old optional evidence that is much too long to remain in this zone"));
+  ASSERT_OK(asngn_work_push(f.c, &t, "keep"));
+  ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
+
+  ASSERT_TRUE(p.tok_working <= 20);
+  ASSERT_TRUE(strstr(p.user_text, "old optional evidence") == NULL);
+  ASSERT_TRUE(strstr(p.user_text, "keep\n") != NULL);
+  ASSERT_TRUE(strstr(p.user_text, "user: q\n") != NULL);
+  ASSERT_TRUE(strstr(p.user_text, "INSTR\n") != NULL);
+
   asngn_prompt_free(&p);
   fx_probe_dispose(&t);
   asngn_session_close(s);
@@ -268,13 +359,13 @@ TEST(summary_zone) {
   asngn_session *s = NULL;
   asngn_turn_state t;
   asngn_prompt p;
-  char msg[] = "terza domanda";
+  char msg[] = "third question";
   int slot;
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
   ASSERT_OK(asngn_session_open(f.c, "summ", &s));
   free(s->summary);
-  s->summary = asngn_strdup("Riassunto.");
+  s->summary = asngn_strdup("Summary note.");
   ASSERT_TRUE(s->summary != NULL);
   fx_probe_state(&f, s, msg, &t, &slot);
   ASSERT_TRUE(slot >= 0);
@@ -284,10 +375,10 @@ TEST(summary_zone) {
    * before the user text — inline golden for the whole system text */
   ASSERT_EQ_STR(p.system_text,
                 "You are a capable, honest local assistant.\n\n"
-                "## Conversation summary\nRiassunto.");
+                "## Conversation summary\nSummary note.");
   ASSERT_TRUE(p.tok_summary > 0);
   ASSERT_EQ_STR(p.user_text,
-                "## This turn\nuser: terza domanda\n\nINSTR\n");
+                "## This turn\nuser: third question\n\nINSTR\n");
   asngn_prompt_free(&p);
   fx_probe_dispose(&t);
   asngn_session_close(s);
@@ -300,7 +391,7 @@ TEST(global_budget_reports_zones) {
   asngn_turn_state t;
   asngn_prompt p;
   asngn_context_diagnostics d;
-  char msg[] = "messaggio che deve rientrare nel budget globale";
+  char msg[] = "a message that must fit inside the global budget";
   int slot;
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
@@ -327,6 +418,8 @@ TEST_LIST = {
   TEST_ENTRY(empty_session_golden),
   TEST_ENTRY(assemble_deterministic),
   TEST_ENTRY(verbatim_budget_pin_first),
+  TEST_ENTRY(verbatim_skips_oversized_recent_turn),
+  TEST_ENTRY(working_budget_counts_mandatory_prompt),
   TEST_ENTRY(summary_zone),
   TEST_ENTRY(global_budget_reports_zones),
 };

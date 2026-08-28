@@ -13,29 +13,77 @@
 
 #include "engine_fx.h"
 
-/* ── a. THINK limit injects the "enough thinking" notice ──────────────── */
+/* ── a. THINK limit preserves analysis and steers the next pass ───────── */
 
 TEST(think_limit) {
   eng_fx f;
   asngn_turn_result r;
-  int i;
 
   memset(&r, 0, sizeof r);
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
-  for (i = 0; i < 6; i++)
-    ASSERT_TRUE(fake_model_push(&f.light,
-                                "THINK | penso ancora un momento\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "ANSWER\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Risposta finale.\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"think\", input: \"inspect the "
+                              "available evidence\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"think\", input: \"choose the "
+                              "next useful action\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Final answer.\n"));
 
-  ASSERT_OK(eng_turn(&f, "usa il tool fake con calma", NULL, NULL, &r));
-  ASSERT_EQ_STR(r.answer, "Risposta finale.\n");
+  ASSERT_OK(eng_turn(&f, "use the fake tool calmly", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "Final answer.\n");
 
-  /* think_limit (2 in a row / 4 per turn) tripped and the notice landed
-   * in the working zone the later decision passes saw */
-  ASSERT_CONTAINS(f.light.last_user, "[notice] enough thinking");
+  /* Both notes remain in context, then THINK is removed for exactly the next
+   * constrained pass.  The guard steers action; it does not discard analysis
+   * or force the response phase. */
+  ASSERT_CONTAINS(f.light.last_user, "THINK: inspect the available evidence");
+  ASSERT_CONTAINS(f.light.last_user, "THINK: choose the next useful action");
+  ASSERT_CONTAINS(f.light.last_user, "[notice] thinking budget complete");
+  ASSERT_NOT_CONTAINS(f.light.last_grammar, "think     ::=");
+  ASSERT_CONTAINS(f.light.last_user, "Use the analysis already recorded");
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+/* A compile/test retry is a new observation after a source mutation, even
+ * when its tool, command, and canonical arguments are byte-identical. */
+TEST(identical_call_after_workspace_change) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_stats st;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo",
+                        "safety: { autoconfirm: \"allow\" },"));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS MODERATE | DETAIL NORMAL | MODE PLAN "
+                              "| TASK EDIT\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"call\", why: \"compile the server\", input: fake.run "
+      "{msg: \"gcc server.c -o server\"}, success: \"exit zero\", "
+      "fallback: \"create the missing source\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"call\", why: \"create the missing source\", input: "
+      "fake.mut {msg: \"write server.c\"}, success: \"source exists\", "
+      "fallback: \"report the write failure\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"call\", why: \"compile the rewritten server\", input: "
+      "fake.run {msg: \"gcc server.c -o server\"}, success: \"exit zero\", "
+      "fallback: \"report compiler diagnostics\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "The rewritten server compiles.\n"));
+
+  ASSERT_OK(eng_turn(&f, "fix the server and compile it", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "The rewritten server compiles.\n");
+  ASSERT_OK(asngn_get_stats(f.c, &st));
+  ASSERT_EQ_INT((long long)st.tool_calls, 3);
+  ASSERT_NOT_CONTAINS(f.stdm.last_user, "asngn/repeat");
 
   asngn_turn_result_free(&r);
   eng_drop(&f);
@@ -52,22 +100,30 @@ TEST(identical_call) {
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "CALL fake.run {msg: \"a\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "CALL fake.run {msg: \"a\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "ANSWER\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Gia fatto.\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"call\", why: \"using the tool\", "
+                              "input: fake.run {msg: \"a\"}, success: "
+                              "\"RESULT with a\", fallback: \"answer\"}"
+                              "\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"call\", why: \"using the tool\", "
+                              "input: fake.run {msg: \"a\"}, success: "
+                              "\"RESULT with a\", fallback: \"answer\"}"
+                              "\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Already done.\n"));
 
-  ASSERT_OK(eng_turn(&f, "usa il tool fake due volte", NULL, NULL, &r));
-  ASSERT_EQ_STR(r.answer, "Gia fatto.\n");
+  ASSERT_OK(eng_turn(&f, "use the fake tool twice", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "Already done.\n");
 
   /* the second, identical call was blocked without dispatch */
   ASSERT_CONTAINS(f.light.last_user, "asngn/repeat");
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.tool_calls, 1);
 
-  /* the pass after the blocked repeat had CALL muted: no CALL protocol
-   * line, and the instruction explains why */
-  ASSERT_NOT_CONTAINS(f.light.last_user, "CALL <tool>.<command>");
+  /* the pass after the blocked repeat had CALL muted: no call action
+   * template in the instruction, and the instruction explains why */
+  ASSERT_NOT_CONTAINS(f.light.last_user, "<tool>.<command>");
   ASSERT_CONTAINS(f.light.last_user, "Take a different step");
 
   asngn_turn_result_free(&r);
@@ -89,21 +145,85 @@ TEST(futile_steps) {
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "CALL fake.run {msg: \"a\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "RECALL | cosa so di a?\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "RECALL | cosa so di a?\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "RECALL | cosa so di a?\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "THINK | mai raggiunto\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Risposta dai risultati.\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"call\", why: \"using the tool\", "
+                              "input: fake.run {msg: \"a\"}, success: "
+                              "\"RESULT with a\", fallback: \"answer\"}"
+                              "\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"recall\", why: \"context on "
+                              "a\", input: \"what do I know of a?\", success: "
+                              "\"notes on a\", fallback: \"proceed\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"recall\", why: \"context on "
+                              "a\", input: \"what do I know of a?\", success: "
+                              "\"notes on a\", fallback: \"proceed\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"recall\", why: \"context on "
+                              "a\", input: \"what do I know of a?\", success: "
+                              "\"notes on a\", fallback: \"proceed\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"think\", input: \"never "
+                              "reached\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Answer from the results.\n"));
 
-  ASSERT_OK(eng_turn(&f, "usa il tool fake e rispondi", NULL, NULL, &r));
-  ASSERT_EQ_STR(r.answer, "Risposta dai risultati.\n");
+  ASSERT_OK(eng_turn(&f, "use the fake tool and answer", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "Answer from the results.\n");
 
   /* CALL + RECALL + 2 blocked RECALLs = 4 steps; the 5th decision never
    * ran (the futile guard ended the loop first) */
   ASSERT_EQ_INT(f.s->log[1].steps, 4);
   ASSERT_EQ_INT(f.light.calls, 4);
   ASSERT_CONTAINS(f.stdm.last_user, "no further progress");
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(futile_steps_do_not_skip_code_verification) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_stats st;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo",
+                        "safety: { autoconfirm: \"allow\" },"));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS MODERATE | DETAIL NORMAL | MODE PLAN "
+                              "| TASK EDIT\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"call\", why: \"rewrite source\", input: fake.mut "
+      "{msg: \"rewrite server.c\"}, success: \"source changed\", "
+      "fallback: \"report failure\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"recall\", why: \"look for build notes\", input: "
+      "\"server build notes\", success: \"build command\", fallback: "
+      "\"use gcc\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"recall\", why: \"look for build notes\", input: "
+      "\"server build notes\", success: \"build command\", fallback: "
+      "\"use gcc\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"recall\", why: \"look for build notes\", input: "
+      "\"server build notes\", success: \"build command\", fallback: "
+      "\"use gcc\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"call\", why: \"verify the rewrite\", input: fake.run "
+      "{msg: \"gcc server.c -o server\"}, success: \"exit zero\", "
+      "fallback: \"report diagnostics\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "The rewrite was verified.\n"));
+
+  ASSERT_OK(eng_turn(&f, "rewrite and verify server.c", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "The rewrite was verified.\n");
+  ASSERT_OK(asngn_get_stats(f.c, &st));
+  ASSERT_EQ_INT((long long)st.tool_calls, 2);
+  ASSERT_CONTAINS(f.stdm.last_user, "gcc server.c -o server");
 
   asngn_turn_result_free(&r);
   eng_drop(&f);
@@ -121,14 +241,15 @@ TEST(step_budget) {
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
   for (i = 0; i < 5; i++)
-    ASSERT_TRUE(fake_model_push(&f.light, "THINK | x\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Ecco cosa so.\n"));
+    ASSERT_TRUE(fake_model_push(&f.light,
+                                "{action: \"think\", input: \"x\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Here is what I know.\n"));
 
-  ASSERT_OK(eng_turn(&f, "usa il tool fake senza fermarti", NULL, NULL,
+  ASSERT_OK(eng_turn(&f, "use the fake tool without stopping", NULL, NULL,
                      &r));
 
   /* the user still gets an answer built from what was gathered */
-  ASSERT_EQ_STR(r.answer, "Ecco cosa so.\n");
+  ASSERT_EQ_STR(r.answer, "Here is what I know.\n");
 
   /* the exhaustion notice reached a model-visible zone: the forced
    * answer pass (std) always sees it; a late decision pass may too */
@@ -159,13 +280,21 @@ TEST(tool_cap) {
   ASSERT_TRUE(eng_setup(&f, "echo", "safety: { max_tool_calls: 1 },"));
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "CALL fake.run {msg: \"a\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "CALL fake.run {msg: \"b\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "ANSWER\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Budget finito.\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"call\", why: \"first call\", "
+                              "input: fake.run {msg: \"a\"}, success: "
+                              "\"RESULT with a\", fallback: \"answer\"}"
+                              "\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"call\", why: \"second "
+                              "call\", input: fake.run {msg: \"b\"}, "
+                              "success: \"RESULT with b\", fallback: "
+                              "\"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Budget exhausted.\n"));
 
-  ASSERT_OK(eng_turn(&f, "usa il tool fake due volte", NULL, NULL, &r));
-  ASSERT_EQ_STR(r.answer, "Budget finito.\n");
+  ASSERT_OK(eng_turn(&f, "use the fake tool twice", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "Budget exhausted.\n");
 
   /* the second (different) call hit the cap instead of dispatching */
   ASSERT_CONTAINS(f.light.last_user, "asngn/tool-cap");
@@ -233,9 +362,10 @@ TEST(cancel_turn) {
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
-  ASSERT_TRUE(fake_model_push(&f.light, "THINK | pausa\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"think\", input: \"pause\"}\n"));
 
-  ASSERT_OK(asngn_submit(f.s, "usa il tool fake con pausa", NULL, NULL,
+  ASSERT_OK(asngn_submit(f.s, "use the fake tool with a pause", NULL, NULL,
                          NULL, &t));
   ASSERT_OK(asngn_task_cancel(t));
   e = asngn_task_wait(t, 60000, &r);
@@ -251,7 +381,9 @@ TEST(cancel_turn) {
 TEST_LIST = {
   TEST_ENTRY(think_limit),
   TEST_ENTRY(identical_call),
+  TEST_ENTRY(identical_call_after_workspace_change),
   TEST_ENTRY(futile_steps),
+  TEST_ENTRY(futile_steps_do_not_skip_code_verification),
   TEST_ENTRY(step_budget),
   TEST_ENTRY(tool_cap),
   TEST_ENTRY(input_gate),

@@ -97,7 +97,19 @@ void tui_events_ingest(tui_app *a, const char *line_xcdn) {
   const char *kind;
 
   doc = xcdn_parse(line_xcdn, &err);
-  if (doc == NULL) return; /* malformed telemetry never hurts the UI */
+  if (doc == NULL) {
+    /* a dropped event can be one the engine is blocked on (confirm),
+     * so a malformed line gets a visible row instead of silence */
+    tui_ev *e = ev_push(&a->evs);
+    snprintf(e->kind, sizeof e->kind, "error");
+    snprintf(e->name, sizeof e->name, "bad event");
+    snprintf(e->extra, sizeof e->extra, "%.31s",
+             xcdn_error_kind_str(err.kind));
+    e->red = 1;
+    a->dirty = 1;
+    a->structural = 1;
+    return;
+  }
   node = xcdn_document_get(doc, 0);
   if (node != NULL && node->value != NULL &&
       node->value->type == XCDN_VAL_OBJECT)
@@ -128,10 +140,6 @@ void tui_events_ingest(tui_app *a, const char *line_xcdn) {
     if (jb(data, "escalated", 0)) {
       snprintf(e->name, sizeof e->name, "route");
       snprintf(e->extra, sizeof e->extra, "escalated");
-      e->amber = 1;
-    } else if (jb(data, "budget_frugal", 0)) {
-      snprintf(e->name, sizeof e->name, "route");
-      snprintf(e->extra, sizeof e->extra, "frugal");
       e->amber = 1;
     } else {
       snprintf(e->name, sizeof e->name, "route");

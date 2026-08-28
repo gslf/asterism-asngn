@@ -89,7 +89,7 @@ static asngn_err fake_model_generate(void *ud, const char *system_prompt,
                                      char **out_text, int *out_tokens_in,
                                      int *out_tokens_out) {
   fake_model *fm = (fake_model *)ud;
-  const char *reply = "ANSWER\n";
+  const char *reply = "{action: \"answer\"}\n";
   (void)p;
   if (!fm || !out_text) return ASNGN_ERR_INVALID;
   if (cancel && *cancel) return ASNGN_ERR_CANCELLED;

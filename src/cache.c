@@ -398,6 +398,7 @@ asngn_err asngn_cache_init(asngn_ctx *c) {
   asngn_time now;
 
   if (c == NULL || c->cache_dir == NULL) return ASNGN_ERR_INVALID;
+  if (!c->cfg.cache_enable) return ASNGN_OK;
   (void)os_mkdir_p(c->cache_dir);
   path = cache_sem_path(c);
   if (path == NULL)
@@ -457,8 +458,10 @@ asngn_err asngn_cache_init(asngn_ctx *c) {
 void asngn_cache_shutdown(asngn_ctx *c) {
   size_t i;
   if (c == NULL) return;
-  (void)asngn_cache_compact(c);   /* best effort; also saves the vectors */
-  (void)asngn_embedcache_save(c); /* best effort if the compact failed   */
+  if (c->cfg.cache_enable) {
+    (void)asngn_cache_compact(c);   /* also saves the vectors */
+    (void)asngn_embedcache_save(c); /* fallback if compact failed */
+  }
   for (i = 0; i < c->cache_n; i++) cache_entry_free(&c->cache[i]);
   free(c->cache);
   c->cache = NULL;

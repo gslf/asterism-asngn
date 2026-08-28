@@ -6,7 +6,7 @@ An outcome-gated agentic coding engine for small local LLMs.
 
 - **Zoned context** — system · memory (Asper) · tool catalog (astools) · rolling summary · verbatim turns · working zone, each under a hard token budget, assembled deterministically (golden-tested).
 - **Folding** — old turns compress into the rolling summary via the light model, with an extractive fallback; oversized tool output is digested to a short summary plus an on-disk blob the model can reopen slice by slice (`OPEN B1`).
-- **Two-pass turns** — cheap grammar-constrained decision passes (`CALL` / `RECALL` / `OPEN` / `THINK` / `CLARIFY` / `ANSWER`) choose the action; only the final answer runs on the expensive tier, under an explicit terse/normal/rich budget.
+- **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; coding and complex work is orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
 - **Semantic cache** — embedding-keyed reuse and light-tier adaptation of previous answers; tool-touched entries are never replayed, only surfaced as plan hints; a world-epoch counter ties cache validity to destructive tool activity. A separate exact-key cache short-circuits repeated read-only tool calls.
 - **Safety** — input/plan/action/output gates, identical-call and oscillation guards, stall watchdog, step and tool caps, secret redaction, human confirmation for destructive tools, an optional judge pass — all measured in the ledger, never hidden.
 - **Telemetry** — every token attributed to a zone, role, and tier; the per-turn ledger records spend and savings. QpT remains diagnostic only: coding quality is gated by task success, passing tests, applicable patches, valid tool calls, regressions, latency, and memory.
@@ -63,6 +63,25 @@ git clone --recurse-submodules https://github.com/gslf/asterism-astools
 
 All commands run from inside `asterism-asngn`. Pick **one** configure line
 (CPU or GPU), then build.
+
+No manual step is needed for the vendored llama.cpp: asper ships local
+patches under `asterism-asper/deps/patches/llama/` (currently one that
+stops a grammar-sampler edge case from aborting the whole process) and its
+CMake applies them to the `deps/llama.cpp` submodule at configure time,
+idempotently — a fresh clone or a submodule re-checkout just needs a
+re-run of cmake, which happens on the next build anyway. `git` must be on
+PATH (it already is if you cloned). The submodule will show up as
+"modified content" in `git status`; that is the applied patch, not local
+noise. If a future submodule bump makes a patch stop applying, the
+configure fails loudly with instructions instead of silently building an
+unpatched llama.
+
+The engine is model-agnostic by construction: every llama.cpp call that
+model-controlled data reaches (tokenize, chat template, decode/encode,
+sampler) goes through `src/llama_guard.cpp`, a C++ shim that converts any
+exception llama.cpp lets escape into a normal model error. A model whose
+tokenizer, template, or grammar interaction misbehaves degrades that one
+turn; it can no longer kill the process.
 
 #### Linux
 
@@ -200,8 +219,8 @@ powershell -File scripts\fetch-models.ps1 $env:USERPROFILE\asngn -InstallTools
 Without this flag the model downloader never changes the tool registry.
 
 Without the registry the engine still runs, but the model can never act:
-the tool catalog is empty, the decision grammar drops the `CALL`
-alternative, and every request is answered chat-only.
+the tool catalog is empty, the decision grammar drops the `call`
+action, and every request is answered chat-only.
 
 ## Running
 
@@ -209,39 +228,104 @@ POSIX (binaries in `build/`):
 
 ```bash
 # interactive TUI (dark theme, yellow accent)
-./build/asngn --root ~/asngn --workspace /path/to/repository
+./build/asngn
 ```
 
 ```bash
 # one-shot headless turn for scripts and pipes
-./build/asngn --root ~/asngn --workspace /path/to/repository --once "fix the failing tests"
+./build/asngn --once "create a small C++ program"
 ```
 
 ```bash
 # MCP server over stdio
-./build/asngn-mcp --root ~/asngn --workspace /path/to/repository
+./build/asngn-mcp
 ```
 
 Windows (binaries in `build\Release\`; the TUI needs a VT-capable console —
 any Windows 10+ console works, Windows Terminal recommended):
 
-```bash
-.\build\Release\asngn.exe --root $env:USERPROFILE\asngn
+```powershell
+.\build\Release\asngn.exe
 ```
 
-```bash
-.\build\Release\asngn.exe --root $env:USERPROFILE\asngn --once "explain the torn-tail rule"
+```powershell
+.\build\Release\asngn.exe --once "create a small C++ program"
 ```
 
-```bash
-.\build\Release\asngn-mcp.exe --root $env:USERPROFILE\asngn
+```powershell
+.\build\Release\asngn-mcp.exe
 ```
 
-The engine root holds everything as human-readable xCDN text:
-`sessions/<slug>/{session,transcript,summary,ledger}.xcdn`, blobs, caches,
-and telemetry. Configuration lives in `<engine-root>/config.xcdn`
-(discovered automatically; `--config` overrides). Without a config file
-the built-in defaults apply.
+With no arguments the engine root is `~/asngn` (`%USERPROFILE%\asngn` on
+Windows), and `<engine-root>/config.xcdn` is discovered automatically.
+`engine.root` and `integration.astools.workspace` belong in that file;
+`--root`, `--config`, and `--workspace` are explicit overrides, not required
+startup ceremony.
+
+Reusable starter configurations live together under [`examples/`](examples/README.md):
+one for embedded GGUF models, one for LM Studio, and a companion astools
+policy. Copy them to a separate engine root and replace the marked model/tool
+paths. The repository itself is not an engine root and should never accumulate
+sessions, memory, cache, telemetry, logs, models, or generated workspaces.
+
+By default `integration.astools.workspace: "session"` gives every session an
+isolated writable tree at `sessions/<slug>/workspace/`. Relative tool paths
+are resolved only there. Engine metadata (`session.xcdn`, transcript, ledger,
+blobs) stays beside the workspace and is never exposed as the tool working
+directory. Set a concrete workspace path, or pass `--workspace`, only when a
+session is deliberately meant to operate on an external checkout.
+
+## Shared model runtime and API providers
+
+asngn and embedded Asper share one `asmodel` runtime. Asper's curator
+borrows the configured compressor slot and retrieval borrows the embedder
+slot, so weights and reusable contexts/KV allocations are not loaded twice.
+Standalone Asper/MCP creates its own manager and remains independent.
+
+Every pool entry may be an embedded GGUF or an OpenAI-compatible endpoint:
+
+```xcdn
+#asngn_config {
+  models: {
+    max_resident: 3,
+    max_ram_mb: 16000,
+    max_vram_mb: 12000,
+    pool: [
+      {
+        id: "remote-chat", backend: "openai",
+        base_url: "http://127.0.0.1:1234/v1",
+        model: "qwen3-8b",
+        api_key_env: "LOCAL_LLM_API_KEY",
+        api_grammar: "lmstudio", // "none" | "llama" | "vllm" | "lmstudio"
+        reasoning_effort: "none", // suppress hidden reasoning when supported
+        ctx: 32768, warm: true, kv_cache: true,
+      },
+      {
+        id: "remote-embed", backend: "openai",
+        base_url: "http://127.0.0.1:1234/v1",
+        model: "text-embedding-nomic-embed-text-v1.5",
+        embedding: true, dim: 768, ctx: 512,
+      },
+    ],
+    roles: {
+      router: "remote-chat", planner: "remote-chat",
+      generator: "remote-chat", compressor: "remote-chat",
+      adapter: "remote-chat", judge: "remote-chat",
+      embedder: "remote-embed",
+    },
+  },
+}
+```
+
+`api_key_env` is the name of an environment variable, not the credential.
+`reasoning_effort` is optional (`none`, `minimal`, `low`, `medium`, or
+`high`). For reasoning-capable local models in LM Studio, `none` avoids
+spending most of a tool turn on hidden reasoning before the constrained
+decision.
+`ram_mb`/`vram_mb` may be declared per entry when automatic estimates
+are not appropriate; the manager evicts the least-recently-used idle model
+to stay within resident, RAM and VRAM budgets. `warm: false` leaves a slot
+lazy.
 
 ## GPU vs CPU at runtime
 
@@ -263,11 +347,11 @@ the 7B model should claim several GB.
 
 ## Bigger context and longer answers
 
-The defaults are sized for small machines (8k context, answers capped at
-1024 tokens). The Qwen2.5 GGUFs natively support **32k context**; a
-machine with ≥16 GB VRAM (or plenty of RAM on CPU) runs comfortably with
-all budgets raised. Drop this into `<engine-root>/config.xcdn` as a
-writing / knowledge-base profile:
+The defaults use a professional 32k profile: enough room for substantial
+tool traces, source drafts, and long-form answers without starving the
+response pass. On machines with less memory, reduce the model contexts and
+zone budgets together rather than shrinking only the answer cap. The core
+profile is equivalent to:
 
 ```
 #asngn_config {
@@ -282,19 +366,32 @@ writing / knowledge-base profile:
       { id: "embed", path: "models/multilingual-e5-small-q8_0.gguf",
         ctx: 512, threads: 4, embedding: true, dim: 384 },
     ],
+    sampling: {
+      classify: { max_tokens: 64 },
+      decide:   { max_tokens: 1024 },
+      // Optional ceiling. Omit it to use all context remaining after the
+      // prompt; artifact drafts never inherit the answer detail cap.
+      draft:    { temp: 0.2, top_p: 0.9 },
+      judge:    { max_tokens: 128 },
+    },
   },
   detail: {                    // per-answer output budgets (tokens)
-    terse_tokens:  512,
-    normal_tokens: 2048,
-    rich_tokens:   8192,       // /detail rich, or --detail rich
+    terse_tokens:  1024,
+    normal_tokens: 4096,
+    rich_tokens:   10240,      // /detail rich, or --detail rich
   },
   context: {                   // zone budgets inside the 32k window
-    summary_tokens:  2000,
-    verbatim_tokens: 10000,
-    working_tokens:  4000,
-    fold_tokens:     400,
-    digest_threshold_chars: 8192,
-    digest_tokens:   512,
+    summary_tokens:  3072,
+    verbatim_tokens: 8192,
+    working_tokens:  6144,
+    safety_margin:   512,
+    fold_tokens:     1536,
+    digest_threshold_chars: 32768,
+    digest_tokens:   2048,
+    pinned_max:      32,
+  },
+  integration: {
+    astools: { catalog_chars: 24000 },
   },
   safety: {
     turn_deadline: "PT10M",    // long rich answers need the headroom
@@ -307,6 +404,30 @@ profile with everything on the GPU: the three Qwen models plus 32k KV
 caches settle around 11–12 GB; halve `ctx` (or set `gpu_layers: 0` on
 `light`) to fit smaller cards.
 
+## Interactive TUI controls
+
+The input prompt bar is always at least three rows high and expands up to
+six rows. Longer prompts remain editable in a scrolling viewport that follows
+the text insertion point during editing; arrows at the right edge indicate
+hidden rows. `Alt+↑` / `Alt+↓` scroll this viewport one line without
+moving the insertion point, and `Alt+PgUp` / `Alt+PgDn` scroll it one page.
+Typing or moving the insertion point resumes automatic following. Pressing
+`Enter` sends the prompt and clears the prompt bar immediately, including
+while ASNGN is waiting for a session fold.
+
+Chat and input history use separate controls:
+
+- `↑` / `↓` scroll the chat one line; `PgUp` / `PgDn` scroll one page.
+- `Alt+↑` / `Alt+↓` scroll the prompt one line; `Alt+PgUp` / `Alt+PgDn`
+  scroll it one page without moving the insertion point.
+- `Ctrl+P` / `Ctrl+N` select the previous or next prompt from input history.
+- `Home` / `End` jump to the beginning or end of the prompt and move its
+  viewport accordingly.
+- `Alt+Enter` or `Ctrl+J` inserts a newline without sending.
+- `Ctrl+U` / `Ctrl+K` / `Ctrl+W` delete to the start, end, or previous word;
+  `Ctrl+Y` restores the last deleted text.
+- `F1` opens the complete in-app key reference.
+
 ## Troubleshooting
 
 - **`ASNGN_ERR_MODEL: model 'std': failed to load models/...`** — the
@@ -315,7 +436,7 @@ caches settle around 11–12 GB; halve `ctx` (or set `gpu_layers: 0` on
 - **The model never calls tools — it answers with CLI instructions
   ("run `git status` yourself") instead of acting** — the tool registry is
   empty: `<engine-root>/tools/` has no packages, so the decision grammar
-  has no `call` rule and the model literally cannot emit `CALL`. Run
+  has no `call` action and the model literally cannot emit one. Run
   step 5 (copy `build/packages/*` into `<engine-root>/tools/`).
 - **`bert model needs to define token type count`** — the embedder GGUF
   lacks the `tokenizer.ggml.token_type_count` metadata key (common in

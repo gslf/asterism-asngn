@@ -13,13 +13,13 @@ TASKS = [
    "baseline":[["cmake","-S",".","-B","build"],["cmake","--build","build"],["ctest","--test-dir","build","--output-on-failure"]],
    "fail_index":2,
    "verify":[["cmake","-S",".","-B","build"],["cmake","--build","build"],["ctest","--test-dir","build","--output-on-failure"]],
-   "prompt":"Diagnostica il test C fallito in questo repository, correggi il bug con una patch minima, compila ed esegui tutti i test. Non limitarti a spiegare: usa gli strumenti e modifica i file."},
+   "prompt":"Diagnose the failing C test in this repository, fix the bug with a minimal patch, then build and run all the tests. Do not just explain: use the tools and modify the files."},
   {"name":"python_config_merge", "files":{
     "config_merge.py":"def merge_defaults(defaults, override):\n    result = defaults.copy()\n    for key, value in override.items():\n        if isinstance(value, dict) and isinstance(result.get(key), dict):\n            result[key] = value\n        else:\n            result[key] = value\n    return result\n",
     "test_config_merge.py":"import unittest\nfrom config_merge import merge_defaults\nclass MergeTests(unittest.TestCase):\n    def test_nested_override_preserves_defaults(self):\n        got = merge_defaults({'db': {'host': 'localhost', 'port': 5432}}, {'db': {'port': 6432}})\n        self.assertEqual(got, {'db': {'host': 'localhost', 'port': 6432}})\n    def test_inputs_are_not_mutated(self):\n        base = {'nested': {'keep': True}}\n        got = merge_defaults(base, {'nested': {'add': 1}})\n        got['nested']['add'] = 2\n        self.assertEqual(base, {'nested': {'keep': True}})\nif __name__ == '__main__': unittest.main()\n"},
    "baseline":[["python3","-m","unittest","-v"]], "fail_index":0,
    "verify":[["python3","-m","unittest","-v"]],
-   "prompt":"Comprendi perché i test Python di merge configurazione falliscono, implementa una correzione generale senza mutare gli input, poi esegui l'intera suite. Devi modificare davvero il repository usando gli strumenti."}
+   "prompt":"Understand why the Python config-merge tests fail, implement a general fix without mutating the inputs, then run the whole suite. You must actually modify the repository using the tools."}
 ]
 
 def run(cmd, cwd, timeout=180):
@@ -88,6 +88,10 @@ def main():
   results=[evaluate(a.asngn.resolve(),a.engine_root.resolve(),artifacts,t,a.timeout) for t in TASKS]
   report={"schema_version":1,"primary_metric":"all_tasks_successful","qpt_role":"diagnostic_only","passed":all(r["task_success"] for r in results),"task_success_rate":sum(r["task_success"] for r in results)/len(results),"tests_passed":sum(r["tests_passed"] for r in results),"patches_applicable":sum(r["patch_applicable"] for r in results),"tool_calls_valid":all(r["invalid_tool_calls"]==0 for r in results),"useless_attempts":sum(r["guard_trips"] for r in results),"regressions":sum(not r["tests_passed"] for r in results),"latency_ms":sum(r["latency_ms"] for r in results),"peak_rss_kb":max(r["peak_rss_kb"] for r in results),"tasks":results}
   a.report.parent.mkdir(parents=True,exist_ok=True); a.report.write_text(json.dumps(report,indent=2)+"\n",encoding="utf-8")
+  # Routing calibration: the engine's classifier reads this back as the
+  # eval-suite evidence axis (src/route.c, calibration/quality.xcdn).
+  calib=a.engine_root.resolve()/"calibration"; calib.mkdir(parents=True,exist_ok=True)
+  (calib/"quality.xcdn").write_text(f'#quality {{ schema: 1, task_success_rate: {report["task_success_rate"]:.4f}, tasks: {len(results)}, guard_trips: {report["useless_attempts"]} }}\n',encoding="utf-8")
   print(json.dumps({k:v for k,v in report.items() if k!="tasks"},indent=2))
   for r in results: print(f"{r['name']}: {'PASS' if r['task_success'] else 'FAIL'}")
   return 0 if report["passed"] else 1

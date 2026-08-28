@@ -56,33 +56,42 @@ TEST(defaults_spot_check) {
   ASSERT_EQ_STR(cfg.role_generator, "std");
   ASSERT_EQ_STR(cfg.role_embedder, "embed");
   ASSERT_EQ_INT(cfg.max_resident, 3);
+  ASSERT_EQ_INT(cfg.pool[0].ctx, 8192);
+  ASSERT_EQ_INT(cfg.pool[1].ctx, 32768);
+  ASSERT_EQ_INT(cfg.pool[2].ctx, 32768);
 
   /* sampling defaults */
   ASSERT_EQ_DBL(cfg.s_classify.temp, 0.0, 1e-9);
-  ASSERT_EQ_INT(cfg.s_classify.max_tokens, 24);
+  ASSERT_EQ_INT(cfg.s_classify.max_tokens, 64);
   ASSERT_EQ_DBL(cfg.s_classify.repeat_penalty, 0.0, 1e-9);
   ASSERT_EQ_DBL(cfg.s_decide.repeat_penalty, 1.15, 1e-9);
+  ASSERT_EQ_DBL(cfg.s_draft.temp, 0.2, 1e-9);
+  ASSERT_EQ_DBL(cfg.s_draft.top_p, 0.9, 1e-9);
+  ASSERT_EQ_INT(cfg.s_draft.max_tokens, 0);          /* auto: free context */
   ASSERT_EQ_DBL(cfg.s_answer.temp, 0.4, 1e-9);
   ASSERT_EQ_DBL(cfg.s_answer.top_p, 0.9, 1e-9);
   ASSERT_EQ_DBL(cfg.s_answer.repeat_penalty, 0.0, 1e-9);
   ASSERT_EQ_INT(cfg.s_answer.max_tokens, 0);
   ASSERT_EQ_DBL(cfg.s_judge.temp, 0.0, 1e-9);
-  ASSERT_EQ_INT(cfg.s_judge.max_tokens, 32);
+  ASSERT_EQ_INT(cfg.s_judge.max_tokens, 128);
 
   /* routing / detail */
   ASSERT_EQ_INT(cfg.classifier, ASNGN_CLASSIFIER_HYBRID);
   ASSERT_EQ_INT(cfg.max_escalations, 2);
   ASSERT_EQ_INT(cfg.detail_default, ASNGN_DETAIL_AUTO);
-  ASSERT_EQ_INT(cfg.terse_tokens, 128);
-  ASSERT_EQ_INT(cfg.normal_tokens, 384);
-  ASSERT_EQ_INT(cfg.rich_tokens, 1024);
+  ASSERT_EQ_INT(cfg.terse_tokens, 1024);
+  ASSERT_EQ_INT(cfg.normal_tokens, 4096);
+  ASSERT_EQ_INT(cfg.rich_tokens, 10240);
 
   /* context */
-  ASSERT_EQ_INT(cfg.summary_tokens, 600);
-  ASSERT_EQ_INT(cfg.verbatim_tokens, 1600);
-  ASSERT_EQ_INT(cfg.working_tokens, 800);
-  ASSERT_EQ_INT(cfg.safety_margin, 64);
-  ASSERT_EQ_INT(cfg.pinned_max, 8);
+  ASSERT_EQ_INT(cfg.summary_tokens, 3072);
+  ASSERT_EQ_INT(cfg.verbatim_tokens, 8192);
+  ASSERT_EQ_INT(cfg.working_tokens, 6144);
+  ASSERT_EQ_INT(cfg.safety_margin, 512);
+  ASSERT_EQ_INT(cfg.fold_tokens, 1536);
+  ASSERT_EQ_INT(cfg.digest_threshold_chars, 32768);
+  ASSERT_EQ_INT(cfg.digest_tokens, 2048);
+  ASSERT_EQ_INT(cfg.pinned_max, 32);
 
   /* cache thresholds and TTLs */
   ASSERT_TRUE(cfg.cache_enable);
@@ -111,7 +120,7 @@ TEST(defaults_spot_check) {
   ASSERT_EQ_INT(cfg.theme, ASNGN_THEME_ASTERISM);
   ASSERT_EQ_STR(cfg.sidebar, "trace");
   ASSERT_EQ_INT(cfg.catalog_level, ASNGN_CATALOG_SUMMARY);
-  ASSERT_EQ_INT(cfg.catalog_chars, 6000);
+  ASSERT_EQ_INT(cfg.catalog_chars, 24000);
   ASSERT_EQ_INT(cfg.mcp_autoconfirm, ASNGN_CONFIRM_DENY);
 
   asngn_config_free(&cfg);
@@ -131,10 +140,11 @@ TEST(overlay_overrides) {
     "      { id: \"vec\", path: \"models/vec.gguf\", embedding: true,"
     " dim: 128 },\n"
     "    ],\n"
-    "    sampling: { answer: { temp: 0.7 },"
+    "    sampling: { draft: { max_tokens: 12000 }, answer: { temp: 0.7 },"
     " decide: { repeat_penalty: 1.3 } },\n"
     "  },\n"
-    "  integration: { astls: { catalog_chars: 1234 } },\n"
+    "  integration: { astls: { workspace: \"session\", "
+    "catalog_chars: 1234 } },\n"
     "  routing: { max_escalations: 0 },\n"
     "}\n";
   char dir[256], path[300];
@@ -160,12 +170,15 @@ TEST(overlay_overrides) {
   ASSERT_EQ_INT(cfg.pool[0].threads, 8);
   ASSERT_EQ_STR(cfg.pool[1].id, "vec");
   ASSERT_TRUE(cfg.pool[1].embedding);
+  ASSERT_EQ_INT(cfg.pool[1].ctx, 512);              /* implicit embed ctx */
   ASSERT_EQ_INT(cfg.pool[1].dim, 128);
   ASSERT_EQ_DBL(cfg.s_answer.temp, 0.7, 1e-9);
+  ASSERT_EQ_INT(cfg.s_draft.max_tokens, 12000);
   ASSERT_EQ_DBL(cfg.s_answer.top_p, 0.9, 1e-9);     /* untouched        */
   ASSERT_EQ_DBL(cfg.s_decide.repeat_penalty, 1.3, 1e-9);
-  ASSERT_EQ_INT(cfg.s_decide.max_tokens, 96);       /* untouched        */
+  ASSERT_EQ_INT(cfg.s_decide.max_tokens, 1024);     /* untouched        */
   ASSERT_EQ_INT(cfg.catalog_chars, 1234);
+  ASSERT_EQ_STR(cfg.astools_workspace, "session");
   ASSERT_EQ_INT(cfg.max_escalations, 0);            /* 0 is allowed     */
 
   asngn_config_free(&cfg);
@@ -222,6 +235,40 @@ TEST(unknown_keys_warn_and_skip) {
   bare_ctx_free(c);
 }
 
+TEST(openai_compatible_pool_entry) {
+  static const char *body =
+    "#asngn_config { models: { max_ram_mb: 12000, max_vram_mb: 8000, "
+    "pool: [{ id: \"remote\", backend: \"openai\", "
+    "base_url: \"http://127.0.0.1:1234/v1\", model: \"qwen-local\", "
+    "api_key_env: \"LM_STUDIO_KEY\", api_grammar: \"llama\", "
+    "reasoning_effort: \"none\", "
+    "ctx: 16384, warm: false, kv_cache: true }] } }\n";
+  char dir[256], path[300];
+  asngn_ctx *c = bare_ctx();
+  asngn_config cfg;
+  ASSERT_TRUE(c != NULL);
+  ASSERT_TRUE(asngn_test_tmpdir(dir));
+  snprintf(path, sizeof path, "%s/config.xcdn", dir);
+  ASSERT_TRUE(write_text(path, body));
+  asngn_config_defaults(&cfg);
+  ASSERT_OK(asngn_config_load(c, &cfg, path));
+  ASSERT_EQ_INT((long long)cfg.pool_n, 1);
+  ASSERT_EQ_INT(cfg.pool[0].backend, ASMODEL_BACKEND_OPENAI);
+  ASSERT_EQ_STR(cfg.pool[0].base_url, "http://127.0.0.1:1234/v1");
+  ASSERT_EQ_STR(cfg.pool[0].remote_model, "qwen-local");
+  ASSERT_EQ_STR(cfg.pool[0].api_key_env, "LM_STUDIO_KEY");
+  ASSERT_EQ_STR(cfg.pool[0].api_grammar, "llama");
+  ASSERT_EQ_STR(cfg.pool[0].reasoning_effort, "none");
+  ASSERT_EQ_INT(cfg.pool[0].ctx, 16384);
+  ASSERT_TRUE(!cfg.pool[0].warm);
+  ASSERT_TRUE(cfg.pool[0].kv_cache);
+  ASSERT_EQ_INT(cfg.max_ram_mb, 12000);
+  ASSERT_EQ_INT(cfg.max_vram_mb, 8000);
+  asngn_config_free(&cfg);
+  asngn_test_rmtree(dir);
+  bare_ctx_free(c);
+}
+
 TEST(bare_object_form_accepted) {
   static const char *body = "{ context: { summary_tokens: 250 } }\n";
   char dir[256], path[300];
@@ -237,6 +284,25 @@ TEST(bare_object_form_accepted) {
   asngn_config_free(&cfg);
   asngn_test_rmtree(dir);
   bare_ctx_free(c);
+}
+
+TEST(starter_configs_parse) {
+  static const char *paths[] = {
+    ASNGN_TEST_SOURCE_DIR "/examples/embedded.xcdn",
+    ASNGN_TEST_SOURCE_DIR "/examples/lmstudio.xcdn",
+  };
+  size_t i;
+  for (i = 0; i < sizeof paths / sizeof paths[0]; i++) {
+    asngn_ctx *c = bare_ctx();
+    asngn_config cfg;
+    ASSERT_TRUE(c != NULL);
+    asngn_config_defaults(&cfg);
+    ASSERT_OK(asngn_config_load(c, &cfg, paths[i]));
+    ASSERT_TRUE(cfg.pool_n >= 2);
+    ASSERT_EQ_INT(cfg.profile, ASNGN_PROFILE_CODING);
+    asngn_config_free(&cfg);
+    bare_ctx_free(c);
+  }
 }
 
 TEST(missing_file_errors) {
@@ -260,7 +326,9 @@ TEST_LIST = {
   TEST_ENTRY(overlay_overrides),
   TEST_ENTRY(hard_errors_are_config),
   TEST_ENTRY(unknown_keys_warn_and_skip),
+  TEST_ENTRY(openai_compatible_pool_entry),
   TEST_ENTRY(bare_object_form_accepted),
+  TEST_ENTRY(starter_configs_parse),
   TEST_ENTRY(missing_file_errors),
 };
 

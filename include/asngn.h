@@ -77,9 +77,9 @@ enum {
 };
 
 typedef struct {
-  const char *engine_root; /* store directory; created if missing          */
+  const char *engine_root; /* override store dir; NULL discovers ~/asngn   */
   const char *config_path; /* optional config.xcdn; NULL = defaults        */
-  const char *workspace_root; /* explicit coding workspace; NULL=config    */
+  const char *workspace_root; /* external override; NULL=config/session    */
   const char *project_id;     /* stable project id; NULL=derived           */
   const char *build_adapter;  /* cmake/npm/cargo/...; NULL=auto-detect      */
   int         allow_degraded; /* explicit opt-in to missing coding deps     */
@@ -143,6 +143,22 @@ asngn_err asngn_session_workspace(asngn_session *s,
                                   asngn_workspace_info *out);
 asngn_err asngn_session_pin    (asngn_session *s, size_t turn, int on);
 asngn_err asngn_session_compact(asngn_session *s);    /* fold + compact    */
+
+/* One transcript entry of an open session (history replay). */
+typedef struct {
+  size_t      turn;      /* ordinal, 1-based                            */
+  char        role[10];  /* "user" | "assistant"                        */
+  const char *text;      /* points into the array allocation            */
+  long long   at;        /* unix seconds UTC                            */
+  int         pinned, folded;
+  char        tier[16];  /* assistant turns: generator tier, else ""    */
+} asngn_transcript_entry;
+/* Full transcript of an open session, oldest first. *out is one
+ * allocation released with asngn_free; *out = NULL, *out_n = 0 when the
+ * session has no turns yet. */
+asngn_err asngn_session_transcript(asngn_session *s,
+                                   asngn_transcript_entry **out,
+                                   size_t *out_n);
 
 /* ---- events (telemetry sink; the TUI is built on this) ----------------- */
 

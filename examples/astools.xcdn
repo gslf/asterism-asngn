@@ -1,0 +1,24 @@
+// Copy beside config.xcdn, then copy the assembled standard packages into
+// <engine-root>/tools/.
+
+#astools_config {
+  registry: {
+    paths: [
+      {
+        path: "tools",
+        trust: "standard",
+      },
+    ],
+    watch: "off",
+    pinning: "off",
+  },
+  workspace: { root: "." },
+  grants: {
+    workspace_access: "read-write",
+    tools: [
+      { tool: "proc", proc: true },
+      { tool: "git", proc: true },
+      { tool: "project", proc: true },
+    ],
+  },
+}

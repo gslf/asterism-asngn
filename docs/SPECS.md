@@ -21,7 +21,7 @@ Out of scope v1: cloud/remote inference, fine-tuning, learned routing, multi-age
 | Term | Meaning |
 |---|---|
 | Turn | One user message through committed answer |
-| Step | One decision-pass iteration: `CALL`, `RECALL`, `OPEN`, `THINK`, `CLARIFY`, `ANSWER` |
+| Step | One decision-pass iteration emitting one action object: `call`, `recall`, `open`, `think`, `clarify`, `answer` |
 | Tier | Model size class: `nano`, `light`, `std`, optional `deep` |
 | Role | Function assigned to a pool model: router, planner, generator, compressor, adapter, judge, embedder |
 | Zone | Prompt region: system, memory, catalog, summary, verbatim, working |
@@ -31,7 +31,7 @@ Out of scope v1: cloud/remote inference, fine-tuning, learned routing, multi-age
 | Ledger | Per-turn xCDN record of tokens spent/saved |
 | QpT | Quality per kilotoken |
 | Budget pressure | `spent / budget`; biases toward cheaper choices |
-| Decision pass | Grammar-constrained step selection by planner role |
+| Decision pass | Schema-constrained action-object emission by planner role (GBNF-enforced) |
 | Answer pass | Budgeted generation of user-facing answer |
 | Escalation | Retry failed pass one tier up |
 | Session | Persistent conversation: transcript, summary, ledger, blobs |
@@ -40,7 +40,7 @@ Out of scope v1: cloud/remote inference, fine-tuning, learned routing, multi-age
 ## 2. Design Goals (invariants)
 
 - **G1 Cheap-first**: start at cheapest capable tier / smallest context; add capacity only on evidence (cache miss, classifier vote, validation failure).
-- **G2 Small-model first**: assume 2–8k windows; GBNF-constrained micro-passes, short ordinal handles (`B1`, `M1`), one-line protocols, deterministic prompts.
+- **G2 Small-model first**: assume 2–8k windows; GBNF-constrained micro-passes, short ordinal handles (`B1`, `M1`), single-line schema-constrained action objects, deterministic prompts.
 - **G3 Measured**: every prompt/generated token attributed to zone, role, tier; every saving (cache, fold, digest, down-tier) counted.
 - **G4 Safe agency**: deny-by-default tool policy (astools), human confirmation for destructive actions, loop/resource guards.
 - **G5 Minimal deps**: strict C99 + libc + small OS shim; external: llama.cpp, xCDN-C, two siblings. In-house TUI (no curses), in-house JSON (MCP only).
@@ -88,8 +88,8 @@ asngn (TUI / --once)          MCP clients
 2. **MEMORY** — `asper_build_prompt` renders base prompt + memory block; astools catalog appended under char budget.
 3. **CACHE** — embed message; probe semantic cache: reuse / adapt / miss (§5.2). Reuse → COMMIT.
 4. **ROUTE** — classifier: complexity, detail, mode; orchestrator fixes tier, params, budgets (§6).
-5. **STEP LOOP** — decision passes select `CALL`/`RECALL`/`OPEN`/`THINK` until `ANSWER`/`CLARIFY`; tool calls via astools behind policy + confirmation gates; oversized results digested.
-6. **ANSWER** — answer pass under detail budget; optional judge; failure → regenerate or escalate.
+5. **ACTION** — decision passes emit action objects (`call`/`recall`/`open`/`think`) until `answer`/`clarify`; only this phase sees the tool catalog and may dispatch through astools. An `fs.write` may carry the exact `@asngn:draft` content marker: a separate private DRAFT pass produces the file payload, after which the engine composes and invokes the real call.
+6. **RESPONSE** — only after ACTION is terminal (and, for `generate`, a content-bearing mutation succeeded): the catalog is hidden, generation is fully buffered, tool/action syntax is rejected before streaming, then the optional judge runs.
 7. **COMMIT** — transcript, ledger, telemetry, cache insert, `asper_observe_turn(assistant)`; queue fold if verbatim overflowed.
 
 Background (cold): folding, summary re-compaction, cache TTL sweep, telemetry flush/rotation, sibling maintenance.
@@ -101,10 +101,10 @@ Background (cold): folding, summary re-compaction, cache TTL sweep, telemetry fl
 | Budget | Contents | Enforcement |
 |---|---|---|
 | Context | Per-call prompt layout, one cap per zone (§5.1) | Hard; at assembly; whole items trimmed, never split |
-| Turn | Generation caps: decision passes, answer pass (detail level), aux passes (classifier, compressor, judge) | Hard; `max_tokens` per pass; sentence-boundary trim on answer |
+| Turn | Generation caps: decision passes, artifact draft, answer pass (detail level), aux passes (classifier, compressor, judge) | Hard; the effective ceiling and remaining step/tool budgets are stated in the model prompt as well as passed as backend `max_tokens`; sentence-boundary trim on answer |
 | Spend | Optional session/daily ceilings `budgets.session_tokens` / `budgets.daily_tokens` (0 = unlimited) | Soft; raise pressure (§4.4); never cut a turn mid-answer |
 
-Token counting: exact, with the tokenizer of the consuming model (D9). Memory zone budget enforced by Asper; catalog zone by astools (chars); asngn passes limits down.
+Token counting: exact, with the tokenizer of the consuming model (D9). Memory zone budget enforced by Asper; catalog zone by astools (chars); asngn passes limits down. If prompt occupancy leaves less response capacity than the configured detail cap, RESPONSE rebuilds its system prompt with the smaller physical ceiling; the model is never told a larger budget than the backend can actually allow.
 
 ### 4.2 Ledger
 
@@ -143,8 +143,8 @@ tests, applicable patches, valid tool calls, regressions, latency and memory.
 
 | Condition | Levers |
 |---|---|
-| `p ≥ warn_at` (0.80) | Detail bias one level down (RICH→NORMAL; NORMAL→TERSE for SIMPLE); proactive escalation disabled (reactive on hard failure allowed); TUI budget bar amber |
-| `p ≥ 1.00` | Detail forced TERSE; generator down-tiered one level if lower exists; `cache.adapt_threshold` −0.02; TUI banner "budget exceeded — running frugal"; nothing refused |
+| `p ≥ warn_at` (0.80) | On SIMPLE turns only, remove excess RICH verbosity (RICH→NORMAL); TUI budget bar amber. MODERATE/COMPLEX and coding work retain their evidenced detail and capable tier |
+| `p ≥ 1.00` | On SIMPLE turns only, NORMAL→TERSE; `cache.adapt_threshold` −0.02; emit `budget_pressure`. Do not down-tier the generator or disable proactive escalation; nothing is refused or cut mid-turn |
 
 Every lever application = telemetry event kind `guard`.
 
@@ -158,18 +158,18 @@ Fixed order; assembly deterministic (same state + config + inputs ⇒ byte-ident
 |---|---|---|---|
 | 1 | system | `engine.base_prompt` + answer-style directive (§7.5) | counted, not capped |
 | 2 | memory | Asper rendered memory block | delegated to Asper `budgets.*` |
-| 3 | catalog | astools tool catalog | `integration.astools.catalog_chars` = 6000 chars |
-| 4 | summary | Rolling summary of folded turns | `context.summary_tokens` = 600 |
-| 5 | verbatim | Most recent turns verbatim; pinned first | `context.verbatim_tokens` = 1600 |
-| 6 | working | Current turn: step trace, tool results/digests, recall answers, THINK notes | `context.working_tokens` = 800 |
+| 3 | catalog | astools tool catalog | `integration.astools.catalog_chars` = 24000 chars |
+| 4 | summary | Rolling summary of folded turns | `context.summary_tokens` = 3072 |
+| 5 | verbatim | Most recent turns verbatim; pinned first | `context.verbatim_tokens` = 8192 |
+| 6 | working | Current turn: step trace, tool results/digests, recall answers, THINK notes | `context.working_tokens` = 6144 |
 
-Trim whole items only. Empty zone omitted with its heading.
+Trim whole optional items only. Empty zones are omitted with their heading. The current user message and phase instruction are mandatory working content and count against `working_tokens`; optional step/tool items are admitted only from the capacity that remains.
 
 ### 5.2 Folding
 
 - Trigger: after COMMIT, verbatim zone > budget.
 - Fold oldest unpinned turns in user+assistant pairs until occupancy ≤ 70 % of budget.
-- One fold = one compressor call: current summary + turns → new summary (App B); gen cap `context.fold_tokens` (200); summary re-capped at `summary_tokens`.
+- One fold = one compressor call: current summary + turns → new summary (App B); gen cap `context.fold_tokens` (1536); summary re-capped at `summary_tokens`.
 - Extractive fallback (compressor disabled/failing): first sentence of user turn + last sentence of assistant turn appended as plain lines; counted as `summary_debt`; retried by background worker.
 - Folded turns stay in transcript with `folded: true`.
 
@@ -183,7 +183,7 @@ Trim whole items only. Empty zone omitted with its heading.
 
 ### 5.5 Digestion and blobs
 
-- Any working item > `context.digest_threshold_chars` (2048) → compressor produces ≤ `context.digest_tokens` (256), preserving numbers, paths, identifiers, error text.
+- Any working item > `context.digest_threshold_chars` (32768) → compressor produces ≤ `context.digest_tokens` (2048), preserving numbers, paths, identifiers, error text.
 - Full text → `sessions/<slug>/blobs/<invocation_id>.txt`.
 - Digest prefixed with handle: `[B3 · fs.read · 41 KiB · digested] …`
 - `OPEN B<n>` re-injects next slice of blob up to free working budget.
@@ -225,7 +225,7 @@ Embed user message (embedder role); flat in-memory cosine scan over L2-normalize
 | `adapt_threshold ≤ cos < hit_threshold` (0.85) | **Adapt**: light-tier pass rewrites cached answer for new query (§6.3) |
 | `cos < adapt_threshold` | **Miss** |
 
-`tools_used: true` entries never reused/adapted; closest such entry summarized into working zone as plan hint ("a similar request previously used: fs.read, proc.run").
+`tools_used: true` entries never reused/adapted; closest such entry summarized into working zone as plan hint ("a similar request previously used: fs.read, proc.run"). The coding profile bypasses semantic answer reuse entirely: cache probing precedes semantic routing, so replay must never turn a multilingual mutation request missed by the English heuristic into a prose-only answer.
 
 ### 6.3 Adapt pass
 
@@ -256,13 +256,26 @@ Adapter role (light): (cached query, cached answer, new query) → adjusted answ
 
 ### 7.1 Model pool and roles
 
-`models.pool` declares GGUF models; `models.roles` maps roles → pool ids. Roles may share a pool entry. Each entry takes an optional `gpu_layers` (default `-1` = every layer in VRAM when llama.cpp is built with a GPU backend; `0` = CPU only; `N` = offload N layers; ignored by CPU-only builds).
+`models.pool` declares embedded GGUF or OpenAI-compatible models;
+`models.roles` maps roles → pool ids. API entries use `backend: "openai"`,
+`base_url`, `model`, optional `api_key_env`, and `api_grammar`
+(`none`, `llama`, `vllm`, or `lmstudio`). The LM Studio mode translates
+asngn's constrained decision/classifier/judge shapes to JSON Schema and
+normalizes the structured response back to the internal line protocol.
+API entries may also set `reasoning_effort` to `none`, `minimal`, `low`,
+`medium`, or `high`; `none` is recommended for constrained tool decisions
+when the served model otherwise emits a long hidden reasoning trace.
+`asmodel` owns resident instances,
+warm-up, reusable context/KV allocations and LRU eviction under
+`max_resident`, `max_ram_mb` and `max_vram_mb`. Embedded Asper borrows
+the compressor and embedder slots; standalone Asper owns an independent
+manager.
 
 | Role | Tier | Used for |
 |---|---|---|
 | router | nano | Turn classification (§7.2) |
-| planner | light | Decision passes (§8.2) |
-| generator | std | Answer passes (§7.5) |
+| planner | light | Routine non-complex decision passes (§8.2) |
+| generator | std | Coding/complex decision passes, artifact drafts, and answer passes (§7.5) |
 | compressor | light | Folds, re-compaction, digests |
 | adapter | light | Cache adaptation |
 | judge | light | Answer validation (§9.4) |
@@ -280,7 +293,23 @@ Three axes; `routing.classifier` = `"hybrid"` (heuristics + one nano micro-pass)
 - **DETAIL**: `TERSE | NORMAL | RICH`
 - **MODE**: `DIRECT | PLAN`
 
-Heuristic features: message length, code fences, math symbols, question count, imperative verbs, file-path/tool-name mentions, recent escalation history. Nano pass emits `CLASS <c> | DETAIL <d> | MODE <m>` (≤ 24 tokens). Disagreement: higher CLASS wins; MODE PLAN wins; explicit user cues ("briefly", "in detail", `/detail`) override DETAIL unconditionally.
+The heuristic scores CLASS additively over evidence, not over byte length alone:
+
+| Evidence axis | Signal |
+|---|---|
+| Task kind | Read off the message (English keyword families): chat 0 · lookup/explain 1 · edit/build 2 · generate/refactor/debug 3. A generation verb routes `generate` on a code-object noun **or** a programming language named in the message ("write a calculator in c++" — the language is the code evidence when the object is in no noun list) |
+| Message shape | Fence +2 · math +1 · length >900 B +2 (else >300 B +1) · ≥3 question marks +1 |
+| Tools evidenced | ≥3 families named by the message itself (fs/grep/git/proc/edit) +1 |
+| Language | Systems language (c/c++/rust/zig) on a code task +1; message mention beats the repository census |
+| Repository scale | (PLAN turns) ≥200 files +1 · ≥2000 files +2; collected free during the workspace fingerprint walk |
+| History | Ledger window (8 turns): any escalation +1 · ≥2 unreliable turns (judge below threshold or negative feedback) +1 |
+| Eval suite | (PLAN turns) recorded `task_success_rate` < 0.5 in `calibration/quality.xcdn` +1 |
+
+Score ≤1 SIMPLE · ≤3 MODERATE · else COMPLEX. MODE is PLAN when tools are available and the message carries work evidence (imperative at a sentence start, path/tool mention, fence, workspace noun with local anchor, or a code-shaped task kind). DETAIL is RICH on a depth ask, fence, length >600 B, a COMPLEX verdict, or a generate task; TERSE under 80 B; NORMAL otherwise.
+
+The quality eval suite (`tests/quality/run_quality.py`) writes `calibration/quality.xcdn` under the engine root after each run; the classifier loads it once per context as the eval-suite evidence axis.
+
+Nano pass emits `CLASS <c> | DETAIL <d> | MODE <m> | TASK <t>` (normally ≤ 24 tokens, hard cap 64); its user prompt carries an evidence header plus the two immediately preceding transcript items for reference resolution. The current message is labelled separately and alone determines the requested action. Disagreement is capability-preserving: higher CLASS and DETAIL win, PLAN wins when tools exist, and a semantic task vote may add intent but cannot erase deterministic operational intent. Explicit user cues ("briefly", "in detail", `/detail`) override DETAIL unconditionally. Short path/status follow-ups remain DIRECT and do not replay a prior mutation.
 
 MODE DIRECT = no decision passes, straight to answer pass.
 
@@ -293,30 +322,36 @@ MODE DIRECT = no decision passes, straight to answer pass.
 | Generation stall (§9.3) | Cancel, retry once; then escalate |
 | `/retry` | Re-run last turn one tier up, cache bypassed |
 
-Max `routing.max_escalations` (2) per turn, all ledgered. Budget pressure gates proactive escalation. De-escalation implicit: next turn starts cheap.
+Max `routing.max_escalations` (2) per turn, all ledgered. A COMPLEX verdict starts the generator one tier up (counts against the escalation budget); spend pressure never substitutes a weaker model for evidenced hard work. A SIMPLE DIRECT chat/lookup verdict with a clean ledger window (no recent escalations or unreliable turns) may start one tier down in the general profile (G1), floored above the router tier. The coding profile never down-tiers answers. De-escalation is implicit: the next turn is routed from fresh evidence.
 
 ### 7.4 Sampling (per task; override in `models.sampling`)
 
 | Task | temp | top_p | max_tokens | repeat_penalty |
 |---|---|---|---|---|
-| classify | 0.0 | — | 24 (grammar) | — |
-| decide | 0.0 | — | 96 (grammar) | 1.15 (last 64 tokens) |
+| classify | 0.0 | — | 64 (grammar) | — |
+| decide | 0.0 | — | 1024 (grammar) | 1.15 (last 64 tokens) |
+| draft | 0.2 | 0.9 | all context remaining after prompt and safety margin; optional configured ceiling | — |
 | answer | 0.4 | 0.9 | per detail level | — |
 | compress | 0.2 | 0.9 | `fold_tokens` / `digest_tokens` | — |
 | adapt | 0.3 | 0.9 | per detail level | — |
-| judge | 0.0 | — | 32 (grammar) | — |
+| judge | 0.0 | — | 128 (grammar) | — |
 
 `repeat_penalty` (off ≤ 1.0, range 1.0–2.0) counters greedy phrase-loop degeneration in grammar-constrained passes; decide has it on by default.
+
+Artifact drafts have an independent budget. TERSE/NORMAL/RICH only control the
+user-facing answer and never truncate generated file contents. DRAFT appends
+its exact context-derived ceiling to the prompt; decision passes likewise see
+their completion ceiling and remaining action/tool-call counts.
 
 ### 7.5 Detail controller
 
 | Level | Cap | Style directive (system zone) |
 |---|---|---|
-| TERSE | `detail.terse_tokens` = 128 | "Answer directly. No preamble, no recap, no closing summary." |
-| NORMAL | `detail.normal_tokens` = 384 | "Answer completely but economically; expand only what the question needs." |
-| RICH | `detail.rich_tokens` = 1024 | "Answer thoroughly, with structure and examples where useful." |
+| TERSE | `detail.terse_tokens` = 1024 | "Answer directly. No preamble, no recap, no closing summary." |
+| NORMAL | `detail.normal_tokens` = 4096 | "Answer completely but economically; expand only what the question needs." |
+| RICH | `detail.rich_tokens` = 10240 | "Answer thoroughly, with structure and examples where useful." |
 
-Selection precedence: explicit user override (`/detail`, in-message cue) → budget-pressure bias → classifier vote → `detail.default` (`"auto"` = classifier). Cap is hard: trim to last complete sentence, `capped: true`, TUI "capped" badge; `/more` continues (D13).
+Selection precedence: explicit user override (`/detail`, in-message cue) → classifier vote / `detail.default` (`"auto"` = classifier) → SIMPLE-only budget-pressure removal of excess verbosity. MODERATE/COMPLEX work is never made terse merely to satisfy a spend target. Cap is hard and visible in the RESPONSE prompt: trim to last complete sentence, `capped: true`, TUI "capped" badge; `/more` continues (D13).
 
 ## 8. Control Loop
 
@@ -326,9 +361,9 @@ Selection precedence: explicit user override (`/detail`, in-message cue) → bud
 INGEST → MEMORY → CACHE → ROUTE ─┬─ reuse ──────────────────────→ COMMIT
                                  ├─ adapt → VALIDATE ───────────→ COMMIT
                                  ├─ MODE DIRECT ─┐
-                                 └─ MODE PLAN → STEP LOOP ─ ANSWER ─→ ANSWER PASS → VALIDATE → FOLD? → COMMIT
-                                                 (CALL|RECALL|OPEN|THINK)
-                                                 └─ CLARIFY → ask user → COMMIT
+                                 └─ MODE PLAN → STEP LOOP ─ answer ─→ ANSWER PASS → VALIDATE → FOLD? → COMMIT
+                                                 (call|recall|open|think)
+                                                 └─ clarify → ask user → COMMIT
                                                  (≤ safety.max_steps, ≤ turn deadline)
 ```
 
@@ -336,31 +371,37 @@ Every stage emits spans, is cancellable; COMMIT is the only durable mutation.
 
 ### 8.2 Step protocol
 
-One line per decision pass, constrained by per-turn GBNF (App A); CALL production grafted from `astools_grammar_export`; `B<n>` handles restricted to blobs present this turn.
+One single-line **action object** per decision pass, constrained by per-turn GBNF (App A) — the in-process equivalent of a llama.cpp-server JSON-schema constraint. Schema: `action` (enum), `why` (short rationale), `input` (payload), and for the information-gathering actions `success` (declared success condition) and `fallback` (declared contingency plan). Fixed key order, quoted values without escapes; the call `input` embeds the astools call production raw (xCDN args, grafted from `astools_grammar_export`); `B<n>` handles restricted to blobs present this turn.
 
 ```
-CALL <tool>.<command> {<args>}    # astools call line
-RECALL | <question>               # Asper memory
-OPEN B<n>                         # re-inject blob slice
-THINK | <one-line note>           # scratch note → working zone
-CLARIFY | <question to the user>  # end turn asking for input
-ANSWER                            # proceed to answer pass
+{action: "call", why: "…", input: <tool>.<command> {<args>},
+ success: "…", fallback: "…"}                     # astools call
+{action: "recall", why: "…", input: "<question>",
+ success: "…", fallback: "…"}                     # Asper memory
+{action: "open", why: "…", input: "B<n>"}         # re-inject blob slice
+{action: "think", input: "<one-line note>"}       # scratch note → working zone
+{action: "clarify", why: "…", input: "<question>"}# end turn asking for input
+{action: "answer"}                                # proceed to answer pass
 ```
+
+`why` is recorded per step in telemetry (kind `step`); `success` is advisory context for the model itself; `fallback` is echoed into the working zone when a call fails ("[notice] the call failed — your declared fallback: …"), steering the recovery pass with the plan the model committed to. Payload bounds: `input` text ≤ 2048 bytes, `why`/`success`/`fallback` ≤ 512 bytes, enforced by grammar and re-checked by the parser.
 
 ### 8.3 Step semantics
 
 | Step | Behavior |
 |---|---|
-| CALL | `astools_call_parse` → validate → gate (§9.2) → confirm (§9.7) → `astools_invoke` with step deadline. Result enters working zone as `CALL <ref>.<cmd> <args> -> RESULT/ERROR …` (the `astools_call_format` line prefixed with the originating call, so outcomes stay attributable to their arguments); oversized → digest. Failed call does not end loop; identical retries blocked (§9.3), and a blocked retry mutes the CALL alternative (instruction and grammar) for the next decision pass, forcing progress toward ANSWER/THINK |
-| RECALL | `asper_recall(question)`; answer + cited memories → working zone. NOMEM → "memory: nothing relevant" |
-| OPEN | Inject next slice of `B<n>` up to free working budget; repeated OPEN advances slice |
-| THINK | Append note to working zone. Max `safety.think_limit` (2) consecutive, 4 per turn |
-| CLARIFY | End turn with question as answer; ledger class `"clarify"`; no answer pass. Any single-line grammar-valid payload reaches the user verbatim; structural multiline protocol echoes are rejected by the parser |
-| ANSWER | Exit loop → answer pass |
+| call | A call line `CALL <ref>.<cmd> <args>` is synthesized from the object's `input` → `astools_call_parse` (authoritative) → validate → gate (§9.2) → confirm (§9.7) → `astools_invoke` with step deadline. Result enters working zone as `CALL <ref>.<cmd> <args> -> RESULT/ERROR …` (the `astools_call_format` line prefixed with the originating call, so outcomes stay attributable to their arguments); oversized → digest. A denied, failed, errored, or locally invalid call does not end the loop: the working zone receives recovery evidence and the next bounded decision may correct it. A retry is identical only when tool, command, canonical arguments, live workspace fingerprint, and world epoch still match; therefore the same compiler/test command is legal after an intervening source mutation. A blocked retry mutes the call alternative (instruction and grammar) for the next decision pass, forcing a different step. |
+| recall | `asper_recall(input)`; answer + cited memories → working zone. NOMEM → "memory: nothing relevant" |
+| open | Inject next slice of `B<n>` up to free working budget; repeated open advances slice |
+| think | Append `input` note to the working zone. After `safety.think_limit` (2) consecutive notes, preserve both notes but remove THINK from exactly the next constrained decision pass, requiring the model to act, answer, or clarify. Any non-THINK step resets the consecutive budget; the hard step/deadline guards remain the backstop. |
+| clarify | End turn with `input` question as answer; ledger class `"clarify"`; no answer pass. Any grammar-valid payload reaches the user verbatim; the payload character set (no quotes, no newlines) makes structural protocol echoes impossible |
+| answer | Request the RESPONSE phase. On a `generate` task with tools available this is bounced every time until a content-bearing `fs.write`, `edit`, or other mutating artifact command succeeds. After a coding mutation, the next decision is explicitly directed to run an applicable build/compile/test/smoke check; RESPONSE records whether verification succeeded, failed, or never ran and forbids unsupported success claims. Step exhaustion or decision-protocol failure before an artifact exists fails closed with `ASNGN_ERR_PROTOCOL`; RESPONSE never starts. |
 
 ### 8.4 Termination
 
-Loop ends on ANSWER, CLARIFY, `safety.max_steps` (16), or `safety.turn_deadline` (`PT120S`). On step/deadline exhaustion: inject working-zone notice "step budget exhausted — answer with what you have", force answer pass, TUI badge. Additionally, two consecutive guard-blocked steps (identical repeat, recall/think limit, bad OPEN, tool cap) while at least one call has succeeded end the loop the same way (guard `futile_steps`, notice "no further progress — answering with what you have"): the model is spinning on walls it cannot pass, and the successful result is already in the working zone. Without a successful result the loop runs on — the model may still correct its call, and `max_steps` bounds the worst case. Engine-level failures (model load, sibling error) end turn with error to caller; partial work ledgered.
+Loop ends on answer, clarify, `safety.max_steps` (16), or `safety.turn_deadline` (`PT120S`). On ordinary step/deadline exhaustion: inject working-zone notice "step budget exhausted — answer with what you have", force RESPONSE, TUI badge. A `generate` turn is stricter: while no artifact mutation has succeeded, exhaustion or a decision-protocol failure returns `ASNGN_ERR_PROTOCOL` and emits no assistant text. Additionally, two consecutive guard-blocked steps (identical repeat, repeated/over-limit recall, bad OPEN, tool cap) while at least one call has succeeded may end a completed lookup with guard `futile_steps`. It never forces RESPONSE while a coding artifact still has pending or failed verification; the normal step/deadline cap bounds that recovery loop.
+
+ACTION, DRAFT, and RESPONSE are disjoint engine states. ACTION alone has the catalog and dispatch authority. DRAFT is opaque file content and cannot stream. RESPONSE has neither the catalog nor dispatch authority; it is buffered and rejected if it contains `CALL`, an action-call object, or a registered `tool.command {…}` form. Rejection happens before the token callback, so a pseudo-call is never briefly visible in chat.
 
 ## 9. Sibling Integration
 
@@ -379,15 +420,15 @@ In-process via `asper.h` / `astools.h` — no serialization, subprocess, or JSON
 ### 9.3 astools
 
 - Catalog zone = `astools_catalog` at `integration.astools.catalog_level` (`"summary"`) under `catalog_chars`.
-- Step grammar grafts `astools_grammar_export`; CALL parsed by `astools_call_parse`, echoed via `astools_call_format`.
+- Step grammar grafts `astools_grammar_export` into the call action's `input`; the call is re-serialized to a call line and parsed by `astools_call_parse`, echoed via `astools_call_format`. For long new-file payloads, `fs.write.content` may be the exact `@asngn:draft` marker. That reserved marker is rejected in every other field. The generator then emits file content in the catalog-free DRAFT phase; a single enclosing Markdown fence is normalized when present, the engine xCDN-escapes the resulting raw bytes, replaces only the content marker, validates the expanded args, and invokes astools.
 - Annotations drive action gate: destructive or non-`read_only` → confirmation per `safety.autoconfirm`.
-- Workspace is selected explicitly at open (`asngn_open_params.workspace_root`, CLI/MCP `--workspace`), canonicalized, and persisted in each session with repository root, HEAD/branch, project id, ignore rules, build adapter and a live content fingerprint. astools receives this same canonical root; asngn narrows, never widens sibling policy.
+- Default workspace mode is `integration.astools.workspace: "session"`: every session owns `sessions/<slug>/workspace`, and astools is rebound to that canonical root before the turn starts. Relative paths and the automatic read-write grant therefore cannot escape into the engine root or another session. A concrete configured path or `asngn_open_params.workspace_root` / CLI `--workspace` is an explicit external-workspace override. The effective workspace identity (repository root, HEAD/branch, project id, ignore rules, build adapter, live fingerprint) is persisted in the session manifest.
 - Shipped default astools config: `sandbox.allow_library = false` (no tool code loaded in-process).
 - Tool-cache keys include tool/version/command/args plus the live workspace fingerprint, so editor changes invalidate reads without an Asterism mutation. Successful non-`read_only` invocations still bump world epoch + clear the cache. Coding turns bypass the semantic answer cache by default.
 
 ### 9.4 Degradation
 
-`integration.asper.enable` / `integration.astools.enable`. `integration.astls` is accepted as a deprecated 0.x alias. Without Asper: no memory zone, RECALL removed from grammar. Without astools: no catalog zone, CALL removed. Without both: frugal chat engine (compression, cache, routing, detail, telemetry, TUI).
+`integration.asper.enable` / `integration.astools.enable`. `integration.astls` is accepted as a deprecated 0.x alias. Without Asper: no memory zone, the recall action removed from grammar. Without astools: no catalog zone, call removed. Without both: frugal chat engine (compression, cache, routing, detail, telemetry, TUI).
 
 ## 10. Safety and Validation
 
@@ -406,10 +447,10 @@ Protected: user machine (delegated to astools sandbox/policy; asngn adds gates i
 
 ### 10.3 Loop and resource guards
 
-- Identical-call guard: SHA-256(tool, command, canonical args); one execution per key per turn; repeat → injected ERROR "already ran; result above".
+- Identical-call guard: SHA-256(tool, command, canonical args, live workspace fingerprint, world epoch); one execution per unchanged workspace state per turn; repeat → injected ERROR. A successful mutating call is recorded against its post-call state: a command cannot unblock itself, but an intervening edit makes a compile/test retry legitimate.
 - Oscillation guard: A-B-A-B alternation of blocked/failing calls beyond two cycles → force ANSWER.
 - Tool-call cap: `safety.max_tool_calls` (8) per turn.
-- THINK limits (§8.3); step cap + turn deadline (§8.4).
+- THINK one-pass steering (§8.3); step cap + turn deadline (§8.4).
 - Stall guard: no token for `safety.stall_timeout` (`PT20S`) → cancel model call; one retry, then escalate or fail.
 - Every guard trip = telemetry event kind `guard`.
 
@@ -500,12 +541,20 @@ Header: session · generator tier · budget bar · pressure · token spend. Main
 
 ### 12.3 Input and slash commands
 
-Editor: history (↑/↓), kill/yank (Ctrl+U/K/W/Y), Tab completion of slash commands and session/project slugs.
+Editor: the prompt bar is always at least three rows high and grows to six.
+Beyond six rows it becomes a cursor-following viewport with visible
+above/below indicators. Alt+Up/Alt+Down scroll it one row and
+Alt+PgUp/Alt+PgDn one page without moving the insertion point; editing resumes
+cursor-follow automatically. Home/End jump to the start/end and therefore
+expose either edge immediately. Enter clears and repaints the prompt bar before
+any potentially blocking submission work. History uses Ctrl+P/Ctrl+N;
+kill/yank uses Ctrl+U/K/W/Y; Tab completes slash commands and session/project
+slugs.
 
 | Command | Effect |
 |---|---|
 | `/help` | Key + command reference |
-| `/session <slug> \| list` | Switch or list sessions |
+| `/session [<slug> \| new \| list \| delete <slug>]` | No arg / `list`: session-picker overlay (Enter switches, `n` new, `d d` deletes). Switching replays the target's transcript into the chat — history is never lost |
 | `/project <slug> \| none` | Select Asper project |
 | `/detail terse\|normal\|rich\|auto` | Force or restore detail level |
 | `/more` | Continue capped answer |
@@ -549,8 +598,12 @@ Streaming tokens coalesced per frame; frame budget ≤ 2 ms at 80×24; fps cap `
 | F1 | Help overlay |
 | F2…F6 | Jump to Trace / Stats / Memory / Tools / Cache |
 | F7 / F8 | Rate last answer good / poor |
-| PgUp / PgDn | Scroll chat pane |
-| ↑ / ↓ | Input history (when editor empty) |
+| ↑ / ↓ | Scroll chat pane one line |
+| PgUp / PgDn | Scroll chat pane one page |
+| Alt+↑ / Alt+↓ | Scroll prompt viewport one line |
+| Alt+PgUp / Alt+PgDn | Scroll prompt viewport one page |
+| Ctrl+P / Ctrl+N | Previous / next input history |
+| Home / End | Jump to prompt beginning / end; viewport follows |
 | y / n / a | Confirmation modal: allow / deny / always this session |
 | Ctrl+D | Quit |
 
@@ -593,7 +646,7 @@ Library never aborts, never writes stdout/stderr on its own (default logger writ
 
 ## 15. MCP Server (`asngn-mcp`)
 
-`asngn-mcp --root <dir> [--config <file>] [--workspace <dir>] [--allow-degraded]`. Stdio, JSON-RPC 2.0. Supports stateless MCP `2026-07-28` (`server/discover`, per-request protocol `_meta`) and legacy `2025-06-18` (`initialize`/`initialized`); other versions fail with `-32022`.
+`asngn-mcp [--root <dir>] [--config <file>] [--workspace <dir>] [--allow-degraded]`. With no root override it discovers `~/asngn/config.xcdn`. Stdio, JSON-RPC 2.0. Supports stateless MCP `2026-07-28` (`server/discover`, per-request protocol `_meta`) and legacy `2025-06-18` (`initialize`/`initialized`); other versions fail with `-32022`.
 
 | Tool | Input | Effect |
 |---|---|---|
@@ -616,31 +669,36 @@ Constraints:
 
 ## 16. Configuration
 
-One xCDN file to `asngn_open` (or `--config`). Precedence: built-in defaults ← `config.xcdn` ← CLI overrides. Every key optional. Complete key set with defaults:
+One xCDN file to `asngn_open` (or `--config`). No-argument frontends discover `~/asngn/config.xcdn`. Precedence: built-in defaults ← `config.xcdn` ← CLI overrides. Every key optional. Complete key set with defaults:
 
 ```xcdn
 #asngn_config {
   engine: {
-    root: ".",
+    root: "~/asngn",
     base_prompt: """You are a capable, honest local assistant.""",
   },
   models: {
     pool: [
-      { id: "nano",  path: "models/qwen2.5-0.5b-instruct-q4_k_m.gguf", ctx: 4096, threads: 4, gpu_layers: -1 },
-      { id: "light", path: "models/qwen2.5-1.5b-instruct-q4_k_m.gguf", ctx: 8192, threads: 4, gpu_layers: -1 },
-      { id: "std",   path: "models/qwen2.5-7b-instruct-q4_k_m.gguf",   ctx: 8192, threads: 6, gpu_layers: -1 },
+      { id: "nano",  path: "models/qwen2.5-0.5b-instruct-q4_k_m.gguf", ctx: 8192,  threads: 4, gpu_layers: -1 },
+      { id: "light", path: "models/qwen2.5-1.5b-instruct-q4_k_m.gguf", ctx: 32768, threads: 4, gpu_layers: -1 },
+      { id: "std",   path: "models/qwen2.5-7b-instruct-q4_k_m.gguf",   ctx: 32768, threads: 6, gpu_layers: -1 },
       { id: "embed", path: "models/multilingual-e5-small-q8_0.gguf",   ctx: 512, threads: 4, gpu_layers: -1, embedding: true, dim: 384 },
     ],
     roles: { router: "nano", planner: "light", generator: "std",
              compressor: "light", adapter: "light", judge: "light", embedder: "embed" },
     max_resident: 3,
-    sampling: {},                       // per-task overrides of §7.4
+    sampling: {
+      classify: { max_tokens: 64 },
+      decide: { max_tokens: 1024 },
+      judge: { max_tokens: 128 },
+    },
   },
   routing: { classifier: "hybrid", max_escalations: 2 },   // "heuristic"|"model"|"hybrid"
-  detail: { default: "auto", terse_tokens: 128, normal_tokens: 384, rich_tokens: 1024 },
+  detail: { default: "auto", terse_tokens: 1024, normal_tokens: 4096, rich_tokens: 10240 },
   context: {
-    summary_tokens: 600, verbatim_tokens: 1600, working_tokens: 800, fold_tokens: 200,
-    digest_threshold_chars: 2048, digest_tokens: 256, pinned_max: 8,
+    summary_tokens: 3072, verbatim_tokens: 8192, working_tokens: 6144,
+    safety_margin: 512, fold_tokens: 1536,
+    digest_threshold_chars: 32768, digest_tokens: 2048, pinned_max: 32,
   },
   cache: {
     enable: true, scope: "session",     // "session"|"global"
@@ -660,8 +718,8 @@ One xCDN file to `asngn_open` (or `--config`). Precedence: built-in defaults ←
   tui: { theme: "asterism", truecolor: "auto", fps_cap: 60, sidebar: "trace" },
   integration: {
     asper: { enable: true, root: "memory", config: null },
-    astools: { enable: true, root: "tools", workspace: ".", config: null,
-             catalog_level: "summary", catalog_chars: 6000 },
+    astools: { enable: true, root: "tools", workspace: "session", config: null,
+             catalog_level: "summary", catalog_chars: 24000 },
   },
   mcp: { autoconfirm: "deny" },
 }
@@ -678,7 +736,8 @@ One xCDN file to `asngn_open` (or `--config`). Precedence: built-in defaults ←
 │   ├── summary.xcdn      # rolling summary (atomic replace)
 │   ├── ledger.xcdn       # stream of #ledger_entry
 │   ├── report.xcdn / report.txt   # from /export
-│   └── blobs/            # digested full texts
+│   ├── blobs/            # digested full texts
+│   └── workspace/        # the session's only default tool workspace
 ├── cache/
 │   ├── semantic.xcdn     # #cache_entry + #cache_touch stream
 │   ├── tools.xcdn        # tool-result cache
@@ -809,23 +868,28 @@ Example log lines:
 | D12 | Judge default `light` (MODERATE/COMPLEX only); all validation overhead ledgered as aux tokens |
 | D13 | Answers capped by detail level, trimmed at sentence boundary, flagged `capped`; `/more` continues |
 | D14 | Deferred to v2 behind unchanged interfaces: learned router, MCP-client sibling mode, streaming MCP, parallel multi-session agents, GPU offload policy, remote telemetry sinks, host-tokenizer callback |
+| D15 | Decision passes emit schema-constrained action objects (`{action, why, input, success, fallback}`) instead of a bare line protocol (accepted 2026-08-26). The GBNF grammar encodes the schema exactly (fixed key order, escape-free bounded strings), mirroring llama.cpp-server JSON-schema constrained output for in-process use; `why` feeds `step` telemetry, `fallback` drives the failure-recovery echo. The professional profile gives this pass 1024 tokens, preventing legitimate structured actions from being truncated. |
+| D16 | Tool execution and user-visible prose are hard-separated into ACTION/DRAFT/RESPONSE states (accepted 2026-08-26). Long `fs.write` payloads use a reserved `@asngn:draft` value exclusively in `content`, while the catalog-free DRAFT phase owns the complete source payload and normalizes a single outer Markdown fence. RESPONSE hides the catalog, buffers before streaming, rejects tool syntax deterministically, and a `generate` turn cannot enter it before a real artifact mutation succeeds. |
 
 ## Appendix A — Step Protocol Grammar (GBNF, illustrative)
 
-Regenerated each turn: CALL grafted verbatim from `astools_grammar_export`; handles = blobs present this turn; RECALL/CALL removed when the sibling is disabled.
+Regenerated each turn: the astools call production grafted verbatim from `astools_grammar_export` as the call action's `input` value; handles = blobs present this turn; recall/call removed when the sibling is disabled. The grammar is the GBNF encoding of the action-object schema (the same constraint a llama.cpp server would apply from a JSON schema), so the planner cannot emit anything but a well-formed action.
 
 ```gbnf
 root      ::= step "\n"
 step      ::= call | recall | open | think | clarify | answer
-call      ::= "CALL " astools-call          # grafted from astools
-recall    ::= "RECALL | " text
-open      ::= "OPEN " handle
-think     ::= "THINK | " text
-clarify   ::= "CLARIFY | " text
-answer    ::= "ANSWER"
+call      ::= "{action: \"call\", why: \"" meta "\", input: " astools-call
+              ", success: \"" meta "\", fallback: \"" meta "\"}"
+recall    ::= "{action: \"recall\", why: \"" meta "\", input: \"" text
+              "\", success: \"" meta "\", fallback: \"" meta "\"}"
+open      ::= "{action: \"open\", why: \"" meta "\", input: \"" handle "\"}"
+think     ::= "{action: \"think\", input: \"" text "\"}"
+clarify   ::= "{action: \"clarify\", why: \"" meta "\", input: \"" text "\"}"
+answer    ::= "{action: \"answer\"}"
 handle    ::= "B1" | "B2" | …               # concrete per-turn alternatives
-text      ::= tchar{1,300}                  # bounded: at the limit only "\n" is legal
-tchar     ::= any char except "|" and newline
+text      ::= tchar{1,2048}                 # bounded: at the limit only the
+meta      ::= tchar{1,512}                  #   closing quote is legal
+tchar     ::= any char except '"', '\', and newlines
 
 # classify micro-grammar
 croot     ::= "CLASS " ("SIMPLE"|"MODERATE"|"COMPLEX")

@@ -46,7 +46,7 @@ static void human_size(size_t bytes, char out[16]) {
 
 /* Extractive fallback digest: the head of the text, one marker line. */
 static char *digest_extract(const char *text, size_t len) {
-  size_t keep = len < 800 ? len : utf8_floor(text, 800);
+  size_t keep = len < 4096 ? len : utf8_floor(text, 4096);
   asngn_buf b;
   asngn_buf_init(&b);
   if (asngn_buf_append(&b, text, keep) != ASNGN_OK ||
@@ -101,7 +101,7 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
     size_t src_len = (s->redact_context && blob_text != NULL)
                          ? blob_len
                          : len;
-    size_t cap = src_len < 16384 ? src_len : utf8_floor(src, 16384);
+    size_t cap = src_len < 65536 ? src_len : utf8_floor(src, 65536);
     char *clipped = asngn_strndup(src, cap);
     int slot = asngn_models_slot_for_role(c, ASNGN_ROLE_COMPRESSOR);
     if (clipped == NULL) {

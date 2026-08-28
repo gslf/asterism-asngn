@@ -61,11 +61,20 @@ dkms.conf
 build/
 build-*/
 
-# Demo engine root: keep config + workspace seed, ignore generated state
-demo/memory/
-demo/sessions/
-demo/cache/
-demo/telemetry/
-demo/models/
-demo/asngn.log*
-demo/workspace/.astools/
+# Local agent worktrees
+.claude/worktrees/
+
+# Runtime state.  Keep reusable starter configurations in examples/; an
+# engine root is local state and must not live in the source checkout.
+/.astools/
+/cache/
+/memory/
+/models/
+/sessions/
+/telemetry/
+/tools/
+/workspace/
+/workspaces/
+/demo/
+/demo-*/
+*.log

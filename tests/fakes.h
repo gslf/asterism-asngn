@@ -9,7 +9,8 @@
  *
  * Fake model: a queue of canned reply strings behind the asngn_model_iface
  * backend vtable. generate() captures the prompts/grammar it was
- * given, pops the next reply (or "ANSWER\n" when the queue is empty),
+ * given, pops the next reply (or the answer action object when the
+ * queue is empty),
  * streams the whole reply through token_cb in one call, and reports token
  * counts with the byte/4 heuristic (min 1, matching asngn_token_heuristic).
  * *cancel set before work => ASNGN_ERR_CANCELLED. embed() is the fake

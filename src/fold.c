@@ -33,7 +33,7 @@ static const char FOLD_INSTRUCTION[] =
     "\n"
     "Answer with the new summary text only.";
 
-/* First sentence of a text, capped at 200 bytes (UTF-8 safe), for the
+/* First sentence of a text, capped at 1024 bytes (UTF-8 safe), for the
  * extractive fallback. */
 static char *first_sentence(const char *text) {
   size_t i, end = 0;
@@ -48,14 +48,14 @@ static char *first_sentence(const char *text) {
     }
   }
   if (end == 0) end = len;
-  if (end > 200) {
-    end = 200;
+  if (end > 1024) {
+    end = 1024;
     while (end > 0 && ((unsigned char)text[end] & 0xC0) == 0x80) end--;
   }
   return asngn_strndup(text, end);
 }
 
-/* Last sentence of a text, capped at 200 bytes. */
+/* Last sentence of a text, capped at 1024 bytes. */
 static char *last_sentence(const char *text) {
   size_t len = strlen(text);
   size_t start = 0, i;
@@ -71,7 +71,7 @@ static char *last_sentence(const char *text) {
     }
   }
   while (start < len && text[start] == ' ') start++;
-  if (len - start > 200) start = len - 200;
+  if (len - start > 1024) start = len - 1024;
   while (start < len && ((unsigned char)text[start] & 0xC0) == 0x80)
     start++;
   return asngn_strndup(text + start, len - start);

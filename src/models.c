@@ -82,6 +82,7 @@ const char *asngn_task_name(asngn_task_kind t) {
   switch (t) {
     case ASNGN_TASK_CLASSIFY: return "classify";
     case ASNGN_TASK_DECIDE:   return "decide";
+    case ASNGN_TASK_DRAFT:    return "draft";
     case ASNGN_TASK_ANSWER:   return "answer";
     case ASNGN_TASK_COMPRESS: return "compress";
     case ASNGN_TASK_ADAPT:    return "adapt";
@@ -96,6 +97,7 @@ static const asngn_sampling *task_sampling(const asngn_config *cfg,
   switch (t) {
     case ASNGN_TASK_CLASSIFY: return &cfg->s_classify;
     case ASNGN_TASK_DECIDE:   return &cfg->s_decide;
+    case ASNGN_TASK_DRAFT:    return &cfg->s_draft;
     case ASNGN_TASK_ANSWER:   return &cfg->s_answer;
     case ASNGN_TASK_COMPRESS: return &cfg->s_compress;
     case ASNGN_TASK_ADAPT:    return &cfg->s_adapt;
@@ -127,10 +129,29 @@ asngn_err asngn_models_init(asngn_ctx *c) {
 
     s->cfg = *src;
     s->cfg.path = asngn_strdup(src->path); /* slot owns its copy */
-    if (src->path != NULL && s->cfg.path == NULL) {
+    s->cfg.base_url = src->base_url ? asngn_strdup(src->base_url) : NULL;
+    s->cfg.remote_model = src->remote_model ? asngn_strdup(src->remote_model) : NULL;
+    s->cfg.api_key_env = src->api_key_env ? asngn_strdup(src->api_key_env) : NULL;
+    s->cfg.api_grammar = src->api_grammar ? asngn_strdup(src->api_grammar) : NULL;
+    s->cfg.reasoning_effort = src->reasoning_effort
+                                  ? asngn_strdup(src->reasoning_effort) : NULL;
+    if ((src->path != NULL && s->cfg.path == NULL) ||
+        (src->base_url && !s->cfg.base_url) ||
+        (src->remote_model && !s->cfg.remote_model) ||
+        (src->api_key_env && !s->cfg.api_key_env) ||
+        (src->api_grammar && !s->cfg.api_grammar) ||
+        (src->reasoning_effort && !s->cfg.reasoning_effort)) {
       size_t j;
+      free(s->cfg.path); free(s->cfg.base_url); free(s->cfg.remote_model);
+      free(s->cfg.api_key_env); free(s->cfg.api_grammar);
+      free(s->cfg.reasoning_effort);
       for (j = 0; j < i; j++) {
         free(c->models[j].cfg.path);
+        free(c->models[j].cfg.base_url);
+        free(c->models[j].cfg.remote_model);
+        free(c->models[j].cfg.api_key_env);
+        free(c->models[j].cfg.api_grammar);
+        free(c->models[j].cfg.reasoning_effort);
         c->models[j].cfg.path = NULL;
         os_mutex_destroy(&c->models[j].mu);
       }
@@ -138,6 +159,13 @@ asngn_err asngn_models_init(asngn_ctx *c) {
       return asngn_seterr(c, ASNGN_ERR_NOMEM, "out of memory");
     }
     os_mutex_init(&s->mu);
+    if (s->cfg.backend == ASMODEL_BACKEND_EMBEDDED &&
+        s->cfg.ram_mb == 0 && s->cfg.path && s->cfg.path[0]) {
+      uint64_t bytes = 0;
+      if (os_file_size(s->cfg.path, &bytes) == ASNGN_OK)
+        s->cfg.ram_mb = (size_t)((bytes + 1024 * 1024 - 1) /
+                                 (1024 * 1024));
+    }
   }
 
   /* Resolve roles onto pool slots by id. */
@@ -183,6 +211,15 @@ asngn_err asngn_models_init(asngn_ctx *c) {
       asngn_model_slot *s = &c->models[es];
       if (s->injected) {
         memset(aux->embed_hash, 0x11, sizeof aux->embed_hash);
+      } else if (s->cfg.backend == ASMODEL_BACKEND_OPENAI) {
+        asngn_sha256_ctx sh;
+        asngn_sha256_init(&sh);
+        if (s->cfg.base_url)
+          asngn_sha256_update(&sh, s->cfg.base_url, strlen(s->cfg.base_url));
+        if (s->cfg.remote_model)
+          asngn_sha256_update(&sh, s->cfg.remote_model,
+                              strlen(s->cfg.remote_model));
+        asngn_sha256_final(&sh, aux->embed_hash);
       } else if (s->cfg.path != NULL && s->cfg.path[0] != '\0') {
         if (asngn_sha256_file(s->cfg.path, aux->embed_hash) != ASNGN_OK) {
           memset(aux->embed_hash, 0, sizeof aux->embed_hash);
@@ -207,6 +244,11 @@ void asngn_models_shutdown(asngn_ctx *c) {
     s->injected = false;
     os_mutex_destroy(&s->mu);
     free(s->cfg.path);
+    free(s->cfg.base_url);
+    free(s->cfg.remote_model);
+    free(s->cfg.api_key_env);
+    free(s->cfg.api_grammar);
+    free(s->cfg.reasoning_effort);
     s->cfg.path = NULL;
   }
   c->models_n = 0;
@@ -242,6 +284,7 @@ void asngn_models_warm(asngn_ctx *c) {
     int slot = asngn_models_slot_for_role(c, ORDER[i]);
     bool seen = false;
     if (slot < 0) continue;
+    if (!c->models[slot].cfg.warm) continue;
     for (j = 0; j < warmed_n; j++)
       if (warmed[j] == slot) seen = true;
     if (seen) continue;
@@ -278,29 +321,80 @@ static void enforce_resident_locked(asngn_ctx *c, int keep) {
   models_aux *aux = aux_find(c);
   int max = c->cfg.max_resident;
 
-  if (max <= 0 || aux == NULL) return;
+  if (aux == NULL) return;
   for (;;) {
     int loaded_n = 0, victim = -1;
+    size_t ram_mb = 0, vram_mb = 0;
     int64_t oldest = 0;
     size_t i;
     for (i = 0; i < c->models_n; i++) {
       asngn_model_slot *s = &c->models[i];
       if (!s->loaded || s->injected) continue;
       loaded_n++;
+      ram_mb += s->cfg.ram_mb;
+      vram_mb += s->cfg.vram_mb;
       if ((int)i == keep || aux->in_use[i]) continue;
       if (victim < 0 || s->last_used_ms < oldest) {
         victim = (int)i;
         oldest = s->last_used_ms;
       }
     }
-    if (loaded_n <= max || victim < 0) return;
+    if ((max <= 0 || loaded_n <= max) &&
+        (c->cfg.max_ram_mb <= 0 || ram_mb <= (size_t)c->cfg.max_ram_mb) &&
+        (c->cfg.max_vram_mb <= 0 ||
+         vram_mb <= (size_t)c->cfg.max_vram_mb)) return;
+    if (victim < 0) return;
     {
       asngn_model_slot *v = &c->models[victim];
       if (v->iface.destroy != NULL) v->iface.destroy(v->iface.ud);
       memset(&v->iface, 0, sizeof v->iface);
       v->loaded = false;
       asngn_log(c, ASNGN_LOG_INFO, "model",
-                "unloaded '%s' (LRU, max_resident=%d)", v->cfg.id, max);
+                "unloaded '%s' (LRU resource budget)", v->cfg.id);
+    }
+  }
+}
+
+/* Evict idle residents before a cold load so hard budgets are not exceeded
+ * even transiently. c->models_mu held. */
+static asngn_err prepare_resident_locked(asngn_ctx *c, int incoming) {
+  models_aux *aux = aux_find(c);
+  asngn_model_slot *want = &c->models[incoming];
+  if (aux == NULL) return ASNGN_OK;
+  for (;;) {
+    size_t ram_mb = want->cfg.ram_mb, vram_mb = want->cfg.vram_mb;
+    int resident = 1, victim = -1;
+    int64_t oldest = 0;
+    size_t i;
+    for (i = 0; i < c->models_n; ++i) {
+      asngn_model_slot *s = &c->models[i];
+      if ((int)i == incoming || !s->loaded || s->injected) continue;
+      resident++;
+      ram_mb += s->cfg.ram_mb;
+      vram_mb += s->cfg.vram_mb;
+      if (!aux->in_use[i] &&
+          (victim < 0 || s->last_used_ms < oldest)) {
+        victim = (int)i;
+        oldest = s->last_used_ms;
+      }
+    }
+    if ((c->cfg.max_resident <= 0 || resident <= c->cfg.max_resident) &&
+        (c->cfg.max_ram_mb <= 0 ||
+         ram_mb <= (size_t)c->cfg.max_ram_mb) &&
+        (c->cfg.max_vram_mb <= 0 ||
+         vram_mb <= (size_t)c->cfg.max_vram_mb))
+      return ASNGN_OK;
+    if (victim < 0)
+      return asngn_seterr(c, ASNGN_ERR_MODEL,
+                          "model '%s' exceeds resident/RAM/VRAM limits",
+                          want->cfg.id);
+    {
+      asngn_model_slot *v = &c->models[victim];
+      if (v->iface.destroy) v->iface.destroy(v->iface.ud);
+      memset(&v->iface, 0, sizeof v->iface);
+      v->loaded = false;
+      asngn_log(c, ASNGN_LOG_INFO, "model",
+                "unloaded '%s' (LRU resource budget)", v->cfg.id);
     }
   }
 }
@@ -311,6 +405,8 @@ static asngn_err ensure_loaded_locked(asngn_ctx *c, int slot) {
   asngn_err e;
 
   if (s->loaded || s->injected) return ASNGN_OK;
+  e = prepare_resident_locked(c, slot);
+  if (e != ASNGN_OK) return e;
   {
     /* phase marker: loads take seconds to tens of seconds on cold
      * cache; without it the trace is silent exactly when the user
@@ -320,7 +416,9 @@ static asngn_err ensure_loaded_locked(asngn_ctx *c, int slot) {
              s->cfg.id);
     asngn_tele_emit(c, "phase", NULL, NULL, NULL, 0, data);
   }
-  e = asngn_model_llama_create(c, &s->cfg, &s->iface);
+  e = s->cfg.backend == ASMODEL_BACKEND_OPENAI
+          ? asngn_model_openai_create(c, &s->cfg, &s->iface)
+          : asngn_model_llama_create(c, &s->cfg, &s->iface);
   if (e != ASNGN_OK) return e;
   s->loaded = true;
   s->last_used_ms = asngn_clock_mono_ms(&c->clock);
@@ -409,8 +507,17 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   os_mutex_unlock(&c->models_mu);
 
   if (e != ASNGN_OK) {
+    char backend_error[512] = {0};
+    if (s->iface.last_error != NULL) {
+      const char *detail = s->iface.last_error(s->iface.ud);
+      if (detail != NULL && detail[0] != '\0')
+        snprintf(backend_error, sizeof backend_error, "%s", detail);
+    }
     free(text);
     if (e == ASNGN_ERR_CANCELLED) return e;
+    if (backend_error[0] != '\0')
+      return asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s' %s failed: %s",
+                          s->cfg.id, asngn_task_name(task), backend_error);
     return asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s' %s failed (%s)",
                         s->cfg.id, asngn_task_name(task), asngn_err_name(e));
   }

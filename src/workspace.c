@@ -22,7 +22,63 @@ static bool skipped_dir(const char *name) {
   return false;
 }
 
-static void hash_tree(asngn_sha256_ctx *h, const char *root,
+/* Code-language census by file extension, tallied during the fingerprint
+ * walk. .h counts toward C — indistinguishable from C++ headers without
+ * parsing, and close enough for a routing signal. */
+static const struct { const char *ext; const char *lang; } ws_langs[] = {
+    {"c", "c"},      {"h", "c"},       {"cpp", "cpp"},  {"cc", "cpp"},
+    {"cxx", "cpp"},  {"hpp", "cpp"},   {"hh", "cpp"},   {"py", "python"},
+    {"rs", "rust"},  {"go", "go"},     {"js", "js"},    {"jsx", "js"},
+    {"mjs", "js"},   {"ts", "ts"},     {"tsx", "ts"},   {"java", "java"},
+    {"cs", "csharp"},{"rb", "ruby"},   {"php", "php"},  {"sh", "shell"},
+    {"swift", "swift"}, {"kt", "kotlin"}, {"zig", "zig"}, {NULL, NULL}};
+
+#define WS_LANG_N (sizeof ws_langs / sizeof ws_langs[0] - 1)
+
+typedef struct {
+  size_t files, bytes;
+  size_t ext_count[WS_LANG_N];
+} ws_scan;
+
+static void ws_scan_file(ws_scan *scan, const char *name, size_t len) {
+  const char *dot = strrchr(name, '.');
+  size_t i;
+  scan->files++;
+  scan->bytes += len;
+  if (dot == NULL || dot[1] == '\0') return;
+  for (i = 0; i < WS_LANG_N; i++) {
+    const char *e = ws_langs[i].ext, *p = dot + 1;
+    while (*e != '\0' && *p != '\0' &&
+           (char)(*p >= 'A' && *p <= 'Z' ? *p - 'A' + 'a' : *p) == *e) {
+      e++; p++;
+    }
+    if (*e == '\0' && *p == '\0') { scan->ext_count[i]++; return; }
+  }
+}
+
+static void ws_scan_finish(const ws_scan *scan, asngn_repo_stats *out) {
+  /* dominant language = argmax of per-language counts (extensions that
+   * map to one language pool their tallies) */
+  size_t lang_count[WS_LANG_N];
+  size_t i, j, best = 0, best_count = 0;
+  memset(lang_count, 0, sizeof lang_count);
+  for (i = 0; i < WS_LANG_N; i++) {
+    for (j = 0; j <= i; j++)
+      if (strcmp(ws_langs[j].lang, ws_langs[i].lang) == 0) break;
+    lang_count[j] += scan->ext_count[i];
+  }
+  out->files = scan->files;
+  out->bytes = scan->bytes;
+  out->language[0] = '\0';
+  for (i = 0; i < WS_LANG_N; i++) {
+    if (lang_count[i] > best_count) { best = i; best_count = lang_count[i]; }
+  }
+  if (best_count > 0)
+    snprintf(out->language, sizeof out->language, "%s", ws_langs[best].lang);
+  out->loaded = true;
+}
+
+static void hash_tree(asngn_sha256_ctx *h, ws_scan *scan, const char *root,
                       const char *relative, unsigned depth) {
   char *dir = relative[0] != '\0' ? os_path_join(root, relative)
                                    : asngn_strdup(root);
@@ -44,6 +100,7 @@ static void hash_tree(asngn_sha256_ctx *h, const char *root,
       asngn_sha256_update(h, rel, strlen(rel) + 1);
       asngn_sha256_update(h, &n, sizeof n);
       asngn_sha256_update(h, data, len);
+      ws_scan_file(scan, files[i], len);
     }
     free(data); free(full); free(rel); free(files[i]);
   }
@@ -51,7 +108,7 @@ static void hash_tree(asngn_sha256_ctx *h, const char *root,
     if (!skipped_dir(dirs[i])) {
       char *rel = relative[0] != '\0' ? os_path_join(relative, dirs[i])
                                        : asngn_strdup(dirs[i]);
-      if (rel != NULL) hash_tree(h, root, rel, depth + 1);
+      if (rel != NULL) hash_tree(h, scan, root, rel, depth + 1);
       free(rel);
     }
     free(dirs[i]);
@@ -208,41 +265,53 @@ static void detect_adapter(asngn_workspace_info *w) {
   snprintf(w->build_adapter, sizeof w->build_adapter, "none");
 }
 
-asngn_err asngn_workspace_refresh(asngn_ctx *c) {
+asngn_err asngn_workspace_info_refresh(asngn_ctx *c,
+                                       asngn_workspace_info *workspace) {
   asngn_sha256_ctx h;
   uint8_t digest[32];
-  if (c == NULL || c->workspace.canonical_root[0] == '\0')
+  ws_scan scan;
+  if (c == NULL || workspace == NULL ||
+      workspace->canonical_root[0] == '\0')
     return ASNGN_ERR_INVALID;
-  c->workspace.head[0] = c->workspace.branch[0] = '\0';
-  git_identity(&c->workspace);
+  memset(&scan, 0, sizeof scan);
+  workspace->head[0] = workspace->branch[0] = '\0';
+  git_identity(workspace);
   asngn_sha256_init(&h);
   asngn_sha256_update(&h, "asngn-workspace-v1", 18);
-  asngn_sha256_update(&h, c->workspace.canonical_root,
-                      strlen(c->workspace.canonical_root) + 1);
-  asngn_sha256_update(&h, c->workspace.repository_root,
-                      strlen(c->workspace.repository_root) + 1);
-  asngn_sha256_update(&h, c->workspace.head, strlen(c->workspace.head) + 1);
-  asngn_sha256_update(&h, c->workspace.branch,
-                      strlen(c->workspace.branch) + 1);
-  asngn_sha256_update(&h, c->workspace.project_id,
-                      strlen(c->workspace.project_id) + 1);
-  asngn_sha256_update(&h, c->workspace.ignore_rules,
-                      strlen(c->workspace.ignore_rules) + 1);
-  asngn_sha256_update(&h, c->workspace.build_adapter,
-                      strlen(c->workspace.build_adapter) + 1);
-  hash_optional_file(&h, c->workspace.repository_root, ".gitignore");
-  hash_optional_file(&h, c->workspace.canonical_root, ".asterismignore");
-  hash_tree(&h, c->workspace.canonical_root, "", 0);
+  asngn_sha256_update(&h, workspace->canonical_root,
+                      strlen(workspace->canonical_root) + 1);
+  asngn_sha256_update(&h, workspace->repository_root,
+                      strlen(workspace->repository_root) + 1);
+  asngn_sha256_update(&h, workspace->head, strlen(workspace->head) + 1);
+  asngn_sha256_update(&h, workspace->branch,
+                      strlen(workspace->branch) + 1);
+  asngn_sha256_update(&h, workspace->project_id,
+                      strlen(workspace->project_id) + 1);
+  asngn_sha256_update(&h, workspace->ignore_rules,
+                      strlen(workspace->ignore_rules) + 1);
+  asngn_sha256_update(&h, workspace->build_adapter,
+                      strlen(workspace->build_adapter) + 1);
+  hash_optional_file(&h, workspace->repository_root, ".gitignore");
+  hash_optional_file(&h, workspace->canonical_root, ".asterismignore");
+  hash_tree(&h, &scan, workspace->canonical_root, "", 0);
   asngn_sha256_final(&h, digest);
-  asngn_sha256_hex(digest, sizeof digest, c->workspace.fingerprint);
+  asngn_sha256_hex(digest, sizeof digest, workspace->fingerprint);
+  ws_scan_finish(&scan, &c->repo_stats);
   return ASNGN_OK;
 }
 
-asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p) {
-  const char *selected = p->workspace_root != NULL ? p->workspace_root
-                                                   : c->cfg.astools_workspace;
+asngn_err asngn_workspace_refresh(asngn_ctx *c) {
+  if (c == NULL) return ASNGN_ERR_INVALID;
+  return asngn_workspace_info_refresh(c, &c->workspace);
+}
+
+static asngn_err workspace_info_build(asngn_ctx *c, const char *selected,
+                                      const char *project_id,
+                                      const char *build_adapter,
+                                      asngn_workspace_info *out) {
   char *joined = NULL, *real = NULL, *repository = NULL;
-  if (selected == NULL || selected[0] == '\0')
+  asngn_err e = ASNGN_OK;
+  if (c == NULL || out == NULL || selected == NULL || selected[0] == '\0')
     return asngn_seterr(c, ASNGN_ERR_CONFIG, "workspace root is required");
   joined = os_path_is_abs(selected) ? asngn_strdup(selected)
                                     : os_path_join(c->root, selected);
@@ -252,32 +321,53 @@ asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p) {
     return asngn_seterr(c, ASNGN_ERR_IO, "workspace cannot be canonicalized");
   }
   free(joined);
-  if (strlen(real) >= sizeof c->workspace.canonical_root) {
-    free(real); return asngn_seterr(c, ASNGN_ERR_INVALID, "workspace path too long");
+  if (strlen(real) >= sizeof out->canonical_root) {
+    free(real);
+    return asngn_seterr(c, ASNGN_ERR_INVALID, "workspace path too long");
   }
-  memset(&c->workspace, 0, sizeof c->workspace);
-  snprintf(c->workspace.canonical_root, sizeof c->workspace.canonical_root,
-           "%s", real);
+  memset(out, 0, sizeof *out);
+  snprintf(out->canonical_root, sizeof out->canonical_root, "%s", real);
   repository = find_repository_root(real);
-  if (repository == NULL ||
-      strlen(repository) >= sizeof c->workspace.repository_root) {
-    free(repository); free(real);
+  if (repository == NULL || strlen(repository) >= sizeof out->repository_root) {
+    free(repository);
+    free(real);
     return asngn_seterr(c, ASNGN_ERR_INVALID, "repository path too long");
   }
-  snprintf(c->workspace.repository_root, sizeof c->workspace.repository_root,
-           "%s", repository);
-  snprintf(c->workspace.ignore_rules, sizeof c->workspace.ignore_rules,
+  snprintf(out->repository_root, sizeof out->repository_root, "%s",
+           repository);
+  snprintf(out->ignore_rules, sizeof out->ignore_rules,
            ".gitignore;.asterismignore;built-in-generated-dirs");
-  if (p->project_id != NULL && p->project_id[0] != '\0')
-    snprintf(c->workspace.project_id, sizeof c->workspace.project_id, "%s",
-             p->project_id);
-  else derive_project(c->workspace.project_id, real);
-  if (p->build_adapter != NULL && p->build_adapter[0] != '\0')
-    snprintf(c->workspace.build_adapter, sizeof c->workspace.build_adapter,
-             "%s", p->build_adapter);
-  else detect_adapter(&c->workspace);
-  free(repository); free(real);
-  return asngn_workspace_refresh(c);
+  if (project_id != NULL && project_id[0] != '\0')
+    snprintf(out->project_id, sizeof out->project_id, "%s", project_id);
+  else
+    derive_project(out->project_id, real);
+  if (build_adapter != NULL && build_adapter[0] != '\0')
+    snprintf(out->build_adapter, sizeof out->build_adapter, "%s",
+             build_adapter);
+  else
+    detect_adapter(out);
+  free(repository);
+  free(real);
+  e = asngn_workspace_info_refresh(c, out);
+  return e;
+}
+
+asngn_err asngn_workspace_info_init(asngn_ctx *c, const char *root,
+                                    asngn_workspace_info *out) {
+  return workspace_info_build(c, root, NULL, NULL, out);
+}
+
+asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p) {
+  const char *selected = p->workspace_root != NULL ? p->workspace_root
+                                                   : c->cfg.astools_workspace;
+  /* "session" is a mode, not a literal directory.  The engine opens
+   * astools against the sessions container for startup readiness and binds
+   * it to sessions/<slug>/workspace before each turn. */
+  if (p->workspace_root == NULL && selected != NULL &&
+      strcmp(selected, "session") == 0)
+    selected = "sessions";
+  return workspace_info_build(c, selected, p->project_id, p->build_adapter,
+                              &c->workspace);
 }
 
 void asngn_workspace_hash(asngn_ctx *c, uint8_t out[32]) {

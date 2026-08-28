@@ -1,0 +1,75 @@
+// Copy to <engine-root>/config.xcdn. Replace both model names with the exact
+// identifiers exposed by LM Studio's OpenAI-compatible server.
+
+#asngn_config {
+  engine: {
+    profile: "coding",
+    base_prompt: """You are a professional local software-engineering
+assistant. Prioritize correctness, completeness, maintainability, and verified
+outcomes. Inspect relevant workspace context before changing it, use tools to
+perform requested work, run applicable builds or tests, and report evidence
+honestly. Token limits prevent waste; they never justify partial work.""",
+  },
+
+  models: {
+    max_resident: 2,
+    pool: [
+      {
+        id: "light",
+        backend: "openai",
+        base_url: "http://127.0.0.1:1234/v1",
+        model: "REPLACE_WITH_ROUTER_MODEL",
+        api_grammar: "lmstudio",
+        reasoning_effort: "none",
+        ctx: 16384,
+        warm: true,
+      },
+      {
+        id: "std",
+        backend: "openai",
+        base_url: "http://127.0.0.1:1234/v1",
+        model: "REPLACE_WITH_CODING_MODEL",
+        api_grammar: "lmstudio",
+        reasoning_effort: "none",
+        ctx: 32768,
+        warm: true,
+      },
+    ],
+    roles: {
+      router: "light",
+      planner: "std",
+      generator: "std",
+      compressor: "light",
+      adapter: "light",
+      judge: "light",
+      embedder: "",
+    },
+  },
+
+  detail: { terse_tokens: 1024, normal_tokens: 4096, rich_tokens: 10240 },
+  context: {
+    summary_tokens: 2048,
+    verbatim_tokens: 4096,
+    working_tokens: 4096,
+    safety_margin: 512,
+    fold_tokens: 1024,
+    digest_threshold_chars: 24576,
+    digest_tokens: 1536,
+  },
+  routing: { classifier: "model", max_escalations: 1 },
+  validation: { judge: "off" },
+  cache: { enable: false, tool_cache: true },
+  safety: { stall_timeout: "PT10M", turn_deadline: "PT20M" },
+
+  integration: {
+    asper: { enable: false, root: "memory" },
+    astools: {
+      enable: true,
+      root: "tools",
+      config: "astools.xcdn",
+      workspace: "session",
+    },
+  },
+  telemetry: { path: "telemetry/telemetry.xcdn" },
+  logging: { path: "asngn.log", level: "info" },
+}

@@ -151,9 +151,13 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
   bool ok = obj != NULL && pins != NULL;
 
   /* Persist the current worktree identity, not merely the fingerprint from
-   * session open; editor/build changes are first-class workspace state. */
-  if (asngn_workspace_refresh(c) == ASNGN_OK)
+   * session open; editor/build changes are first-class workspace state.
+   * An isolated session may be saved while another session is active. */
+  if (c->session_workspaces) {
+    (void)asngn_workspace_info_refresh(c, &s->workspace);
+  } else if (asngn_workspace_refresh(c) == ASNGN_OK) {
     s->workspace = c->workspace;
+  }
 
   asngn_buf_init(&buf);
   for (i = 0; ok && i < s->log_n; i++)
@@ -539,8 +543,10 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
                              asngn_session **out) {
   asngn_session *s;
   char *mpath = NULL, *tpath = NULL, *lpath = NULL, *bdir = NULL;
+  char *wdir = NULL;
   struct xcdn_document *mdoc = NULL;
   asngn_err e;
+  bool session_workspace;
 
   *out = NULL;
   if (!asngn_slug_valid(slug))
@@ -565,6 +571,19 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
     e = asngn_seterr(c, e, "session %s: cannot create directory", slug);
     goto fail;
   }
+  session_workspace = c->session_workspaces;
+  if (session_workspace) {
+    wdir = sess_path(s, "workspace");
+    if (wdir == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
+    e = os_mkdir_p(wdir);
+    if (e == ASNGN_OK)
+      e = asngn_workspace_info_init(c, wdir, &s->workspace);
+    if (e != ASNGN_OK) {
+      e = asngn_seterr(c, e, "session %s: cannot create workspace/", slug);
+      goto fail;
+    }
+    s->workspace_loaded = true;
+  }
   bdir = sess_path(s, "blobs");
   if (bdir == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
   e = os_mkdir_p(bdir);
@@ -584,7 +603,14 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
     xcdn_document_t *d = (xcdn_document_t *)mdoc;
     if (d->values_len > 0) sess_apply_manifest(s, d->values[0]);
   }
-  if (s->workspace_loaded &&
+  if (session_workspace) {
+    /* Ignore legacy manifests that pointed at the engine root or an
+     * unrelated checkout.  Session mode has one deterministic writable
+     * root and migrates old sessions to it on open. */
+    e = asngn_workspace_info_init(c, wdir, &s->workspace);
+    if (e != ASNGN_OK) goto fail;
+    s->workspace_loaded = true;
+  } else if (s->workspace_loaded &&
       strcmp(s->workspace.canonical_root, c->workspace.canonical_root) != 0) {
     e = asngn_seterr(c, ASNGN_ERR_CONFIG,
                      "session %s belongs to workspace %s, not %s", slug,
@@ -592,7 +618,7 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
                      c->workspace.canonical_root);
     goto fail;
   }
-  s->workspace = c->workspace;
+  if (!session_workspace) s->workspace = c->workspace;
 
   /* transcript */
   e = sess_load_transcript(s);
@@ -629,6 +655,7 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   free(mpath);
   free(tpath);
   free(lpath);
+  free(wdir);
   *out = s;
   return ASNGN_OK;
 
@@ -637,6 +664,22 @@ fail:
   free(mpath);
   free(tpath);
   free(lpath);
+  free(wdir);
   asngn_session_free(s);
   return e;
+}
+
+asngn_err asngn_session_workspace_activate(asngn_session *s) {
+  asngn_ctx *c;
+  asngn_err e;
+  if (s == NULL || s->ctx == NULL) return ASNGN_ERR_INVALID;
+  c = s->ctx;
+  if (!c->session_workspaces)
+    return ASNGN_OK;
+  os_rwlock_wrlock(&s->lock);
+  e = asngn_workspace_info_refresh(c, &s->workspace);
+  if (e == ASNGN_OK) c->workspace = s->workspace;
+  os_rwlock_wrunlock(&s->lock);
+  if (e != ASNGN_OK) return e;
+  return asngn_siblings_workspace_sync(c, c->workspace.canonical_root);
 }

@@ -91,14 +91,16 @@ static void fx_drop(fx *f) {
 }
 
 /* One scripted DIRECT turn (heuristic classifier, judge off, cache off):
- * exactly one std-fake generation per turn. */
+ * exactly one generation per turn. A SIMPLE DIRECT turn with a clean
+ * ledger window starts one tier below the generator (G1), so the reply
+ * is scripted on the light fake. */
 static int fx_turn(fx *f, asngn_session *s, const char *msg,
                    const char *reply) {
   asngn_task *task = NULL;
   asngn_turn_result res;
   asngn_err e;
 
-  if (!fake_model_push(&f->stdm, reply)) return 0;
+  if (!fake_model_push(&f->light, reply)) return 0;
   if (asngn_submit(s, msg, NULL, NULL, NULL, &task) != ASNGN_OK) return 0;
   memset(&res, 0, sizeof res);
   e = asngn_task_wait(task, 30000, &res);
@@ -116,8 +118,8 @@ TEST(two_turns_entry_fields) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "led", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "Prima domanda", "Risposta uno.\n"));
-  ASSERT_TRUE(fx_turn(&f, s, "Seconda domanda", "Risposta due.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "First question", "Response one.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "Second question", "Response two.\n"));
 
   ASSERT_EQ_INT((long long)s->led_n, 2);
   ASSERT_TRUE(s->spent_tokens > 0);
@@ -128,7 +130,7 @@ TEST(two_turns_entry_fields) {
   ASSERT_EQ_STR(e0->klass, "simple");
   ASSERT_EQ_STR(e0->detail, "terse");   /* short message, no cue */
   ASSERT_EQ_STR(e0->mode, "direct");
-  ASSERT_EQ_STR(e0->tier, "std");
+  ASSERT_EQ_STR(e0->tier, "light"); /* simple: frugal start */
   ASSERT_EQ_STR(e0->cache, "off");      /* cache disabled */
   ASSERT_EQ_STR(e1->cache, "off");
   ASSERT_EQ_INT(e0->at, 1755150000);
@@ -136,7 +138,7 @@ TEST(two_turns_entry_fields) {
   ASSERT_TRUE(!e0->has_judge);          /* judge off */
   ASSERT_TRUE(!e0->has_user_fb);
   ASSERT_TRUE(!e0->capped);
-  /* "Risposta uno.\n" = 14 bytes -> 3 fake tokens; DIRECT: no decisions */
+  /* "Response one.\n" = 14 bytes -> 3 fake tokens; DIRECT: no decisions */
   ASSERT_EQ_INT((long long)e0->gt_answer, 3);
   ASSERT_EQ_INT((long long)e0->gt_decision, 0);
   ASSERT_EQ_INT((long long)e0->sv_cache, 0);
@@ -157,8 +159,8 @@ TEST(feedback_persists) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "led", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "Prima domanda", "Risposta uno.\n"));
-  ASSERT_TRUE(fx_turn(&f, s, "Seconda domanda", "Risposta due.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "First question", "Response one.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "Second question", "Response two.\n"));
   t2 = s->led[1].turn;
 
   ASSERT_OK(asngn_feedback(s, t2, 1));
@@ -204,7 +206,7 @@ TEST(qpt_window_and_feedback) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "qpt", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "Prima domanda", "Risposta uno.\n"));
+  ASSERT_TRUE(fx_turn(&f, s, "First question", "Response one.\n"));
   ASSERT_EQ_INT((long long)s->led_n, 1);
 
   /* no judge/outcome: quality is unknown and QpT stays zero */

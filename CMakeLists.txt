@@ -18,6 +18,8 @@ set(ASNGN_ASPER_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/../asterism-asper"
     CACHE PATH "Path to the asterism-asper working tree")
 set(ASNGN_ASTOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../asterism-astools"
     CACHE PATH "Path to the asterism-astools working tree")
+set(ASNGN_ASMODEL_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../asterism-asmodel"
+    CACHE PATH "Path to the asterism-asmodel working tree")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -44,13 +46,16 @@ if(ASNGN_SANITIZERS AND NOT MSVC)
 endif()
 
 # ── Dependencies ────────────────────────────────────────────────────────────
-foreach(dep_dir "${ASNGN_ASPER_DIR}" "${ASNGN_ASTOOLS_DIR}")
+foreach(dep_dir "${ASNGN_ASPER_DIR}" "${ASNGN_ASTOOLS_DIR}" "${ASNGN_ASMODEL_DIR}")
   if(NOT EXISTS "${dep_dir}/CMakeLists.txt")
     message(FATAL_ERROR "sibling missing: ${dep_dir} — clone the asterism "
             "siblings next to this repository or set ASNGN_ASPER_DIR / "
             "ASNGN_ASTOOLS_DIR")
   endif()
 endforeach()
+
+set(ASMODEL_BUILD_TESTS OFF)
+add_subdirectory("${ASNGN_ASMODEL_DIR}" deps-build/asmodel EXCLUDE_FROM_ALL)
 
 # xCDN-C: one copy for the whole process, supplied by astools' pinned
 # submodule. Configuration is deliberately read-only: dependency fixes belong
@@ -150,6 +155,8 @@ set(ASNGN_SOURCES
   src/tokens.c
   src/models.c
   src/models_llama.c
+  src/models_openai.c
+  src/models_shared.c
   src/context.c
   src/fold.c
   src/digest.c
@@ -176,6 +183,20 @@ if(WIN32)
 else()
   list(APPEND ASNGN_SOURCES src/os_posix.c)
 endif()
+if(ASNGN_WITH_LLAMA)
+  # The guard shim is C++: it is the only place a C++ exception escaping
+  # llama.cpp's C API can be caught before it unwinds into C callers and
+  # terminates the process (llama_guard.h has the full rationale).
+  enable_language(CXX)
+  list(APPEND ASNGN_SOURCES src/llama_guard.cpp)
+  if (MSVC)
+    # /EHs, not the default /EHsc: the guard exists to catch C++ exceptions
+    # arriving through the extern "C" llama API. Under /EHsc MSVC assumes
+    # extern "C" callees never throw and elides exactly those catch
+    # handlers, turning every such exception into a silent fail-fast.
+    set_source_files_properties(src/llama_guard.cpp PROPERTIES COMPILE_OPTIONS "/EHs")
+  endif()
+endif()
 
 add_library(asngn_obj OBJECT ${ASNGN_SOURCES})
 target_include_directories(asngn_obj
@@ -184,7 +205,7 @@ target_include_directories(asngn_obj
           ${ASNGN_ASPER_DIR}/include
           ${ASNGN_ASTOOLS_DIR}/include)
 target_compile_options(asngn_obj PRIVATE ${ASNGN_C_FLAGS})
-target_link_libraries(asngn_obj PUBLIC xcdn)
+target_link_libraries(asngn_obj PUBLIC xcdn asmodel_static)
 if(UNIX AND NOT APPLE)
   target_compile_definitions(asngn_obj PRIVATE _POSIX_C_SOURCE=200809L)
 endif()
@@ -209,7 +230,7 @@ endif()
 
 foreach(tgt asngn_static asngn_shared)
   target_include_directories(${tgt} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-  target_link_libraries(${tgt} PUBLIC xcdn asper_static astools_static)
+  target_link_libraries(${tgt} PUBLIC xcdn asmodel_static asper_static astools_static)
   if(UNIX AND NOT APPLE)
     target_compile_definitions(${tgt} PUBLIC _POSIX_C_SOURCE=200809L)
   endif()

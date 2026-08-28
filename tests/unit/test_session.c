@@ -32,7 +32,7 @@ static int fx_write_config(fx *f, const char *extra) {
   ok = fprintf(fp,
                "#asngn_config {\n"
                "  integration: { asper: { enable: false }, "
-               "astools: { enable: false } },\n"
+               "astools: { enable: false, workspace: \".\" } },\n"
                "  validation: { judge: \"off\" },\n"
                "  routing: { classifier: \"heuristic\" },\n"
                "  models: { pool: [\n"
@@ -95,15 +95,17 @@ static void fx_drop(fx *f) {
 }
 
 /* One scripted DIRECT turn: classifier heuristic (no nano pass), judge
- * off, cache disabled — exactly one generation, popped from the std
- * fake. reply NULL queues nothing (cache-served turns). */
+ * off, cache disabled — exactly one generation. A SIMPLE DIRECT turn
+ * with a clean ledger window starts one tier below the generator (G1),
+ * so replies are popped from the light fake. reply NULL queues nothing
+ * (cache-served turns). */
 static int fx_turn(fx *f, asngn_session *s, const char *msg,
                    const char *reply, asngn_turn_result *out) {
   asngn_task *task = NULL;
   asngn_turn_result res;
   asngn_err e;
 
-  if (reply != NULL && !fake_model_push(&f->stdm, reply)) return 0;
+  if (reply != NULL && !fake_model_push(&f->light, reply)) return 0;
   if (asngn_submit(s, msg, NULL, NULL, NULL, &task) != ASNGN_OK) return 0;
   memset(&res, 0, sizeof res);
   e = asngn_task_wait(task, 30000, &res);
@@ -216,13 +218,14 @@ TEST(transcript_roundtrip) {
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
   ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "Come va oggi", "Ciao!\n", &res));
-  ASSERT_EQ_STR(res.answer, "Ciao!\n");
+  ASSERT_TRUE(fx_turn(&f, s, "How are things today", "Hello!\n", &res));
+  ASSERT_EQ_STR(res.answer, "Hello!\n");
   ASSERT_EQ_INT((long long)res.turn, 2);
   ASSERT_EQ_STR(res.klass, "simple");
   ASSERT_EQ_STR(res.cache, "off");
   asngn_turn_result_free(&res);
-  ASSERT_EQ_INT(f.stdm.calls, 1);
+  ASSERT_EQ_INT(f.light.calls, 1); /* simple: frugal start, one tier down */
+  ASSERT_EQ_INT(f.stdm.calls, 0);
   ASSERT_EQ_INT(f.nano.calls, 0); /* heuristic classifier: no nano pass */
   asngn_session_close(s);
   s = NULL;
@@ -231,17 +234,62 @@ TEST(transcript_roundtrip) {
   ASSERT_EQ_INT((long long)s->log_n, 2);
   ASSERT_EQ_INT((long long)s->turns, 2);
   ASSERT_EQ_STR(s->log[0].role, "user");
-  ASSERT_EQ_STR(s->log[0].text, "Come va oggi");
+  ASSERT_EQ_STR(s->log[0].text, "How are things today");
   ASSERT_EQ_INT((long long)s->log[0].n, 1);
   ASSERT_EQ_STR(s->log[1].role, "assistant");
-  ASSERT_EQ_STR(s->log[1].text, "Ciao!\n");
+  ASSERT_EQ_STR(s->log[1].text, "Hello!\n");
   ASSERT_EQ_INT((long long)s->log[1].n, 2);
   /* route summary fields on the assistant turn */
   ASSERT_EQ_STR(s->log[1].klass, "simple");
   ASSERT_EQ_STR(s->log[1].detail, "terse");
   ASSERT_EQ_STR(s->log[1].mode, "direct");
-  ASSERT_EQ_STR(s->log[1].tier, "std");
+  ASSERT_EQ_STR(s->log[1].tier, "light"); /* simple: frugal start */
   ASSERT_EQ_STR(s->log[1].cache, "off");
+  asngn_session_close(s);
+  fx_drop(&f);
+}
+
+TEST(transcript_public_api) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_transcript_entry *ents = NULL;
+  size_t n = 0;
+
+  ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
+  ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
+
+  /* empty session: NULL/0, still ASNGN_OK */
+  ASSERT_OK(asngn_session_transcript(s, &ents, &n));
+  ASSERT_TRUE(ents == NULL);
+  ASSERT_EQ_INT((long long)n, 0);
+
+  ASSERT_TRUE(fx_turn(&f, s, "How are things today", "Hello!\n", NULL));
+  ASSERT_OK(asngn_session_transcript(s, &ents, &n));
+  ASSERT_EQ_INT((long long)n, 2);
+  ASSERT_EQ_STR(ents[0].role, "user");
+  ASSERT_EQ_STR(ents[0].text, "How are things today");
+  ASSERT_EQ_INT((long long)ents[0].turn, 1);
+  ASSERT_EQ_STR(ents[0].tier, "");
+  ASSERT_EQ_STR(ents[1].role, "assistant");
+  ASSERT_EQ_STR(ents[1].text, "Hello!\n");
+  ASSERT_EQ_INT((long long)ents[1].turn, 2);
+  ASSERT_EQ_STR(ents[1].tier, "light");
+  ASSERT_TRUE(ents[1].at > 0);
+  asngn_free(ents);
+  asngn_session_close(s);
+  s = NULL;
+
+  /* the replay survives a close/reopen: history comes back from disk */
+  ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
+  ents = NULL;
+  n = 0;
+  ASSERT_OK(asngn_session_transcript(s, &ents, &n));
+  ASSERT_EQ_INT((long long)n, 2);
+  ASSERT_EQ_STR(ents[1].text, "Hello!\n");
+  asngn_free(ents);
+
+  ASSERT_ERR(asngn_session_transcript(NULL, &ents, &n),
+             ASNGN_ERR_INVALID);
   asngn_session_close(s);
   fx_drop(&f);
 }
@@ -252,7 +300,7 @@ TEST(pin_persists) {
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
   ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "Come va oggi", "Ciao!\n", NULL));
+  ASSERT_TRUE(fx_turn(&f, s, "How are things today", "Hello!\n", NULL));
   ASSERT_OK(asngn_session_pin(s, 1, 1));
   ASSERT_TRUE(s->log[0].pinned);
   asngn_session_close(s);
@@ -278,7 +326,7 @@ TEST(pin_limit) {
                        "  cache: { enable: false },\n"
                        "  context: { pinned_max: 1 },\n"));
   ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
-  ASSERT_TRUE(fx_turn(&f, s, "Come va oggi", "Ciao!\n", NULL));
+  ASSERT_TRUE(fx_turn(&f, s, "How are things today", "Hello!\n", NULL));
   ASSERT_OK(asngn_session_pin(s, 1, 1));
   ASSERT_ERR(asngn_session_pin(s, 2, 1), ASNGN_ERR_INVALID);
   ASSERT_TRUE(!s->log[1].pinned);
@@ -342,16 +390,63 @@ TEST(workspace_discovers_repository_identity) {
   fx_drop(&f);
 }
 
+TEST(session_workspace_is_private_and_switches_deterministically) {
+  fx f;
+  asngn_session *alpha = NULL, *beta = NULL;
+  asngn_workspace_info aw, bw;
+  char *marker = NULL, *beta_marker = NULL, *alpha_dir = NULL;
+
+  ASSERT_TRUE(fx_setup(&f, "  cache: { enable: false },\n"));
+  free(f.c->cfg.astools_workspace);
+  f.c->cfg.astools_workspace = asngn_strdup("session");
+  f.c->session_workspaces = true;
+  ASSERT_TRUE(f.c->cfg.astools_workspace != NULL);
+
+  ASSERT_OK(asngn_session_open(f.c, "alpha", &alpha));
+  ASSERT_OK(asngn_session_open(f.c, "beta", &beta));
+  ASSERT_OK(asngn_session_workspace(alpha, &aw));
+  ASSERT_OK(asngn_session_workspace(beta, &bw));
+  ASSERT_TRUE(strcmp(aw.canonical_root, bw.canonical_root) != 0);
+  ASSERT_TRUE(strstr(aw.canonical_root, "sessions") != NULL);
+  ASSERT_TRUE(strstr(aw.canonical_root, "alpha") != NULL);
+  ASSERT_TRUE(strstr(aw.canonical_root, "workspace") != NULL);
+  ASSERT_TRUE(strstr(bw.canonical_root, "beta") != NULL);
+
+  ASSERT_OK(asngn_session_workspace_activate(alpha));
+  ASSERT_EQ_STR(f.c->workspace.canonical_root, aw.canonical_root);
+  marker = os_path_join(f.c->workspace.canonical_root, "alpha-only.txt");
+  ASSERT_TRUE(marker != NULL);
+  ASSERT_OK(os_write_file(marker, "alpha\n", 6));
+  ASSERT_OK(asngn_session_workspace_activate(beta));
+  ASSERT_EQ_STR(f.c->workspace.canonical_root, bw.canonical_root);
+  beta_marker = os_path_join(bw.canonical_root, "alpha-only.txt");
+  ASSERT_TRUE(beta_marker != NULL);
+  ASSERT_TRUE(!os_file_exists(beta_marker));
+
+  alpha_dir = asngn_strdup(alpha->dir);
+  ASSERT_TRUE(alpha_dir != NULL);
+  free(beta_marker);
+  free(marker);
+  asngn_session_close(beta);
+  asngn_session_close(alpha);
+  ASSERT_OK(asngn_session_delete(f.c, "alpha"));
+  ASSERT_TRUE(!os_file_exists(alpha_dir));
+  free(alpha_dir);
+  fx_drop(&f);
+}
+
 TEST_LIST = {
   TEST_ENTRY(create_layout_and_busy),
   TEST_ENTRY(generated_and_invalid_slugs),
   TEST_ENTRY(list_sorted),
   TEST_ENTRY(manifest_project_persists),
   TEST_ENTRY(transcript_roundtrip),
+  TEST_ENTRY(transcript_public_api),
   TEST_ENTRY(pin_persists),
   TEST_ENTRY(pin_limit),
   TEST_ENTRY(workspace_is_bound_and_live_fingerprinted),
   TEST_ENTRY(workspace_discovers_repository_identity),
+  TEST_ENTRY(session_workspace_is_private_and_switches_deterministically),
 };
 
 RUN_ALL_TESTS()

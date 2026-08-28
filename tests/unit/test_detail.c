@@ -30,10 +30,10 @@ static void ctx_free(asngn_ctx *c) {
 TEST(caps_defaults) {
   asngn_ctx *c = ctx_defaults();
   ASSERT_TRUE(c != NULL);
-  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_TERSE), 128);
-  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_NORMAL), 384);
-  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_RICH), 1024);
-  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_AUTO), 384); /* defensive */
+  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_TERSE), 1024);
+  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_NORMAL), 4096);
+  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_RICH), 10240);
+  ASSERT_EQ_INT(asngn_detail_cap(c, ASNGN_DETAIL_AUTO), 4096); /* defensive */
   ctx_free(c);
 }
 
@@ -59,7 +59,7 @@ TEST(names) {
 
 TEST(cues) {
   ASSERT_EQ_INT(asngn_detail_cue("briefly please"), ASNGN_DETAIL_TERSE);
-  ASSERT_EQ_INT(asngn_detail_cue("spiegamelo in dettaglio"),
+  ASSERT_EQ_INT(asngn_detail_cue("walk me through it step by step"),
                 ASNGN_DETAIL_RICH);
   ASSERT_EQ_INT(asngn_detail_cue("hello"), ASNGN_DETAIL_AUTO);
   ASSERT_EQ_INT(asngn_detail_cue(NULL), ASNGN_DETAIL_AUTO);
@@ -75,22 +75,26 @@ TEST(effective_user_override_wins_under_pressure) {
   ctx_free(c);
 }
 
-TEST(effective_warn_pressure_steps_rich_down) {
+TEST(effective_pressure_preserves_moderate_rich) {
   asngn_ctx *c = ctx_defaults(); /* warn_at 0.80 */
   ASSERT_TRUE(c != NULL);
   ASSERT_EQ_INT(asngn_detail_effective(c, ASNGN_DETAIL_AUTO,
                                        ASNGN_DETAIL_RICH,
                                        ASNGN_CLASS_MODERATE, 0.9),
-                ASNGN_DETAIL_NORMAL);
+                ASNGN_DETAIL_RICH);
   ctx_free(c);
 }
 
-TEST(effective_normal_to_terse_only_when_simple) {
+TEST(effective_simple_pressure_removes_only_excess) {
   asngn_ctx *c = ctx_defaults();
   ASSERT_TRUE(c != NULL);
   ASSERT_EQ_INT(asngn_detail_effective(c, ASNGN_DETAIL_AUTO,
                                        ASNGN_DETAIL_NORMAL,
                                        ASNGN_CLASS_SIMPLE, 0.9),
+                ASNGN_DETAIL_NORMAL);
+  ASSERT_EQ_INT(asngn_detail_effective(c, ASNGN_DETAIL_AUTO,
+                                       ASNGN_DETAIL_NORMAL,
+                                       ASNGN_CLASS_SIMPLE, 1.0),
                 ASNGN_DETAIL_TERSE);
   ASSERT_EQ_INT(asngn_detail_effective(c, ASNGN_DETAIL_AUTO,
                                        ASNGN_DETAIL_NORMAL,
@@ -99,13 +103,13 @@ TEST(effective_normal_to_terse_only_when_simple) {
   ctx_free(c);
 }
 
-TEST(effective_full_pressure_forces_terse) {
+TEST(effective_full_pressure_preserves_complex_quality) {
   asngn_ctx *c = ctx_defaults();
   ASSERT_TRUE(c != NULL);
   ASSERT_EQ_INT(asngn_detail_effective(c, ASNGN_DETAIL_AUTO,
                                        ASNGN_DETAIL_RICH,
                                        ASNGN_CLASS_COMPLEX, 1.0),
-                ASNGN_DETAIL_TERSE);
+                ASNGN_DETAIL_RICH);
   ctx_free(c);
 }
 
@@ -125,9 +129,9 @@ TEST_LIST = {
   TEST_ENTRY(names),
   TEST_ENTRY(cues),
   TEST_ENTRY(effective_user_override_wins_under_pressure),
-  TEST_ENTRY(effective_warn_pressure_steps_rich_down),
-  TEST_ENTRY(effective_normal_to_terse_only_when_simple),
-  TEST_ENTRY(effective_full_pressure_forces_terse),
+  TEST_ENTRY(effective_pressure_preserves_moderate_rich),
+  TEST_ENTRY(effective_simple_pressure_removes_only_excess),
+  TEST_ENTRY(effective_full_pressure_preserves_complex_quality),
   TEST_ENTRY(effective_default_auto_takes_classifier_vote),
 };
 

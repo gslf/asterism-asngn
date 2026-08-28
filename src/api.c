@@ -170,13 +170,24 @@ static asngn_err root_join(asngn_ctx *c, char **slot) {
   return ASNGN_OK;
 }
 
+/* No-argument frontends converge on one conventional engine root.  That
+ * location bootstraps config.xcdn discovery; engine.root inside the file
+ * remains authoritative unless an API/CLI override is supplied. */
+static char *default_engine_root(void) {
+  const char *home = getenv("USERPROFILE");
+  if (home == NULL || home[0] == '\0') home = getenv("HOME");
+  if (home == NULL || home[0] == '\0') return asngn_strdup(".");
+  return os_path_join(home, "asngn");
+}
+
 asngn_err asngn_open_with(const asngn_open_params *p,
                           const asngn_model_iface *fakes, size_t fakes_n,
                           const char *const *fake_ids,
                           const asngn_clock *clk, asngn_ctx **out) {
   asngn_ctx *c;
   asngn_err e;
-  const char *root_in;
+  const char *root_in, *bootstrap_root;
+  char *default_root = NULL;
   size_t i;
 
   if (out == NULL || p == NULL) return ASNGN_ERR_INVALID;
@@ -190,14 +201,22 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   c->allow_degraded = p->allow_degraded != 0;
 
   asngn_config_defaults(&c->cfg);
+  bootstrap_root = p->engine_root;
+  if (bootstrap_root == NULL || bootstrap_root[0] == '\0') {
+    default_root = default_engine_root();
+    if (default_root == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
+    bootstrap_root = default_root;
+    free(c->cfg.root);
+    c->cfg.root = asngn_strdup(bootstrap_root);
+    if (c->cfg.root == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
+  }
   {
     /* layout: <engine_root>/config.xcdn is discovered when no
      * explicit config path is given */
     const char *cfg_path = p->config_path;
     char *discovered = NULL;
     if (cfg_path == NULL) {
-      const char *base = p->engine_root != NULL ? p->engine_root : ".";
-      discovered = os_path_join(base, "config.xcdn");
+      discovered = os_path_join(bootstrap_root, "config.xcdn");
       if (discovered != NULL && os_file_exists(discovered))
         cfg_path = discovered;
     }
@@ -205,6 +224,9 @@ asngn_err asngn_open_with(const asngn_open_params *p,
     free(discovered);
   }
   if (e != ASNGN_OK) goto fail;
+  c->session_workspaces = p->workspace_root == NULL &&
+                          c->cfg.astools_workspace != NULL &&
+                          strcmp(c->cfg.astools_workspace, "session") == 0;
 
   /* engine root: open param wins over engine.root */
   root_in = p->engine_root != NULL ? p->engine_root : c->cfg.root;
@@ -250,6 +272,7 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   /* model weights: relative paths resolve under the engine root, like
    * every other engine-root artifact (the process cwd is arbitrary) */
   for (i = 0; i < c->cfg.pool_n; i++) {
+    if (c->cfg.pool[i].backend == ASMODEL_BACKEND_OPENAI) continue;
     e = root_join(c, &c->cfg.pool[i].path);
     if (e != ASNGN_OK) goto fail;
   }
@@ -267,6 +290,8 @@ asngn_err asngn_open_with(const asngn_open_params *p,
     }
   }
   e = asngn_models_init(c);
+  if (e != ASNGN_OK) goto fail;
+  e = asngn_shared_models_init(c);
   if (e != ASNGN_OK) goto fail;
 
   /* siblings (degrade on failure) */
@@ -296,10 +321,12 @@ asngn_err asngn_open_with(const asngn_open_params *p,
 
   asngn_log(c, ASNGN_LOG_INFO, "session", "asngn %s open at %s",
             asngn_version(), c->root);
+  free(default_root);
   *out = c;
   return ASNGN_OK;
 
 fail:
+  free(default_root);
   asngn_close(c);
   return e;
 }
@@ -332,6 +359,7 @@ void asngn_close(asngn_ctx *c) {
   asngn_cache_shutdown(c);
   asngn_toolcache_shutdown(c);
   asngn_siblings_close(c);
+  asngn_shared_models_shutdown(c);
   asngn_models_shutdown(c);
   asngn_tele_shutdown(c);
   asngn_log_close(c);
@@ -355,13 +383,16 @@ asngn_err asngn_session_workspace(asngn_session *s,
                                   asngn_workspace_info *out) {
   asngn_err e;
   if (s == NULL || out == NULL) return ASNGN_ERR_INVALID;
-  e = asngn_workspace_refresh(s->ctx);
-  if (e != ASNGN_OK) return e;
   os_rwlock_wrlock(&s->lock);
-  s->workspace = s->ctx->workspace;
+  if (s->ctx->session_workspaces) {
+    e = asngn_workspace_info_refresh(s->ctx, &s->workspace);
+  } else {
+    e = asngn_workspace_refresh(s->ctx);
+    if (e == ASNGN_OK) s->workspace = s->ctx->workspace;
+  }
   *out = s->workspace;
   os_rwlock_wrunlock(&s->lock);
-  return ASNGN_OK;
+  return e;
 }
 
 static asngn_err startup_readiness(asngn_ctx *c) {
@@ -374,6 +405,18 @@ static asngn_err startup_readiness(asngn_ctx *c) {
   for (r = 0; r < ASNGN_ROLE_COUNT; r++) {
     int slot = c->role_slot[r];
     asngn_model_slot *m;
+    bool required = true;
+    if (r == ASNGN_ROLE_ROUTER &&
+        c->cfg.classifier == ASNGN_CLASSIFIER_HEURISTIC)
+      required = false;
+    else if (r == ASNGN_ROLE_ADAPTER && !c->cfg.cache_enable)
+      required = false;
+    else if (r == ASNGN_ROLE_JUDGE && c->cfg.judge == ASNGN_JUDGE_OFF)
+      required = false;
+    else if (r == ASNGN_ROLE_EMBEDDER && !c->cfg.cache_enable &&
+             !c->cfg.asper_enable)
+      required = false;
+    if (!required) continue;
     if (slot < 0 || (size_t)slot >= c->models_n)
       return asngn_seterr(c, ASNGN_ERR_MODEL,
                           "coding readiness failed: role %s is unmapped",
@@ -381,7 +424,12 @@ static asngn_err startup_readiness(asngn_ctx *c) {
     if (seen[slot]) continue;
     seen[slot] = true;
     m = &c->models[slot];
-    if (!m->injected && (m->cfg.path == NULL || !os_file_exists(m->cfg.path))) {
+    /* Remote/OpenAI-compatible slots intentionally have no local weight
+     * path.  Coding readiness must validate a path only for the embedded
+     * backend, otherwise selecting the professional profile makes a valid
+     * LM Studio setup fail at startup. */
+    if (!m->injected && m->cfg.backend == ASMODEL_BACKEND_EMBEDDED &&
+        (m->cfg.path == NULL || !os_file_exists(m->cfg.path))) {
       if (c->allow_degraded) {
         asngn_log(c, ASNGN_LOG_WARN, "model",
                   "coding readiness degraded: model '%s' missing at %s",
@@ -492,11 +540,12 @@ void asngn_session_close(asngn_session *s) {
   asngn_session_free(s);
 }
 
-/* Remove every regular file in dir, then dir itself (empty-dir remove:
- * unexpected nested directories fail the rmdir and surface as IO). */
+/* Remove one session-owned tree.  The caller constructs dir exclusively as
+ * <canonical sessions_dir>/<validated slug>; recursion is needed because a
+ * session workspace contains user-created project directories. */
 static asngn_err session_rm_dir(const char *dir) {
-  char **files = NULL;
-  size_t n = 0, i;
+  char **files = NULL, **dirs = NULL;
+  size_t n = 0, nd = 0, i;
   asngn_err e = os_list_dir(dir, &files, &n);
   if (e != ASNGN_OK) return e;
   for (i = 0; i < n; i++) {
@@ -513,12 +562,27 @@ static asngn_err session_rm_dir(const char *dir) {
   }
   free(files);
   if (e != ASNGN_OK) return e;
+  e = os_list_dirs(dir, &dirs, &nd);
+  if (e != ASNGN_OK) return e;
+  for (i = 0; i < nd; i++) {
+    if (e == ASNGN_OK) {
+      char *full = os_path_join(dir, dirs[i]);
+      if (full == NULL) e = ASNGN_ERR_NOMEM;
+      else {
+        e = session_rm_dir(full);
+        free(full);
+      }
+    }
+    free(dirs[i]);
+  }
+  free(dirs);
+  if (e != ASNGN_OK) return e;
   e = os_remove_dir(dir);
   return e == ASNGN_ERR_NOT_FOUND ? ASNGN_OK : e;
 }
 
 asngn_err asngn_session_delete(asngn_ctx *c, const char *slug) {
-  char *dir = NULL, *blobs = NULL;
+  char *dir = NULL;
   size_t i;
   asngn_err e;
   if (c == NULL || slug == NULL) return ASNGN_ERR_INVALID;
@@ -535,24 +599,19 @@ asngn_err asngn_session_delete(asngn_ctx *c, const char *slug) {
   os_rwlock_rdunlock(&c->lock);
 
   dir = os_path_join(c->sessions_dir, slug);
-  blobs = dir != NULL ? os_path_join(dir, "blobs") : NULL;
-  if (dir == NULL || blobs == NULL) {
+  if (dir == NULL) {
     free(dir);
-    free(blobs);
     return ASNGN_ERR_NOMEM;
   }
   {
     char *real = os_realpath(dir);
     if (real == NULL) {
-      free(blobs);
       free(dir);
       return asngn_seterr(c, ASNGN_ERR_NOT_FOUND, "no session %s", slug);
     }
     free(real);
   }
-  e = session_rm_dir(blobs);
-  if (e == ASNGN_OK || e == ASNGN_ERR_NOT_FOUND) e = session_rm_dir(dir);
-  free(blobs);
+  e = session_rm_dir(dir);
   free(dir);
   if (e != ASNGN_OK)
     return asngn_seterr(c, e, "cannot delete session %s", slug);
@@ -668,6 +727,52 @@ asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
     os_rwlock_wrunlock(&s->lock);
     return e;
   }
+}
+
+asngn_err asngn_session_transcript(asngn_session *s,
+                                   asngn_transcript_entry **out,
+                                   size_t *out_n) {
+  asngn_transcript_entry *ents;
+  size_t i, n, bytes;
+  char *p;
+  if (s == NULL || out == NULL || out_n == NULL) return ASNGN_ERR_INVALID;
+  *out = NULL;
+  *out_n = 0;
+  os_rwlock_rdlock(&s->lock);
+  n = s->log_n;
+  if (n == 0) {
+    os_rwlock_rdunlock(&s->lock);
+    return ASNGN_OK;
+  }
+  /* one allocation: the entry array followed by the packed texts */
+  bytes = n * sizeof *ents;
+  for (i = 0; i < n; i++)
+    bytes += (s->log[i].text != NULL ? strlen(s->log[i].text) : 0) + 1;
+  ents = malloc(bytes);
+  if (ents == NULL) {
+    os_rwlock_rdunlock(&s->lock);
+    return ASNGN_ERR_NOMEM;
+  }
+  p = (char *)(ents + n);
+  for (i = 0; i < n; i++) {
+    const asngn_turn *t = &s->log[i];
+    const char *txt = t->text != NULL ? t->text : "";
+    size_t len = strlen(txt);
+    memset(&ents[i], 0, sizeof ents[i]);
+    ents[i].turn = t->n;
+    snprintf(ents[i].role, sizeof ents[i].role, "%s", t->role);
+    memcpy(p, txt, len + 1);
+    ents[i].text = p;
+    p += len + 1;
+    ents[i].at = (long long)t->at;
+    ents[i].pinned = t->pinned ? 1 : 0;
+    ents[i].folded = t->folded ? 1 : 0;
+    snprintf(ents[i].tier, sizeof ents[i].tier, "%s", t->tier);
+  }
+  os_rwlock_rdunlock(&s->lock);
+  *out = ents;
+  *out_n = n;
+  return ASNGN_OK;
 }
 
 asngn_err asngn_session_compact(asngn_session *s) {

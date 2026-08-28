@@ -141,13 +141,27 @@ static asngn_err sib_open_asper(asngn_ctx *c) {
               root);
   } else {
     asper_open_params p;
+    asper_model_binding models;
     asper_err ae;
     memset(&p, 0, sizeof(p));
     p.memory_root = root;
     p.config_path = conf;
+    memset(&models, 0, sizeof models);
+    models.manager = c->shared_models;
+    {
+      int curator_slot = asngn_models_slot_for_role(c, ASNGN_ROLE_COMPRESSOR);
+      int embed_slot = asngn_models_slot_for_role(c, ASNGN_ROLE_EMBEDDER);
+      if (curator_slot >= 0)
+        models.curator_model_id = c->models[curator_slot].cfg.id;
+      if (embed_slot >= 0) {
+        models.embedding_model_id = c->models[embed_slot].cfg.id;
+        models.embedding_dim = c->models[embed_slot].cfg.dim;
+      }
+      asngn_models_embed_hash(c, models.embedding_model_hash);
+    }
     /* Asper's relative model paths (the shared weights files) resolve
      * under the engine root, exactly like asngn's own pool paths. */
-    ae = asper_open_at(&p, c->root, &c->asper);
+    ae = asper_open_at_with_models(&p, c->root, &models, &c->asper);
     if (ae != ASPER_OK) {
       /* No context was created, so there is no asper_last_error to read:
        * the stable code name is all we have. */
@@ -166,12 +180,12 @@ static asngn_err sib_open_asper(asngn_ctx *c) {
   return ASNGN_OK;
 }
 
-static asngn_err sib_open_astools(asngn_ctx *c) {
+static asngn_err sib_open_astools_at(asngn_ctx *c, const char *workspace) {
   char *root, *work, *conf = NULL;
   asngn_err e;
 
   root = sib_join(c, c->cfg.astools_root);
-  work = asngn_strdup(c->workspace.canonical_root);
+  work = asngn_strdup(workspace);
   if (c->cfg.astools_config) conf = sib_join(c, c->cfg.astools_config);
   if (!root || !work || (c->cfg.astools_config && !conf)) {
     free(root);
@@ -207,6 +221,18 @@ static asngn_err sib_open_astools(asngn_ctx *c) {
                 "astools_open failed: %s; tools disabled (degraded)",
                 astools_err_name(ae));
     } else {
+      char *active = asngn_strdup(work);
+      if (active == NULL) {
+        astools_close(c->astools);
+        c->astools = NULL;
+        free(root);
+        free(work);
+        free(conf);
+        return asngn_seterr(c, ASNGN_ERR_NOMEM,
+                            "siblings: out of memory");
+      }
+      free(c->astools_workspace_active);
+      c->astools_workspace_active = active;
       c->astools_ok = true;
       astools_set_logger(c->astools, sib_astools_log, c);
     }
@@ -230,7 +256,7 @@ asngn_err asngn_siblings_open(asngn_ctx *c) {
     if (e != ASNGN_OK) return e;
   }
   if (c->cfg.astools_enable) {
-    e = sib_open_astools(c);
+    e = sib_open_astools_at(c, c->workspace.canonical_root);
     if (e != ASNGN_OK) return e;
   }
   return ASNGN_OK;
@@ -243,21 +269,23 @@ asngn_err asngn_siblings_readiness(asngn_ctx *c) {
   if (c == NULL) return ASNGN_ERR_INVALID;
   memset(&mr, 0, sizeof mr);
   memset(&tr, 0, sizeof tr);
-  if (!c->asper_ok || c->asper == NULL)
+  if (c->cfg.asper_enable && (!c->asper_ok || c->asper == NULL))
     why = "Asper is unavailable";
-  else if (asper_get_readiness(c->asper, &mr) != ASPER_OK ||
-           !mr.store_ok || !mr.embedder_ok || !mr.curator_ok)
+  else if (c->cfg.asper_enable &&
+           (asper_get_readiness(c->asper, &mr) != ASPER_OK ||
+            !mr.store_ok || !mr.embedder_ok || !mr.curator_ok))
     why = "Asper store, embedder, or curator is not ready";
-  else if (!c->astools_ok || c->astools == NULL)
+  else if (c->cfg.astools_enable && (!c->astools_ok || c->astools == NULL))
     why = "astools is unavailable";
-  else if (astools_get_readiness(c->astools, &tr) != ASTOOLS_OK ||
-           !tr.workspace_bound)
+  else if (c->cfg.astools_enable &&
+           (astools_get_readiness(c->astools, &tr) != ASTOOLS_OK ||
+            !tr.workspace_bound))
     why = "astools has no canonical workspace";
-  else if ((tr.workspace_access & 2) == 0)
+  else if (c->cfg.astools_enable && (tr.workspace_access & 2) == 0)
     why = "astools lacks a read-write workspace grant";
-  else if (tr.sandbox_level < 1)
+  else if (c->cfg.astools_enable && tr.sandbox_level < 1)
     why = "astools sandbox is disabled";
-  else if (tr.tools_enabled == 0)
+  else if (c->cfg.astools_enable && tr.tools_enabled == 0)
     why = "astools has no enabled tools";
   if (why == NULL) return ASNGN_OK;
   if (c->allow_degraded) {
@@ -282,6 +310,8 @@ void asngn_siblings_close(asngn_ctx *c) {
   }
   c->asper_ok = false;
   c->astools_ok = false;
+  free(c->astools_workspace_active);
+  c->astools_workspace_active = NULL;
   free(c->astools_catalog);
   c->astools_catalog = NULL;
   free(c->astools_grammar);
@@ -290,6 +320,32 @@ void asngn_siblings_close(asngn_ctx *c) {
   c->notes = NULL;
   c->notes_n = 0;
   c->notes_cap = 0;
+}
+
+asngn_err asngn_siblings_workspace_sync(asngn_ctx *c, const char *root) {
+  asngn_err e;
+  if (c == NULL || root == NULL || root[0] == '\0')
+    return ASNGN_ERR_INVALID;
+  if (!c->cfg.astools_enable) return ASNGN_OK;
+
+  /* The agent worker serializes turns across sessions.  Rebinding here
+   * gives every turn an astools context whose auto-grant and relative-path
+   * base are exactly that session's private workspace. */
+  if (c->astools_workspace_active != NULL &&
+      strcmp(c->astools_workspace_active, root) == 0)
+    return ASNGN_OK;
+  if (c->astools != NULL) {
+    astools_close(c->astools);
+    c->astools = NULL;
+  }
+  c->astools_ok = false;
+  free(c->astools_workspace_active);
+  c->astools_workspace_active = NULL;
+  e = sib_open_astools_at(c, root);
+  if (e != ASNGN_OK) return e;
+  if (c->cfg.profile == ASNGN_PROFILE_CODING)
+    return asngn_siblings_readiness(c);
+  return ASNGN_OK;
 }
 
 /* ═══════════════════════ catalog / grammar ═══════════════════════ */
@@ -560,7 +616,7 @@ asngn_err asngn_siblings_observe(asngn_ctx *c, int is_assistant,
 /* ═══════════════════════ recall ═══════════════════════ */
 
 #define SIB_RECALL_CITES     3
-#define SIB_CITE_MAX_BYTES 200
+#define SIB_CITE_MAX_BYTES 2048
 
 asngn_err asngn_siblings_recall(asngn_ctx *c, const char *question,
                                 char **out_block) {

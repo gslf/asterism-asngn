@@ -32,9 +32,9 @@ extern "C" {
  */
 #define ASNGN_FIX_POOL                                                     \
   "[\n"                                                                    \
-  "      { id: \"nano\",  path: \"fake-nano.gguf\",  ctx: 4096 },\n"       \
-  "      { id: \"light\", path: \"fake-light.gguf\", ctx: 8192 },\n"       \
-  "      { id: \"std\",   path: \"fake-std.gguf\",   ctx: 8192 },\n"       \
+  "      { id: \"nano\",  path: \"fake-nano.gguf\",  ctx: 8192 },\n"       \
+  "      { id: \"light\", path: \"fake-light.gguf\", ctx: 32768 },\n"      \
+  "      { id: \"std\",   path: \"fake-std.gguf\",   ctx: 32768 },\n"      \
   "      { id: \"embed\", path: \"fake-embed.gguf\", ctx: 512,"            \
   " embedding: true, dim: 16 },\n"                                         \
   "    ]"

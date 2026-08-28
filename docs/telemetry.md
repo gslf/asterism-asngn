@@ -10,17 +10,18 @@ and unknown `data` fields (forward compatibility).
 | kind          | data fields                                            |
 |---------------|--------------------------------------------------------|
 | `turn_start`  | `bytes` — size of the gated user message               |
-| `classify`    | `class`, `detail`, `mode`, `source` ("heuristic" \| "model" \| "hybrid") |
-| `route`       | `class`, `detail`, `mode`, `tier`; or `escalated: true` when the judge ladder moves the generator up a tier |
+| `classify`    | `class`, `detail`, `mode`, `task`, `tools`, `repo_files`, `escalated`, `unreliable`, `eval` (success rate or null), `source` ("heuristic" \| "model" \| "hybrid") |
+| `route`       | `class`, `detail`, `mode`, `task`, `tier`; or `escalated: true` when the judge ladder moves the generator up a tier; or `start: "up"/"down"` when the evidence-gated initial tier moves |
 | `cache_probe` | `outcome` ("hit" \| "adapt" \| "miss"), `cos`          |
-| `model_call`  | `model` (pool id), `task` (classify \| decide \| answer \| compress \| adapt \| judge), `tokens_in`, `tokens_out`, `ms`, `tps` |
+| `model_call`  | `model` (pool id), `task` (classify \| decide \| draft \| answer \| compress \| adapt \| judge), `tokens_in`, `tokens_out`, `ms`, `tps` |
 | `tool_call`   | `tool`, `command`, `ok`, `ms`; or `cached: true` for a tool-result-cache hit |
-| `recall`      | (empty) — the RECALL step ran                          |
+| `step`        | `action` (call \| recall \| open \| think \| clarify \| answer), `why` — the model's declared rationale (redacted, flattened, truncated) |
+| `recall`      | (empty) — the recall step ran                          |
 | `fold`        | `mode` ("compressor" \| "extractive")                  |
 | `digest`      | `label` (tool.command or "recall"), `bytes` (full size)|
 | `judge`       | `score` (0–10), `tokens`                               |
 | `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated) — answer via `asngn_confirm` |
-| `guard`       | `guard` — one of `stall`, `identical_call`, `oscillation`, `step_budget`, `think_limit`, `tool_cap`, `working_trim`, `budget_frugal` |
+| `guard`       | `guard` — one of `stall`, `identical_call`, `oscillation`, `step_budget`, `think_limit`, `recall_limit`, `futile_steps`, `tool_cap`, `working_trim`, `budget_pressure`, `outcome_gate`, `response_protocol` |
 | `answer`      | `tokens`, `capped`                                     |
 | `turn_end`    | (empty), or `cancelled: true`                          |
 | `error`       | `message`                                              |

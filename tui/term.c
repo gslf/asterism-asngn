@@ -668,6 +668,16 @@ static size_t decode_csi(const unsigned char *buf, size_t i, size_t n,
     break;
   default: break;
   }
+  if (np >= 1 && (params[1] == 3 || params[1] == 4 ||
+                  params[1] == 7 || params[1] == 8)) {
+    switch (*kind) {
+    case TK_UP: *kind = TK_ALT_UP; break;
+    case TK_DOWN: *kind = TK_ALT_DOWN; break;
+    case TK_PGUP: *kind = TK_ALT_PGUP; break;
+    case TK_PGDN: *kind = TK_ALT_PGDN; break;
+    default: break;
+    }
+  }
   return i;
 }
 
@@ -746,6 +756,12 @@ int tui_term_read_keys(tui_term *t, tui_key *out, int max) {
     } else if (c == 0x19) {
       nk = key_push(out, max, nk, TK_CTRL_Y, NULL);
       i++;
+    } else if (c == 0x10) {
+      nk = key_push(out, max, nk, TK_CTRL_P, NULL);
+      i++;
+    } else if (c == 0x0E) {
+      nk = key_push(out, max, nk, TK_CTRL_N, NULL);
+      i++;
     } else if (c < 0x20) {
       i++; /* other control bytes: ignore */
     } else {
@@ -800,6 +816,7 @@ static int win_decode_key(tui_term *t, const KEY_EVENT_RECORD *k,
   WORD vk = k->wVirtualKeyCode;
   WCHAR wc = k->uChar.UnicodeChar;
   DWORD st = k->dwControlKeyState;
+  int alt = (st & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
 
   u8[0] = '\0';
   switch (vk) {
@@ -813,14 +830,14 @@ static int win_decode_key(tui_term *t, const KEY_EVENT_RECORD *k,
   case VK_TAB: return TK_TAB; /* Shift+Tab: treat as Tab (POSIX parity) */
   case VK_BACK: return TK_BACKSPACE;
   case VK_DELETE: return TK_DELETE;
-  case VK_UP: return TK_UP;
-  case VK_DOWN: return TK_DOWN;
+  case VK_UP: return alt ? TK_ALT_UP : TK_UP;
+  case VK_DOWN: return alt ? TK_ALT_DOWN : TK_DOWN;
   case VK_LEFT: return TK_LEFT;
   case VK_RIGHT: return TK_RIGHT;
   case VK_HOME: return TK_HOME;
   case VK_END: return TK_END;
-  case VK_PRIOR: return TK_PGUP;
-  case VK_NEXT: return TK_PGDN;
+  case VK_PRIOR: return alt ? TK_ALT_PGUP : TK_PGUP;
+  case VK_NEXT: return alt ? TK_ALT_PGDN : TK_PGDN;
   case VK_F1: return TK_F1;
   case VK_F2: return TK_F2;
   case VK_F3: return TK_F3;
@@ -839,6 +856,8 @@ static int win_decode_key(tui_term *t, const KEY_EVENT_RECORD *k,
   case 0x0B: return TK_CTRL_K;
   case 0x17: return TK_CTRL_W;
   case 0x19: return TK_CTRL_Y;
+  case 0x10: return TK_CTRL_P;
+  case 0x0E: return TK_CTRL_N;
   case L'\r': return TK_ENTER;
   case L'\n': return TK_NEWLINE;
   case 0x08: case 0x7F: return TK_BACKSPACE;

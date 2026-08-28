@@ -40,7 +40,7 @@ static asngn_err context_check(asngn_ctx *c, int slot,
     return ASNGN_ERR_INVALID;
   memset(&d, 0, sizeof d);
   d.n_ctx = c->models[slot].cfg.ctx > 0
-                ? (size_t)c->models[slot].cfg.ctx : 4096u;
+                ? (size_t)c->models[slot].cfg.ctx : 32768u;
   d.output_reserve = output_reserve > 0
                          ? (size_t)output_reserve
                          : (size_t)c->cfg.rich_tokens;
@@ -115,6 +115,39 @@ static asngn_err verb_render(asngn_buf *b, const asngn_turn *t) {
   return e;
 }
 
+/* Render the mandatory current message and instruction around a suffix of
+ * optional working evidence.  The caller tokenizes this complete block, so
+ * the zone limit is based on the exact prompt shape rather than a sum of
+ * independently tokenized fragments (which is not generally additive). */
+static asngn_err working_render(asngn_buf *b, const asngn_turn_state *t,
+                                const char *instruction, size_t first,
+                                bool follows_verbatim) {
+  asngn_err e;
+  size_t i;
+
+  e = asngn_buf_appends(b, follows_verbatim ? "\n## This turn\n"
+                                           : "## This turn\n");
+  if (e == ASNGN_OK && t != NULL && t->user_msg != NULL) {
+    e = asngn_buf_appends(b, "user: ");
+    if (e == ASNGN_OK) e = asngn_buf_appends(b, t->user_msg);
+    if (e == ASNGN_OK) e = asngn_buf_appendc(b, '\n');
+  }
+  if (e == ASNGN_OK && t != NULL) {
+    for (i = first; i < t->work_n && e == ASNGN_OK; i++) {
+      e = asngn_buf_appends(b, t->work[i].text);
+      if (e == ASNGN_OK && t->work[i].text[0] != '\0' &&
+          t->work[i].text[strlen(t->work[i].text) - 1] != '\n')
+        e = asngn_buf_appendc(b, '\n');
+    }
+  }
+  if (e == ASNGN_OK && instruction != NULL && instruction[0] != '\0') {
+    e = asngn_buf_appendc(b, '\n');
+    if (e == ASNGN_OK) e = asngn_buf_appends(b, instruction);
+    if (e == ASNGN_OK) e = asngn_buf_appendc(b, '\n');
+  }
+  return e;
+}
+
 /* Select the verbatim zone: pinned turns first (chronological),
  * then the most recent unpinned turns, chosen newest-first under the
  * remaining budget, rendered chronologically. The current in-flight user
@@ -174,7 +207,9 @@ static asngn_err verbatim_build(asngn_ctx *c, asngn_session *s,
       if (e != ASNGN_OK) { asngn_buf_free(&one); goto out; }
       cost = zone_tokens(c, count_slot, one.data);
       asngn_buf_free(&one);
-      if (used + cost > budget) break; /* older turns are larger holes */
+      /* A large recent turn does not imply older turns are larger.  Keep
+       * scanning so a small but useful earlier exchange can still fit. */
+      if (used + cost > budget) continue;
       take[i - 1] = true;
       used += cost;
     }
@@ -213,7 +248,6 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   const char *base = c->cfg.base_prompt != NULL ? c->cfg.base_prompt : "";
   char *verb_text = NULL;
   size_t verb_tokens = 0;
-  size_t i;
 
   memset(out, 0, sizeof *out);
   asngn_buf_init(&sys);
@@ -237,8 +271,8 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   }
 
   /* zone 3: tool catalog (astools renders its own "## Tools" heading) */
-  if (t != NULL && t->catalog != NULL && t->catalog[0] != '\0' &&
-      !t->opts.no_tools) {
+  if (t != NULL && t->phase == ASNGN_PHASE_ACTION &&
+      t->catalog != NULL && t->catalog[0] != '\0' && !t->opts.no_tools) {
     e = asngn_buf_appends(&sys, "\n\n");
     if (e == ASNGN_OK) e = asngn_buf_appends(&sys, t->catalog);
     if (e != ASNGN_OK) goto fail;
@@ -275,57 +309,34 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   /* zone 6: this turn — current message, working items, instruction */
   {
     asngn_buf work;
-    size_t wtoks = 0;
-    asngn_buf_init(&work);
-    e = asngn_buf_appends(&work, usr.len > 0 ? "\n## This turn\n"
-                                             : "## This turn\n");
-    if (e == ASNGN_OK && t != NULL && t->user_msg != NULL) {
-      e = asngn_buf_appends(&work, "user: ");
-      if (e == ASNGN_OK) e = asngn_buf_appends(&work, t->user_msg);
-      if (e == ASNGN_OK) e = asngn_buf_appendc(&work, '\n');
-    }
-    if (e == ASNGN_OK && t != NULL) {
-      /* whole-item working budget: drop oldest items when over;
-       * digestion keeps single items small, so drops are rare */
-      size_t total = 0, first = 0;
-      for (i = 0; i < t->work_n; i++) total += t->work[i].tokens;
-      while (first < t->work_n &&
-             total > (size_t)c->cfg.working_tokens) {
-        total -= t->work[first].tokens;
-        first++;
-      }
-      if (first > 0) {
-        asngn_log(c, ASNGN_LOG_WARN, "context",
-                  "working zone over budget: %zu item(s) trimmed", first);
-        asngn_tele_emit(c, "guard", NULL, NULL,
-                        s != NULL ? s->slug : NULL,
-                        t->led.turn, "{guard: \"working_trim\"}");
-      }
-      for (i = first; i < t->work_n && e == ASNGN_OK; i++) {
-        e = asngn_buf_appends(&work, t->work[i].text);
-        if (e == ASNGN_OK && t->work[i].text[0] != '\0' &&
-            t->work[i].text[strlen(t->work[i].text) - 1] != '\n')
-          e = asngn_buf_appendc(&work, '\n');
-        if (e == ASNGN_OK) wtoks += t->work[i].tokens;
-      }
+    size_t first = 0;
+    size_t rendered_tokens = 0;
+    for (;;) {
+      asngn_buf_init(&work);
+      e = working_render(&work, t, instruction, first, usr.len > 0);
+      if (e != ASNGN_OK) break;
+      rendered_tokens = zone_tokens(c, count_slot, work.data);
+      if (rendered_tokens <= (size_t)c->cfg.working_tokens || t == NULL ||
+          first >= t->work_n)
+        break;
+      asngn_buf_free(&work);
+      first++;
     }
     if (e != ASNGN_OK) {
       asngn_buf_free(&work);
       goto fail;
     }
+    if (first > 0) {
+      asngn_log(c, ASNGN_LOG_WARN, "context",
+                "working zone over budget: %zu item(s) trimmed", first);
+      asngn_tele_emit(c, "guard", NULL, NULL,
+                      s != NULL ? s->slug : NULL,
+                      t->led.turn, "{guard: \"working_trim\"}");
+    }
+    out->tok_working = rendered_tokens;
     e = asngn_buf_append(&usr, work.data, work.len);
     asngn_buf_free(&work);
     if (e != ASNGN_OK) goto fail;
-    if (t != NULL && t->user_msg != NULL)
-      wtoks += zone_tokens(c, count_slot, t->user_msg);
-    out->tok_working = wtoks;
-  }
-  if (instruction != NULL && instruction[0] != '\0') {
-    e = asngn_buf_appendc(&usr, '\n');
-    if (e == ASNGN_OK) e = asngn_buf_appends(&usr, instruction);
-    if (e == ASNGN_OK) e = asngn_buf_appendc(&usr, '\n');
-    if (e != ASNGN_OK) goto fail;
-    out->tok_working += zone_tokens(c, count_slot, instruction);
   }
 
   out->system_text = asngn_buf_detach(&sys);

@@ -60,7 +60,7 @@ const char *asngn_detail_name(asngn_detail d) {
 
 /* Case-insensitive (ASCII) substring search; cues are matched as plain
  * substrings, not whole words — "word-ish" matching is deliberate, so
- * "approfondit" covers "approfondito/approfondita/approfonditamente". */
+ * multi-word cues like "step by step" match anywhere in the sentence. */
 static const char *detail_ci_strstr(const char *hay, const char *needle) {
   size_t nl = strlen(needle);
   for (; *hay != '\0'; hay++) {
@@ -79,20 +79,16 @@ static const char *detail_ci_strstr(const char *hay, const char *needle) {
 
 /* Cue table (first matching table wins; TERSE cues are checked first):
  *
- *   TERSE  "briefly"  "in breve"  "brevemente"  "one line"  "una riga"
- *          "tl;dr"
- *   RICH   "in detail"  "in dettaglio"  "thoroughly"  "approfondit"
- *          "step by step"  "passo passo"
+ *   TERSE  "briefly"  "one line"  "tl;dr"
+ *   RICH   "in detail"  "thoroughly"  "step by step"
  *
  * Returns ASNGN_DETAIL_AUTO when no cue is present (no override). */
 asngn_detail asngn_detail_cue(const char *message) {
   static const char *const terse_cues[] = {
-    "briefly", "in breve", "brevemente", "one line", "una riga", "tl;dr",
-    NULL
+    "briefly", "one line", "tl;dr", NULL
   };
   static const char *const rich_cues[] = {
-    "in detail", "in dettaglio", "thoroughly", "approfondit",
-    "step by step", "passo passo", NULL
+    "in detail", "thoroughly", "step by step", NULL
   };
   size_t i;
 
@@ -112,11 +108,9 @@ asngn_detail asngn_detail_cue(const char *message) {
  * 1. Start: user override when explicit (!= AUTO); otherwise
  *    detail.default when explicit; otherwise the classifier vote
  *    (which is never AUTO — a defensive AUTO reads as NORMAL).
- * 2. Pressure levers apply only when the user did NOT explicitly
- *    override (an explicit override always wins untouched):
- *      p >= 1.00     forced TERSE.
- *      p >= warn_at  one level down: RICH -> NORMAL; NORMAL -> TERSE
- *                    only for SIMPLE turns.
+ * 2. Spend pressure may remove excess verbosity from SIMPLE turns only.
+ *    It is accounting guidance, not permission to under-resource hard work:
+ *    MODERATE/COMPLEX tasks retain the detail justified by their evidence.
  * 3. The result is a concrete level, never AUTO.
  */
 asngn_detail asngn_detail_effective(asngn_ctx *c, asngn_detail user_override,
@@ -130,11 +124,10 @@ asngn_detail asngn_detail_effective(asngn_ctx *c, asngn_detail user_override,
                                                    : classifier_vote;
   if (d == ASNGN_DETAIL_AUTO) d = ASNGN_DETAIL_NORMAL; /* defensive */
 
-  if (pressure >= 1.0) return ASNGN_DETAIL_TERSE;
-  if (pressure >= c->cfg.warn_at) {
+  if (klass == ASNGN_CLASS_SIMPLE && pressure >= c->cfg.warn_at) {
     if (d == ASNGN_DETAIL_RICH)
       d = ASNGN_DETAIL_NORMAL;
-    else if (d == ASNGN_DETAIL_NORMAL && klass == ASNGN_CLASS_SIMPLE)
+    else if (d == ASNGN_DETAIL_NORMAL && pressure >= 1.0)
       d = ASNGN_DETAIL_TERSE;
   }
   return d;

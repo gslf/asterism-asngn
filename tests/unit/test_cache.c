@@ -16,11 +16,11 @@
 
 /* Bag-of-words fake-embed geometry (verified in cosine_geometry):
  *   Q_HIT vs Q_HIT    cos = 1.0            (>= hit 0.95)
- *   Q_HIT vs Q_ADAPT  cos = 5/sqrt(30) ~ 0.9129 (in [0.85, 0.95))
- *   Q_HIT vs Q_MISS   cos ~ 0.54           (< adapt 0.85)          */
-static const char Q_HIT[]   = "come rigenero la cache embeddings";
-static const char Q_ADAPT[] = "come rigenero la cache embeddings adesso";
-static const char Q_MISS[]  = "quale porta usa il server ftp remoto";
+ *   Q_HIT vs Q_ADAPT  cos = 6/sqrt(42) ~ 0.9258 (in [0.85, 0.95))
+ *   Q_HIT vs Q_MISS   cos ~ 0.52           (< adapt 0.85)          */
+static const char Q_HIT[]   = "how to regenerate the embeddings cache";
+static const char Q_ADAPT[] = "how to regenerate the embeddings cache now";
+static const char Q_MISS[]  = "which port does the remote ftp server use";
 
 /* ── shared fixture ───────────────────────────────────────────────────── */
 
@@ -106,14 +106,16 @@ static int fx_reopen_ctx(fx *f) {
   return fx_open_ctx(f);
 }
 
-/* One scripted DIRECT turn; reply NULL queues nothing (cache-served). */
+/* One scripted DIRECT turn; reply NULL queues nothing (cache-served).
+ * SIMPLE DIRECT turns start one tier below the generator (G1), so
+ * replies are scripted on the light fake. */
 static int fx_turn(fx *f, asngn_session *s, const char *msg,
                    const char *reply, asngn_turn_result *out) {
   asngn_task *task = NULL;
   asngn_turn_result res;
   asngn_err e;
 
-  if (reply != NULL && !fake_model_push(&f->stdm, reply)) return 0;
+  if (reply != NULL && !fake_model_push(&f->light, reply)) return 0;
   if (asngn_submit(s, msg, NULL, NULL, NULL, &task) != ASNGN_OK) return 0;
   memset(&res, 0, sizeof res);
   e = asngn_task_wait(task, 30000, &res);
@@ -170,9 +172,9 @@ TEST(miss_then_verbatim_hit) {
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "cache1", &s));
 
-  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Risposta A.\n", &r));
+  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Response A.\n", &r));
   ASSERT_EQ_STR(r.cache, "miss");
-  ASSERT_EQ_STR(r.answer, "Risposta A.\n");
+  ASSERT_EQ_STR(r.answer, "Response A.\n");
   asngn_turn_result_free(&r);
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.cache_misses, 1);
@@ -182,10 +184,11 @@ TEST(miss_then_verbatim_hit) {
   /* the same question again: verbatim reuse, zero generation */
   ASSERT_TRUE(fx_turn(&f, s, Q_HIT, NULL, &r));
   ASSERT_EQ_STR(r.cache, "hit");
-  ASSERT_EQ_STR(r.answer, "Risposta A.\n");
+  ASSERT_EQ_STR(r.answer, "Response A.\n");
   ASSERT_TRUE(r.tokens_saved > 0);
   asngn_turn_result_free(&r);
-  ASSERT_EQ_INT(f.stdm.calls, 1); /* the generator was not consulted */
+  ASSERT_EQ_INT(f.light.calls, 1); /* no second generation */
+  ASSERT_EQ_INT(f.stdm.calls, 0); /* the generator was not consulted */
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.cache_hits, 1);
   ASSERT_EQ_INT((long long)st.cache_misses, 1);
@@ -206,17 +209,17 @@ TEST(paraphrase_adapt) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "cache2", &s));
-  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Risposta A.\n", NULL));
+  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Response A.\n", NULL));
 
-  /* overlapping paraphrase: cos ~0.913 lands in [adapt, hit) — the
+  /* overlapping paraphrase: cos ~0.926 lands in [adapt, hit) — the
    * adapter (light role) rewrites the cached answer */
-  ASSERT_TRUE(fake_model_push(&f.light, "Risposta adattata.\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "Response adapted.\n"));
   ASSERT_TRUE(fx_turn(&f, s, Q_ADAPT, NULL, &r));
   ASSERT_EQ_STR(r.cache, "adapt");
-  ASSERT_EQ_STR(r.answer, "Risposta adattata.\n");
+  ASSERT_EQ_STR(r.answer, "Response adapted.\n");
   asngn_turn_result_free(&r);
-  ASSERT_EQ_INT(f.stdm.calls, 1);  /* only the first turn generated */
-  ASSERT_EQ_INT(f.light.calls, 1); /* one adapt pass */
+  ASSERT_EQ_INT(f.stdm.calls, 0);  /* generator never consulted */
+  ASSERT_EQ_INT(f.light.calls, 2); /* first-turn generation + adapt */
   ASSERT_EQ_STR(s->led[1].cache, "adapt");
   ASSERT_EQ_STR(s->led[1].tier, "light");
   ASSERT_TRUE(s->led[1].sv_cache > 0);
@@ -235,12 +238,12 @@ TEST(probe_direct_outcomes) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "probe", &s));
-  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Risposta A.", 0));
+  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Response A.", 0));
 
   ASSERT_OK(asngn_cache_probe(f.c, s, Q_HIT, 0.0, &pr));
   ASSERT_EQ_INT(pr.outcome, ASNGN_CACHE_HIT);
   ASSERT_TRUE(pr.answer != NULL);
-  ASSERT_EQ_STR(pr.answer, "Risposta A.");
+  ASSERT_EQ_STR(pr.answer, "Response A.");
   ASSERT_EQ_DBL(pr.cos, 1.0, 1e-5);
   ASSERT_TRUE(pr.query_vec != NULL);
   asngn_cache_probe_free(&pr);
@@ -266,7 +269,7 @@ TEST(epoch_blocks_hit_allows_adapt) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "epoch", &s));
-  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Risposta A.", 0));
+  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Response A.", 0));
 
   /* same epoch: verbatim hit */
   ASSERT_OK(asngn_cache_probe(f.c, s, Q_HIT, 0.0, &pr));
@@ -292,7 +295,7 @@ TEST(tools_used_excluded_plan_hint) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "tools", &s));
-  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Uscita del tool.", 1));
+  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Output of the tool.", 1));
 
   /* tool-touched entries never answer, even at cos 1.0 */
   ASSERT_OK(asngn_cache_probe(f.c, s, Q_HIT, 0.0, &pr));
@@ -316,7 +319,7 @@ TEST(ttl_sweep_expires) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "ttl", &s));
-  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Risposta A.", 0));
+  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Response A.", 0));
   ASSERT_EQ_INT((long long)asngn_cache_count(f.c), 1);
 
   /* default TTL is P7D: 8 days later the sweep drops the entry */
@@ -335,7 +338,7 @@ TEST(persistence_across_reopen) {
 
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "persist", &s));
-  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Risposta A.", 0));
+  ASSERT_TRUE(fx_insert(&f, s, Q_HIT, "Response A.", 0));
   ASSERT_OK(asngn_cache_compact(f.c));
   asngn_session_close(s);
   s = NULL;
@@ -352,7 +355,7 @@ TEST(persistence_across_reopen) {
   ASSERT_OK(asngn_cache_probe(f.c, s, Q_HIT, 0.0, &pr));
   ASSERT_EQ_INT(pr.outcome, ASNGN_CACHE_HIT);
   ASSERT_TRUE(pr.answer != NULL);
-  ASSERT_EQ_STR(pr.answer, "Risposta A.");
+  ASSERT_EQ_STR(pr.answer, "Response A.");
   asngn_cache_probe_free(&pr);
   asngn_session_close(s);
   fx_drop(&f);

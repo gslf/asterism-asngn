@@ -2,23 +2,34 @@
  * grammar.c — per-turn step-protocol GBNF plus the
  * classify and judge micro-grammars.
  *
+ * A decision pass emits one schema-constrained action object on a
+ * single line (fixed key order, no string escapes) — the GBNF encoding
+ * of the JSON-schema constraint a llama.cpp server would enforce:
+ *
+ *   {action: "call", why: "…", input: <astools-call>, success: "…",
+ *    fallback: "…"}
+ *
  * The merged grammar keeps asngn's own productions (root, step, call,
- * recall, open, think, clarify, answer, handle, text, tchar) and grafts
- * the astools export below them: the astools root line is dropped, its
- * "call" rule is renamed to "astools-call", and the remainder is appended
- * verbatim. The astools shared terminals (str, char, int, num, ws, obj,
+ * recall, open, think, clarify, answer, handle, text, meta, tchar) and
+ * grafts the astools export below them: the astools root line is
+ * dropped, its "call" rule is renamed to "astools-call", and the
+ * remainder is appended verbatim — the grafted production is embedded
+ * raw (xCDN args, unquoted) as the value of the call action's `input`
+ * key. The astools shared terminals (str, char, int, num, ws, obj,
  * t-*) do not collide with our rule names. The rename is a token scan —
  * a rule name is a maximal run of [a-zA-Z0-9-] — that leaves quoted
  * literals, character classes, and comments untouched.
  *
- * Length note: `text` is bounded to ASNGN_STEP_TEXT_MAX chars via {m,n}
- * repetition, so at the limit the only legal continuation is the
- * terminating newline and the sampler closes the line instead of
- * rambling into the decide max_tokens cap. The cap still bounds CALL
- * lines (astools' grafted productions stay unbounded); a line it
- * truncates lacks the newline root requires and is rejected as
- * malformed by the control loop; asngn_step_parse re-caps text payloads
- * at the same limit as defense in depth.
+ * Length note: `text` / `meta` are bounded to ASNGN_STEP_TEXT_MAX /
+ * ASNGN_STEP_META_MAX chars via {m,n} repetition, so at the limit the
+ * only legal continuation is the closing quote and the sampler
+ * completes the object instead of rambling into the decide max_tokens
+ * cap. The cap still bounds CALL objects (astools' grafted productions
+ * stay unbounded); an output it truncates lacks the newline root
+ * requires and is rejected as malformed by the control loop;
+ * asngn_step_parse re-caps payloads at the same limits as defense in
+ * depth. tchar excludes '"' and '\\' so payloads can never escape
+ * their quotes or forge a nested object.
  *
  * Output is deterministic: byte-identical for identical inputs.
  *
@@ -49,7 +60,11 @@ static bool has_call_rule(const char *gbnf) {
     if (strncmp(q, "call", 4) == 0 && !rule_char(q[4])) {
       q += 4;
       while (*q == ' ' || *q == '\t') q++;
-      if (strncmp(q, "::=", 3) == 0) return true;
+      if (strncmp(q, "::=", 3) == 0) {
+        q += 3;
+        while (*q == ' ' || *q == '\t') q++;
+        return strncmp(q, "\"\"", 2) != 0;
+      }
     }
     while (*p != '\0' && *p != '\n') p++;
     while (*p == '\n') p++;
@@ -106,8 +121,8 @@ static asngn_err graft_astools(asngn_buf *b, const char *gbnf) {
 /* ---- step grammar ------------------------------------- */
 
 asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
-                              size_t blobs_n, const char *astools_gbnf,
-                              char **out) {
+                               bool with_think, size_t blobs_n,
+                               const char *astools_gbnf, char **out) {
   asngn_buf b;
   asngn_err e = ASNGN_OK;
   bool call_on, open_on;
@@ -125,17 +140,35 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
   if (e == ASNGN_OK && call_on) e = asngn_buf_appends(&b, "call | ");
   if (e == ASNGN_OK && with_recall) e = asngn_buf_appends(&b, "recall | ");
   if (e == ASNGN_OK && open_on) e = asngn_buf_appends(&b, "open | ");
-  if (e == ASNGN_OK) e = asngn_buf_appends(&b, "think | clarify | answer\n");
+  if (e == ASNGN_OK && with_think) e = asngn_buf_appends(&b, "think | ");
+  if (e == ASNGN_OK) e = asngn_buf_appends(&b, "clarify | answer\n");
   if (e == ASNGN_OK && call_on)
-    e = asngn_buf_appends(&b, "call      ::= \"CALL \" astools-call\n");
+    e = asngn_buf_appends(&b,
+                          "call      ::= \"{action: \\\"call\\\", why: "
+                          "\\\"\" meta \"\\\", input: \" astools-call "
+                          "\", success: \\\"\" meta \"\\\", fallback: "
+                          "\\\"\" meta \"\\\"}\"\n");
   if (e == ASNGN_OK && with_recall)
-    e = asngn_buf_appends(&b, "recall    ::= \"RECALL | \" text\n");
+    e = asngn_buf_appends(&b,
+                          "recall    ::= \"{action: \\\"recall\\\", why: "
+                          "\\\"\" meta \"\\\", input: \\\"\" text "
+                          "\"\\\", success: \\\"\" meta \"\\\", fallback: "
+                          "\\\"\" meta \"\\\"}\"\n");
   if (e == ASNGN_OK && open_on)
-    e = asngn_buf_appends(&b, "open      ::= \"OPEN \" handle\n");
+    e = asngn_buf_appends(&b,
+                          "open      ::= \"{action: \\\"open\\\", why: "
+                          "\\\"\" meta \"\\\", input: \\\"\" handle "
+                          "\"\\\"}\"\n");
+  if (e == ASNGN_OK && with_think)
+    e = asngn_buf_appends(&b,
+                          "think     ::= \"{action: \\\"think\\\", input: "
+                          "\\\"\" text \"\\\"}\"\n");
   if (e == ASNGN_OK)
-    e = asngn_buf_appends(&b, "think     ::= \"THINK | \" text\n"
-                              "clarify   ::= \"CLARIFY | \" text\n"
-                              "answer    ::= \"ANSWER\"\n");
+    e = asngn_buf_appends(&b,
+                           "clarify   ::= \"{action: \\\"clarify\\\", why: "
+                          "\\\"\" meta \"\\\", input: \\\"\" text "
+                          "\"\\\"}\"\n"
+                          "answer    ::= \"{action: \\\"answer\\\"}\"\n");
   if (e == ASNGN_OK && open_on) {
     e = asngn_buf_appends(&b, "handle    ::= ");
     for (i = 1; e == ASNGN_OK && i <= blobs_n; i++) {
@@ -146,8 +179,9 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
   }
   if (e == ASNGN_OK)
     e = asngn_buf_printf(&b, "text      ::= tchar{1,%d}\n"
-                             "tchar     ::= [^|\\x0A\\x0D]\n",
-                         ASNGN_STEP_TEXT_MAX);
+                             "meta      ::= tchar{1,%d}\n"
+                             "tchar     ::= [^\\\"\\\\\\x0A\\x0D]\n",
+                         ASNGN_STEP_TEXT_MAX, ASNGN_STEP_META_MAX);
   if (e == ASNGN_OK && call_on) e = graft_astools(&b, astools_gbnf);
 
   if (e != ASNGN_OK) {
@@ -166,7 +200,9 @@ asngn_err asngn_grammar_classify(char **out) {
   static const char grammar[] =
       "root ::= \"CLASS \" (\"SIMPLE\" | \"MODERATE\" | \"COMPLEX\")"
       " \" | DETAIL \" (\"TERSE\" | \"NORMAL\" | \"RICH\")"
-      " \" | MODE \" (\"DIRECT\" | \"PLAN\") \"\\n\"\n";
+      " \" | MODE \" (\"DIRECT\" | \"PLAN\")"
+      " \" | TASK \" (\"CHAT\" | \"LOOKUP\" | \"EXPLAIN\" | \"EDIT\" | "
+      "\"BUILD\" | \"GENERATE\" | \"REFACTOR\" | \"DEBUG\") \"\\n\"\n";
   if (!out) return ASNGN_ERR_INVALID;
   *out = asngn_strdup(grammar);
   return *out ? ASNGN_OK : ASNGN_ERR_NOMEM;

@@ -60,6 +60,11 @@ foreach(test_name ${ASNGN_TEST_PROGRAMS})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()
 
+if(TARGET test_config)
+  target_compile_definitions(test_config PRIVATE
+    "ASNGN_TEST_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/..\"")
+endif()
+
 if(TARGET asngn-mcp)
   add_test(NAME test_mcp_protocol
     COMMAND ${CMAKE_COMMAND}

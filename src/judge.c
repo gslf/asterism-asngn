@@ -25,8 +25,8 @@ static const char judge_system[] =
     "Answer with exactly one line:\n"
     "SCORE <0-10> | <justification of at most ten words>";
 
-#define JUDGE_EVIDENCE_MAX 4000
-#define JUDGE_ANSWER_MAX 6000
+#define JUDGE_EVIDENCE_MAX 32768
+#define JUDGE_ANSWER_MAX 49152
 
 /* Append at most `cap` bytes of src, backing off to a UTF-8 boundary and
  * appending a "…" marker when truncated. */

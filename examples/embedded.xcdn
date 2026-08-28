@@ -1,0 +1,64 @@
+// Copy to <engine-root>/config.xcdn, then place the GGUF files under
+// <engine-root>/models/. This profile uses the capable generator for coding
+// decisions and artifact generation; the smaller tiers handle routing and
+// routine auxiliary work.
+
+#asngn_config {
+  engine: {
+    profile: "coding",
+    base_prompt: """You are a professional local software-engineering
+assistant. Prioritize correctness, completeness, maintainability, and verified
+outcomes. Inspect relevant workspace context before changing it, use tools to
+perform requested work, run applicable builds or tests, and report evidence
+honestly. Token limits prevent waste; they never justify partial work.""",
+  },
+
+  models: {
+    max_resident: 3,
+    pool: [
+      { id: "nano", path: "models/router.gguf", ctx: 8192,
+        threads: 4, gpu_layers: -1, warm: true },
+      { id: "light", path: "models/helper.gguf", ctx: 16384,
+        threads: 6, gpu_layers: -1, warm: true },
+      { id: "std", path: "models/coder.gguf", ctx: 32768,
+        threads: 8, gpu_layers: -1, warm: false },
+      { id: "embed", path: "models/embedder.gguf", ctx: 512,
+        threads: 4, embedding: true, dim: 384 },
+    ],
+    roles: {
+      router: "nano",
+      planner: "light",
+      generator: "std",
+      compressor: "light",
+      adapter: "light",
+      judge: "light",
+      embedder: "embed",
+    },
+  },
+
+  detail: { terse_tokens: 1024, normal_tokens: 4096, rich_tokens: 10240 },
+  context: {
+    summary_tokens: 3072,
+    verbatim_tokens: 8192,
+    working_tokens: 6144,
+    safety_margin: 512,
+    fold_tokens: 1536,
+    digest_threshold_chars: 32768,
+    digest_tokens: 2048,
+  },
+  routing: { classifier: "hybrid", max_escalations: 2 },
+  validation: { judge: "light" },
+  cache: { enable: true, tool_cache: true },
+
+  integration: {
+    asper: { enable: true, root: "memory" },
+    astools: {
+      enable: true,
+      root: "tools",
+      config: "astools.xcdn",
+      workspace: "session",
+    },
+  },
+  telemetry: { path: "telemetry/telemetry.xcdn" },
+  logging: { path: "asngn.log", level: "info" },
+}

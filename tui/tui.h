@@ -215,7 +215,9 @@ enum {
   TK_ESC, TK_TAB, TK_BACKSPACE, TK_DELETE,
   TK_UP, TK_DOWN, TK_LEFT, TK_RIGHT, TK_HOME, TK_END, TK_PGUP, TK_PGDN,
   TK_F1, TK_F2, TK_F3, TK_F4, TK_F5, TK_F6, TK_F7, TK_F8,
-  TK_CTRL_C, TK_CTRL_D, TK_CTRL_U, TK_CTRL_K, TK_CTRL_W, TK_CTRL_Y
+  TK_CTRL_C, TK_CTRL_D, TK_CTRL_U, TK_CTRL_K, TK_CTRL_W, TK_CTRL_Y,
+  TK_CTRL_P, TK_CTRL_N,
+  TK_ALT_UP, TK_ALT_DOWN, TK_ALT_PGUP, TK_ALT_PGDN
 };
 typedef struct {
   int kind;
@@ -230,6 +232,8 @@ int tui_term_read_keys(tui_term *t, tui_key *out, int max);
 
 #define TUI_ED_MAX   4096
 #define TUI_HIST_MAX 64
+#define TUI_ED_VIEW_MIN 3
+#define TUI_ED_VIEW_MAX 6
 
 typedef struct {
   char   buf[TUI_ED_MAX];
@@ -241,6 +245,10 @@ typedef struct {
   int    hist_pos; /* -1 = not browsing */
   char   saved[TUI_ED_MAX];
   size_t saved_len;
+  int    view_top;    /* first displayed wrapped row */
+  int    view_rows;   /* rows in the last rendered viewport */
+  int    view_total;  /* wrapped rows in the last layout */
+  int    view_manual; /* manual scroll; editing resumes cursor-follow */
 } tui_editor;
 
 void ed_init(tui_editor *e);
@@ -261,6 +269,7 @@ void ed_yank(tui_editor *e);          /* Ctrl+Y */
 void ed_hist_add(tui_editor *e, const char *line);
 void ed_hist_up(tui_editor *e);
 void ed_hist_down(tui_editor *e);
+void ed_view_scroll(tui_editor *e, int rows);
 
 typedef struct {
   size_t start, end; /* byte range of one display row */
@@ -356,9 +365,32 @@ typedef struct {
   int              top;   /* first visible row (scroll)  */
 } tui_perms;
 
+/* One row of the session-picker overlay (/session). The display
+ * strings are precomputed in main.c when the modal opens. */
+typedef struct {
+  char   slug[72];
+  size_t turns;
+  char   tok[16];     /* formatted spent tokens        */
+  char   age[16];     /* "3h ago" / "now" / "empty"    */
+  char   project[65]; /* "" = none                     */
+  int    current;
+  int    unreadable;  /* peek failed: shown dimmed     */
+} tui_sess_row;
+
+typedef struct {
+  int           active;
+  tui_sess_row *rows; /* free(); NULL when empty       */
+  size_t        n;
+  int           cur;  /* cursor index into rows        */
+  int           top;  /* first visible row (scroll)    */
+  char          confirm_del[72]; /* slug awaiting the second d; "" none */
+  char          note[96];        /* one-line hint at the modal foot     */
+} tui_sess;
+
 void modal_draw_confirm(struct tui_app *a, tui_frame *f);
 void modal_draw_help(struct tui_app *a, tui_frame *f);
 void modal_draw_perms(struct tui_app *a, tui_frame *f);
+void modal_draw_sessions(struct tui_app *a, tui_frame *f);
 
 /* ── engine → main-loop queue ────────────────────────────────────────── */
 
@@ -411,6 +443,7 @@ typedef struct tui_app {
 
   tui_confirm  confirm;
   tui_perms    perms;
+  tui_sess     sess;
   asngn_detail detail; /* submit detail for future turns */
 
   /* cached engine introspection */

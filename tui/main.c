@@ -55,6 +55,32 @@ static void refresh_stats(tui_app *a) {
     a->models_n = sizeof a->models / sizeof a->models[0];
 }
 
+/* Replay the open session's transcript into the chat pane so the
+ * conversation is always readable from the top — on startup and after
+ * every session switch. */
+static void chat_replay(tui_app *a) {
+  asngn_transcript_entry *ents = NULL;
+  size_t n = 0, i;
+  if (asngn_session_transcript(a->ses, &ents, &n) != ASNGN_OK) {
+    chat_systemf(&a->chat, "history unavailable: %s",
+                 asngn_last_error(a->ctx));
+    return;
+  }
+  for (i = 0; i < n; i++) {
+    chat_entry *e = chat_push(&a->chat,
+                              strcmp(ents[i].role, "user") == 0
+                                  ? CHAT_USER
+                                  : CHAT_ASSISTANT);
+    if (e == NULL) break;
+    chat_append(&a->chat, e, ents[i].text, strlen(ents[i].text));
+    e->turn = ents[i].turn;
+    if (ents[i].role[0] == 'a') a->last_turn = ents[i].turn;
+  }
+  if (n > 0)
+    chat_systemf(&a->chat, "%zu turns restored from the transcript", n);
+  asngn_free(ents);
+}
+
 /* ── engine callbacks: queue-only, engine threads ────────────────────── */
 
 static void cb_token(const char *utf8, void *ud) {
@@ -192,7 +218,7 @@ void tui_render_frame(tui_app *a, tui_frame *f, int *cx, int *cy) {
   *cx = *cy = -1;
 
   d_clear(f);
-  if (f->w < 24 || f->h < 6) {
+  if (f->w < 24 || f->h < 7) {
     d_put(f, 0, 0, "asngn: window too small", TFG_DIM, TBG_DEFAULT, 0);
     return;
   }
@@ -200,7 +226,9 @@ void tui_render_frame(tui_app *a, tui_frame *f, int *cx, int *cy) {
   ed_w = f->w - 6; /* "| > " … " |" */
   nrows = ed_layout(&a->ed, ed_w, rows,
                     (int)(sizeof rows / sizeof rows[0]), &crow, &ccol);
-  input_rows = nrows > 4 ? 4 : nrows;
+  input_rows = nrows;
+  if (input_rows < TUI_ED_VIEW_MIN) input_rows = TUI_ED_VIEW_MIN;
+  if (input_rows > TUI_ED_VIEW_MAX) input_rows = TUI_ED_VIEW_MAX;
   sep_row = f->h - 2 - input_rows;
   if (sep_row < 2) {
     sep_row = 2;
@@ -229,11 +257,22 @@ void tui_render_frame(tui_app *a, tui_frame *f, int *cx, int *cy) {
     if (show) panes_draw(a, f, box_x, 1, box_w, chat_h);
   }
 
-  /* input editor (up to 4 rows; the window keeps the cursor visible) */
+  /* Input editor: always at least three rows, growing to six. Longer
+   * input lives in a viewport that follows the cursor; the edge marks
+   * make hidden rows explicit. */
   {
-    int wstart = 0;
+    int wstart;
+    int max_start = nrows - input_rows;
     int r;
-    if (crow >= input_rows) wstart = crow - input_rows + 1;
+    if (max_start < 0) max_start = 0;
+    if (!a->ed.view_manual) {
+      a->ed.view_top = crow >= input_rows ? crow - input_rows + 1 : 0;
+    }
+    if (a->ed.view_top < 0) a->ed.view_top = 0;
+    if (a->ed.view_top > max_start) a->ed.view_top = max_start;
+    a->ed.view_rows = input_rows;
+    a->ed.view_total = nrows;
+    wstart = a->ed.view_top;
     for (r = 0; r < input_rows; r++) {
       int ry = sep_row + 1 + r;
       int er = wstart + r;
@@ -258,12 +297,22 @@ void tui_render_frame(tui_app *a, tui_frame *f, int *cx, int *cy) {
         *cy = ry;
       }
     }
+    if (wstart > 0)
+      d_put(f, f->w - 2, sep_row + 1, th->ascii ? "^" : "↑",
+            TFG_ACCENT, TBG_DEFAULT, TA_DIM);
+    if (wstart + input_rows < nrows)
+      d_put(f, f->w - 2, sep_row + input_rows, th->newmark,
+            TFG_ACCENT, TBG_DEFAULT, TA_DIM);
   }
 
   render_status(a, f);
 
   if (a->help_on) {
     modal_draw_help(a, f);
+    *cx = *cy = -1;
+  }
+  if (a->sess.active) {
+    modal_draw_sessions(a, f);
     *cx = *cy = -1;
   }
   if (a->perms.active) {
@@ -422,63 +471,106 @@ static int busy_guard(tui_app *a) {
   return 0;
 }
 
-static void cmd_session(tui_app *a, const char *arg) {
-  if (arg == NULL) {
-    chat_systemf(&a->chat,
-                 "usage: /session <slug> | new | list | delete <slug>");
+/* Open (or create: slug NULL asks the engine for a fresh generated
+ * slug) a session and rebuild the chat from its transcript. The chat is
+ * never lost: switching back replays the full history from disk. */
+static void switch_session(tui_app *a, const char *slug) {
+  asngn_session *ns = NULL;
+  if (busy_guard(a)) return;
+  if (asngn_session_open(a->ctx, slug, &ns) != ASNGN_OK) {
+    chat_systemf(&a->chat, "session failed: %s",
+                 asngn_last_error(a->ctx));
     return;
   }
-  if (strcmp(arg, "list") == 0) {
-    char **slugs = NULL;
-    size_t n = 0, i;
-    if (asngn_session_list(a->ctx, &slugs, &n) == ASNGN_OK) {
-      if (n == 0) chat_systemf(&a->chat, "no sessions yet");
-      for (i = 0; i < n; i++) {
-        int current = strcmp(slugs[i], a->slug) == 0;
-        asngn_session_peek_info pi;
-        char tok[16], age[32];
-        long long ref;
-        memset(&pi, 0, sizeof pi);
-        if (current && a->sstats_ok) {
-          /* the open session reads its own live stats: a disk peek
-           * would race the appenders */
-          pi.turns = a->sstats.turns;
-          pi.spent_tokens = a->sstats.spent_tokens;
-          pi.last_turn_at = a->stats_ok ? a->stats.last_turn_at : 0;
-        } else if (asngn_session_peek(a->ctx, slugs[i], &pi) !=
-                   ASNGN_OK) {
-          chat_systemf(&a->chat, "%s %s (unreadable)", slugs[i],
-                       a->theme.bullet);
-          continue;
-        }
-        tui_fmt_count(tok, sizeof tok, pi.spent_tokens);
-        ref = pi.last_turn_at > 0 ? pi.last_turn_at : pi.created_at;
-        if (ref > 0) {
-          long long mins = ((long long)time(NULL) - ref) / 60;
-          if (mins < 1) snprintf(age, sizeof age, "now");
-          else if (mins < 60)
-            snprintf(age, sizeof age, "%lldm ago", mins);
-          else if (mins < 60 * 48)
-            snprintf(age, sizeof age, "%lldh ago", mins / 60);
-          else
-            snprintf(age, sizeof age, "%lldd ago", mins / (60 * 24));
-        } else if (pi.turns == 0) {
-          snprintf(age, sizeof age, "empty");
-        } else {
-          /* live stats carry no timestamps before the first turn of
-           * this process */
-          snprintf(age, sizeof age, "open");
-        }
-        chat_systemf(&a->chat, "%-14s %3zu turns %s %5s tok %s %s%s%s%s%s",
-                     slugs[i], pi.turns, a->theme.bullet, tok,
-                     a->theme.bullet, age,
-                     pi.project[0] != '\0' ? " [" : "",
-                     pi.project[0] != '\0' ? pi.project : "",
-                     pi.project[0] != '\0' ? "]" : "",
-                     current ? " (current)" : "");
-      }
-      asngn_strings_free(slugs, n);
+  asngn_session_close(a->ses);
+  a->ses = ns;
+  snprintf(a->slug, sizeof a->slug, "%s", asngn_session_slug(ns));
+  a->last_turn = 0;
+  chat_free(&a->chat);
+  chat_init(&a->chat);
+  a->live_idx = -1;
+  chat_systemf(&a->chat, "session %s", a->slug);
+  chat_replay(a);
+  refresh_stats(a);
+}
+
+/* Fill the session-picker rows (list + per-slug peek), keeping the
+ * cursor on the current session. */
+static void sessions_build(tui_app *a) {
+  tui_sess *p = &a->sess;
+  char **slugs = NULL;
+  size_t n = 0, i;
+  free(p->rows);
+  p->rows = NULL;
+  p->n = 0;
+  p->confirm_del[0] = '\0';
+  if (asngn_session_list(a->ctx, &slugs, &n) != ASNGN_OK) {
+    snprintf(p->note, sizeof p->note, "list failed: %s",
+             asngn_last_error(a->ctx));
+    return;
+  }
+  if (n > 0) {
+    p->rows = calloc(n, sizeof *p->rows);
+    if (p->rows == NULL) n = 0;
+  }
+  for (i = 0; i < n; i++) {
+    tui_sess_row *r = &p->rows[p->n];
+    asngn_session_peek_info pi;
+    long long ref;
+    memset(&pi, 0, sizeof pi);
+    snprintf(r->slug, sizeof r->slug, "%s", slugs[i]);
+    r->current = strcmp(slugs[i], a->slug) == 0;
+    if (r->current && a->sstats_ok) {
+      /* the open session reads its own live stats: a disk peek would
+       * race the appenders */
+      pi.turns = a->sstats.turns;
+      pi.spent_tokens = a->sstats.spent_tokens;
+      pi.last_turn_at = a->stats_ok ? a->stats.last_turn_at : 0;
+    } else if (asngn_session_peek(a->ctx, slugs[i], &pi) != ASNGN_OK) {
+      r->unreadable = 1;
+      if (r->current) p->cur = (int)p->n;
+      p->n++;
+      continue;
     }
+    r->turns = pi.turns;
+    tui_fmt_count(r->tok, sizeof r->tok, pi.spent_tokens);
+    ref = pi.last_turn_at > 0 ? pi.last_turn_at : pi.created_at;
+    if (ref > 0) {
+      long long mins = ((long long)time(NULL) - ref) / 60;
+      if (mins < 1) snprintf(r->age, sizeof r->age, "now");
+      else if (mins < 60)
+        snprintf(r->age, sizeof r->age, "%lldm ago", mins);
+      else if (mins < 60 * 48)
+        snprintf(r->age, sizeof r->age, "%lldh ago", mins / 60);
+      else
+        snprintf(r->age, sizeof r->age, "%lldd ago", mins / (60 * 24));
+    } else if (pi.turns == 0) {
+      snprintf(r->age, sizeof r->age, "empty");
+    } else {
+      /* live stats carry no timestamps before the first turn of this
+       * process */
+      snprintf(r->age, sizeof r->age, "open");
+    }
+    snprintf(r->project, sizeof r->project, "%s", pi.project);
+    if (r->current) p->cur = (int)p->n;
+    p->n++;
+  }
+  asngn_strings_free(slugs, n);
+  if (p->cur >= (int)p->n) p->cur = (int)p->n - 1;
+  if (p->cur < 0) p->cur = 0;
+  if (p->top > p->cur) p->top = p->cur;
+}
+
+static void sessions_open(tui_app *a) {
+  a->sess.note[0] = '\0';
+  refresh_stats(a);
+  sessions_build(a);
+  a->sess.active = 1;
+}
+
+static void cmd_session(tui_app *a, const char *arg) {
+  if (arg == NULL || strcmp(arg, "list") == 0) {
+    sessions_open(a);
     return;
   }
   if (strncmp(arg, "delete", 6) == 0 &&
@@ -501,26 +593,8 @@ static void cmd_session(tui_app *a, const char *arg) {
                    asngn_last_error(a->ctx));
     return;
   }
-  if (busy_guard(a)) return;
-  {
-    /* "/session new" asks the engine for a fresh generated slug */
-    const char *slug = strcmp(arg, "new") == 0 ? NULL : arg;
-    asngn_session *ns = NULL;
-    if (asngn_session_open(a->ctx, slug, &ns) == ASNGN_OK) {
-      asngn_session_close(a->ses);
-      a->ses = ns;
-      snprintf(a->slug, sizeof a->slug, "%s", asngn_session_slug(ns));
-      a->last_turn = 0;
-      chat_free(&a->chat);
-      chat_init(&a->chat);
-      a->live_idx = -1;
-      refresh_stats(a);
-      chat_systemf(&a->chat, "session %s", a->slug);
-    } else {
-      chat_systemf(&a->chat, "session failed: %s",
-                   asngn_last_error(a->ctx));
-    }
-  }
+  /* "/session new" asks the engine for a fresh generated slug */
+  switch_session(a, strcmp(arg, "new") == 0 ? NULL : arg);
 }
 
 static void cmd_cache(tui_app *a, const char *arg) {
@@ -841,6 +915,7 @@ static void resolve_confirm(tui_app *a, int allow, int session_wide) {
 
 static void submit_editor(tui_app *a) {
   char text[TUI_ED_MAX];
+  int cx, cy;
   if (a->ed.len == 0) return;
   memcpy(text, a->ed.buf, a->ed.len);
   text[a->ed.len] = '\0';
@@ -848,6 +923,18 @@ static void submit_editor(tui_app *a) {
   ed_clear(&a->ed);
   a->chat.scroll = 0; /* sending returns to the tail */
   a->chat.unseen = 0;
+
+  /* Paint the cleared editor before command handling or asngn_submit:
+   * submission may wait for a session fold, and the old prompt must not
+   * remain visible during that wait. Cached stats are sufficient for
+   * this immediate input-only frame; the regular structural repaint
+   * refreshes them immediately afterwards. */
+  a->dirty = a->structural = 1;
+  tui_render_frame(a, &a->term.cur, &cx, &cy);
+  tui_term_render(&a->term, cx, cy);
+  a->last_render_ms = now_ms();
+  a->dirty = a->structural = 0;
+
   if (text[0] == '/') {
     handle_slash(a, text);
     return;
@@ -896,6 +983,81 @@ static void handle_key(tui_app *a, const tui_key *k) {
                k->kind == TK_CTRL_D) {
       resolve_confirm(a, 0, 0); /* escape hatches deny */
     }
+    return;
+  }
+  if (a->sess.active) { /* arrows move, Enter switches, n new, d d deletes */
+    tui_sess *p = &a->sess;
+    switch (k->kind) {
+    case TK_UP:
+      if (p->cur > 0) p->cur--;
+      p->confirm_del[0] = p->note[0] = '\0';
+      break;
+    case TK_DOWN:
+      if (p->cur + 1 < (int)p->n) p->cur++;
+      p->confirm_del[0] = p->note[0] = '\0';
+      break;
+    case TK_HOME:
+      p->cur = 0;
+      p->confirm_del[0] = p->note[0] = '\0';
+      break;
+    case TK_END:
+      if (p->n > 0) p->cur = (int)p->n - 1;
+      p->confirm_del[0] = p->note[0] = '\0';
+      break;
+    case TK_ENTER:
+      if (p->cur >= 0 && (size_t)p->cur < p->n &&
+          !p->rows[p->cur].current) {
+        char slug[72];
+        snprintf(slug, sizeof slug, "%s", p->rows[p->cur].slug);
+        p->active = 0;
+        switch_session(a, slug);
+      } else {
+        p->active = 0;
+      }
+      break;
+    case TK_CHAR:
+      if (k->utf8[0] == 'n') {
+        p->active = 0;
+        switch_session(a, NULL);
+      } else if (k->utf8[0] == 'd') {
+        if (p->cur >= 0 && (size_t)p->cur < p->n) {
+          tui_sess_row *r = &p->rows[p->cur];
+          if (r->current) {
+            snprintf(p->note, sizeof p->note,
+                     "cannot delete the current session %s switch first",
+                     a->theme.bullet);
+          } else if (strcmp(p->confirm_del, r->slug) == 0) {
+            char victim[72];
+            snprintf(victim, sizeof victim, "%s", r->slug);
+            if (asngn_session_delete(a->ctx, victim) == ASNGN_OK) {
+              sessions_build(a);
+              snprintf(p->note, sizeof p->note, "session %s deleted",
+                       victim);
+            } else {
+              p->confirm_del[0] = '\0';
+              snprintf(p->note, sizeof p->note, "delete failed: %s",
+                       asngn_last_error(a->ctx));
+            }
+          } else {
+            snprintf(p->confirm_del, sizeof p->confirm_del, "%s",
+                     r->slug);
+            snprintf(p->note, sizeof p->note,
+                     "d again deletes %s (irreversible)", r->slug);
+          }
+        }
+      } else if (k->utf8[0] == 'q') {
+        p->active = 0;
+      }
+      break;
+    case TK_ESC:
+    case TK_CTRL_C:
+    case TK_CTRL_D:
+      p->active = 0;
+      break;
+    default:
+      break;
+    }
+    a->structural = 1;
     return;
   }
   if (a->perms.active) { /* arrows move, Space/Enter toggles, Esc closes */
@@ -994,11 +1156,39 @@ static void handle_key(tui_app *a, const tui_key *k) {
                    -(a->chat.last_h > 1 ? a->chat.last_h - 1 : 10));
     a->structural = 1;
     break;
+  case TK_ALT_UP:
+    ed_view_scroll(&a->ed, -1);
+    a->structural = 1;
+    break;
+  case TK_ALT_DOWN:
+    ed_view_scroll(&a->ed, 1);
+    a->structural = 1;
+    break;
+  case TK_ALT_PGUP:
+    ed_view_scroll(&a->ed,
+                   -(a->ed.view_rows > 1 ? a->ed.view_rows - 1 : 1));
+    a->structural = 1;
+    break;
+  case TK_ALT_PGDN:
+    ed_view_scroll(&a->ed,
+                   a->ed.view_rows > 1 ? a->ed.view_rows - 1 : 1);
+    a->structural = 1;
+    break;
   case TK_UP:
-    if (a->ed.len == 0 || a->ed.hist_pos >= 0) ed_hist_up(&a->ed);
+    if (a->ed.hist_pos >= 0) {
+      ed_hist_up(&a->ed);
+    } else {
+      chat_scroll_by(&a->chat, 1);
+      a->structural = 1;
+    }
     break;
   case TK_DOWN:
-    if (a->ed.hist_pos >= 0) ed_hist_down(&a->ed);
+    if (a->ed.hist_pos >= 0) {
+      ed_hist_down(&a->ed);
+    } else {
+      chat_scroll_by(&a->chat, -1);
+      a->structural = 1;
+    }
     break;
   case TK_LEFT: ed_left(&a->ed); break;
   case TK_RIGHT: ed_right(&a->ed); break;
@@ -1010,6 +1200,8 @@ static void handle_key(tui_app *a, const tui_key *k) {
   case TK_CTRL_K: ed_kill_to_end(&a->ed); break;
   case TK_CTRL_W: ed_kill_word(&a->ed); break;
   case TK_CTRL_Y: ed_yank(&a->ed); break;
+  case TK_CTRL_P: ed_hist_up(&a->ed); break;
+  case TK_CTRL_N: ed_hist_down(&a->ed); break;
   default: break;
   }
 }
@@ -1290,6 +1482,7 @@ static int run_interactive(const char *root, const char *config,
 
   refresh_stats(&a);
   welcome(&a);
+  chat_replay(&a); /* resumed sessions show their full history */
   a.dirty = a.structural = 1;
 
   while (!a.quit) {
@@ -1382,6 +1575,7 @@ static int run_interactive(const char *root, const char *config,
     for (i = 0; i < a.pending_n; i++) free(a.pending[i]);
   }
   asngn_free(a.perms.tools);
+  free(a.sess.rows);
   chat_free(&a.chat);
   ed_free(&a.ed);
   return 0;
@@ -1400,6 +1594,9 @@ static void usage(FILE *out) {
           "\n"
           "  --once <message>   run one turn headless and print the "
           "answer (\"-\" reads stdin)\n"
+          "  --root <dir>       override engine root (default: ~/asngn)\n"
+          "  --workspace <dir>  use an external workspace instead of the "
+          "session workspace\n"
           "  --detail <level>   force the answer detail level\n"
           "  --confirm <mode>   destructive-tool confirmation policy "
           "(TUI default: prompt;\n"
@@ -1419,7 +1616,7 @@ static const char *arg_value(int argc, char **argv, int *i,
 }
 
 int main(int argc, char **argv) {
-  const char *root = ".";
+  const char *root = NULL;
   const char *config = NULL;
   const char *workspace = NULL;
   const char *session = NULL;

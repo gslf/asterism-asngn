@@ -26,11 +26,14 @@ static void cfg_pool_entry(asngn_pool_entry *e, const char *id,
   memset(e, 0, sizeof *e);
   snprintf(e->id, sizeof e->id, "%s", id);
   e->path = cfg_dup(path);
+  e->backend = ASMODEL_BACKEND_EMBEDDED;
   e->ctx = ctx;
   e->threads = threads;
   e->embedding = embedding;
   e->dim = dim;
   e->gpu_layers = gpu_layers;
+  e->warm = true;
+  e->kv_cache = true;
 }
 
 void asngn_config_defaults(asngn_config *cfg) {
@@ -41,13 +44,13 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->profile = ASNGN_PROFILE_GENERAL;
 
   cfg_pool_entry(&cfg->pool[0], "nano",
-                 "models/qwen2.5-0.5b-instruct-q4_k_m.gguf", 4096, 4,
+                 "models/qwen2.5-0.5b-instruct-q4_k_m.gguf", 8192, 4,
                  false, 0, -1);
   cfg_pool_entry(&cfg->pool[1], "light",
-                 "models/qwen2.5-1.5b-instruct-q4_k_m.gguf", 8192, 4,
+                 "models/qwen2.5-1.5b-instruct-q4_k_m.gguf", 32768, 4,
                  false, 0, -1);
   cfg_pool_entry(&cfg->pool[2], "std",
-                 "models/qwen2.5-7b-instruct-q4_k_m.gguf", 8192, 6,
+                 "models/qwen2.5-7b-instruct-q4_k_m.gguf", 32768, 6,
                  false, 0, -1);
   cfg_pool_entry(&cfg->pool[3], "embed",
                  "models/multilingual-e5-small-q8_0.gguf", 512, 4,
@@ -64,12 +67,17 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->max_resident = 3;
 
   cfg->s_classify.temp = 0.0; cfg->s_classify.top_p = 0.0;
-  cfg->s_classify.max_tokens = 24; cfg->s_classify.repeat_penalty = 0.0;
+  cfg->s_classify.max_tokens = 64; cfg->s_classify.repeat_penalty = 0.0;
   cfg->s_decide.temp = 0.0; cfg->s_decide.top_p = 0.0;
-  cfg->s_decide.max_tokens = 96;
+  cfg->s_decide.max_tokens = 1024; /* professional structured actions */
   /* greedy decode under a grammar can lock into repeating a legal
    * phrase; a mild recent-token penalty breaks the loop */
   cfg->s_decide.repeat_penalty = 1.15;
+  cfg->s_draft.temp = 0.2; cfg->s_draft.top_p = 0.9;
+  /* 0 means use every token physically available in the model context.
+   * Artifact size must never inherit the user-facing detail cap. */
+  cfg->s_draft.max_tokens = 0;
+  cfg->s_draft.repeat_penalty = 0.0;
   cfg->s_answer.temp = 0.4; cfg->s_answer.top_p = 0.9;
   cfg->s_answer.max_tokens = 0; /* per detail level */
   cfg->s_answer.repeat_penalty = 0.0;
@@ -80,24 +88,24 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->s_adapt.max_tokens = 0; /* per detail level */
   cfg->s_adapt.repeat_penalty = 0.0;
   cfg->s_judge.temp = 0.0; cfg->s_judge.top_p = 0.0;
-  cfg->s_judge.max_tokens = 32; cfg->s_judge.repeat_penalty = 0.0;
+  cfg->s_judge.max_tokens = 128; cfg->s_judge.repeat_penalty = 0.0;
 
   cfg->classifier = ASNGN_CLASSIFIER_HYBRID;
   cfg->max_escalations = 2;
 
   cfg->detail_default = ASNGN_DETAIL_AUTO;
-  cfg->terse_tokens = 128;
-  cfg->normal_tokens = 384;
-  cfg->rich_tokens = 1024;
+  cfg->terse_tokens = 1024;
+  cfg->normal_tokens = 4096;
+  cfg->rich_tokens = 10240;
 
-  cfg->summary_tokens = 600;
-  cfg->verbatim_tokens = 1600;
-  cfg->working_tokens = 800;
-  cfg->safety_margin = 64;
-  cfg->fold_tokens = 200;
-  cfg->digest_threshold_chars = 2048;
-  cfg->digest_tokens = 256;
-  cfg->pinned_max = 8;
+  cfg->summary_tokens = 3072;
+  cfg->verbatim_tokens = 8192;
+  cfg->working_tokens = 6144;
+  cfg->safety_margin = 512;
+  cfg->fold_tokens = 1536;
+  cfg->digest_threshold_chars = 32768;
+  cfg->digest_tokens = 2048;
+  cfg->pinned_max = 32;
 
   cfg->cache_enable = true;
   cfg->cache_scope = ASNGN_SCOPE_SESSION;
@@ -145,10 +153,10 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->asper_config = NULL;
   cfg->astools_enable = true;
   cfg->astools_root = cfg_dup("tools");
-  cfg->astools_workspace = cfg_dup(".");
+  cfg->astools_workspace = cfg_dup("session");
   cfg->astools_config = NULL;
   cfg->catalog_level = ASNGN_CATALOG_SUMMARY;
-  cfg->catalog_chars = 6000;
+  cfg->catalog_chars = 24000;
 
   cfg->mcp_autoconfirm = ASNGN_CONFIRM_DENY;
 }
@@ -158,7 +166,14 @@ void asngn_config_free(asngn_config *cfg) {
   if (cfg == NULL) return;
   free(cfg->root);
   free(cfg->base_prompt);
-  for (i = 0; i < ASNGN_MAX_POOL; i++) free(cfg->pool[i].path);
+  for (i = 0; i < ASNGN_MAX_POOL; i++) {
+    free(cfg->pool[i].path);
+    free(cfg->pool[i].base_url);
+    free(cfg->pool[i].remote_model);
+    free(cfg->pool[i].api_key_env);
+    free(cfg->pool[i].api_grammar);
+    free(cfg->pool[i].reasoning_effort);
+  }
   free(cfg->tele_path);
   free(cfg->log_path);
   free(cfg->asper_root);
@@ -238,6 +253,8 @@ static const cfg_key CFG_KEYS[] = {
   { "engine", "profile",     K_ENUM, OFF(profile), 0, PROFILE_MAP },
 
   { "models", "max_resident", K_INT, OFF(max_resident), 0, NULL },
+  { "models", "max_ram_mb", K_INT, OFF(max_ram_mb), 0, NULL },
+  { "models", "max_vram_mb", K_INT, OFF(max_vram_mb), 0, NULL },
 
   { "routing", "classifier",      K_ENUM, OFF(classifier), 0,
     CLASSIFIER_MAP },
@@ -458,16 +475,42 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
   for (i = 0; i < n; i++) {
     const xcdn_node_t *en = xcdn_array_get(v, i);
     const xcdn_value_t *eo = en != NULL ? en->value : NULL;
-    const char *id, *path;
-    int64_t ctx = 4096, threads = 4, dim = 0, gpu_layers = -1;
-    bool embedding = false;
+    const char *id, *path, *backend_s, *base_url, *remote_model;
+    const char *api_key_env, *api_grammar, *reasoning_effort;
+    int64_t ctx = 0, threads = 4, dim = 0, gpu_layers = -1;
+    int64_t ram_mb = 0, vram_mb = 0;
+    bool embedding = false, warm = true, kv_cache = true;
+    asmodel_backend backend = ASMODEL_BACKEND_EMBEDDED;
     const xcdn_value_t *f;
     size_t j;
     if (eo == NULL || eo->type != XCDN_VAL_OBJECT) goto bad_entry;
     id = asngn_xstr(asngn_xfield(eo, "id"));
     path = asngn_xstr(asngn_xfield(eo, "path"));
-    if (id == NULL || id[0] == '\0' || strlen(id) >= 32 || path == NULL ||
-        path[0] == '\0')
+    backend_s = asngn_xstr(asngn_xfield(eo, "backend"));
+    base_url = asngn_xstr(asngn_xfield(eo, "base_url"));
+    remote_model = asngn_xstr(asngn_xfield(eo, "model"));
+    api_key_env = asngn_xstr(asngn_xfield(eo, "api_key_env"));
+    api_grammar = asngn_xstr(asngn_xfield(eo, "api_grammar"));
+    reasoning_effort = asngn_xstr(asngn_xfield(eo, "reasoning_effort"));
+    if (api_grammar && strcmp(api_grammar, "none") != 0 &&
+        strcmp(api_grammar, "llama") != 0 &&
+        strcmp(api_grammar, "vllm") != 0 &&
+        strcmp(api_grammar, "lmstudio") != 0) goto bad_entry;
+    if (reasoning_effort && strcmp(reasoning_effort, "none") != 0 &&
+        strcmp(reasoning_effort, "minimal") != 0 &&
+        strcmp(reasoning_effort, "low") != 0 &&
+        strcmp(reasoning_effort, "medium") != 0 &&
+        strcmp(reasoning_effort, "high") != 0) goto bad_entry;
+    if (backend_s != NULL) {
+      if (strcmp(backend_s, "openai") == 0) backend = ASMODEL_BACKEND_OPENAI;
+      else if (strcmp(backend_s, "embedded") != 0) goto bad_entry;
+    }
+    if (id == NULL || id[0] == '\0' || strlen(id) >= 32 ||
+        (backend == ASMODEL_BACKEND_EMBEDDED &&
+         (path == NULL || path[0] == '\0')) ||
+        (backend == ASMODEL_BACKEND_OPENAI &&
+         (base_url == NULL || !base_url[0] || remote_model == NULL ||
+          !remote_model[0])))
       goto bad_entry;
     for (j = 0; j < i; j++)
       if (strcmp(fresh[j].id, id) == 0) goto bad_entry;
@@ -478,28 +521,66 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
       goto bad_entry;
     f = asngn_xfield(eo, "embedding");
     if (f != NULL && !asngn_xbool(f, &embedding)) goto bad_entry;
+    if (ctx == 0) ctx = embedding ? 512 : 32768;
     f = asngn_xfield(eo, "dim");
     if (f != NULL && (!asngn_xint(f, &dim) || dim < 1)) goto bad_entry;
     if (embedding && dim == 0) goto bad_entry;
     f = asngn_xfield(eo, "gpu_layers");
     if (f != NULL && (!asngn_xint(f, &gpu_layers) || gpu_layers < -1))
       goto bad_entry;
-    cfg_pool_entry(&fresh[i], id, path, (int)ctx, (int)threads, embedding,
+    f = asngn_xfield(eo, "ram_mb");
+    if (f != NULL && (!asngn_xint(f, &ram_mb) || ram_mb < 0)) goto bad_entry;
+    f = asngn_xfield(eo, "vram_mb");
+    if (f != NULL && (!asngn_xint(f, &vram_mb) || vram_mb < 0)) goto bad_entry;
+    f = asngn_xfield(eo, "warm");
+    if (f != NULL && !asngn_xbool(f, &warm)) goto bad_entry;
+    f = asngn_xfield(eo, "kv_cache");
+    if (f != NULL && !asngn_xbool(f, &kv_cache)) goto bad_entry;
+    cfg_pool_entry(&fresh[i], id, path != NULL ? path : "", (int)ctx,
+                   (int)threads, embedding,
                    (int)dim, (int)gpu_layers);
-    if (fresh[i].path == NULL) {
-      for (j = 0; j <= i; j++) free(fresh[j].path);
+    fresh[i].backend = backend;
+    fresh[i].base_url = base_url ? cfg_dup(base_url) : NULL;
+    fresh[i].remote_model = remote_model ? cfg_dup(remote_model) : NULL;
+    fresh[i].api_key_env = api_key_env ? cfg_dup(api_key_env) : NULL;
+    fresh[i].api_grammar = api_grammar ? cfg_dup(api_grammar) : NULL;
+    fresh[i].reasoning_effort = reasoning_effort
+                                    ? cfg_dup(reasoning_effort) : NULL;
+    fresh[i].ram_mb = (size_t)ram_mb; fresh[i].vram_mb = (size_t)vram_mb;
+    fresh[i].warm = warm; fresh[i].kv_cache = kv_cache;
+    if (fresh[i].path == NULL || (base_url && !fresh[i].base_url) ||
+        (remote_model && !fresh[i].remote_model) ||
+        (api_key_env && !fresh[i].api_key_env) ||
+        (api_grammar && !fresh[i].api_grammar) ||
+        (reasoning_effort && !fresh[i].reasoning_effort)) {
+      for (j = 0; j <= i; j++) {
+        free(fresh[j].path); free(fresh[j].base_url);
+        free(fresh[j].remote_model); free(fresh[j].api_key_env);
+        free(fresh[j].api_grammar);
+        free(fresh[j].reasoning_effort);
+      }
       return ASNGN_ERR_NOMEM;
     }
   }
-  for (i = 0; i < ASNGN_MAX_POOL; i++) free(cfg->pool[i].path);
+  for (i = 0; i < ASNGN_MAX_POOL; i++) {
+    free(cfg->pool[i].path); free(cfg->pool[i].base_url);
+    free(cfg->pool[i].remote_model); free(cfg->pool[i].api_key_env);
+    free(cfg->pool[i].api_grammar);
+    free(cfg->pool[i].reasoning_effort);
+  }
   memcpy(cfg->pool, fresh, sizeof fresh);
   cfg->pool_n = n;
   return ASNGN_OK;
 bad_entry:
-  for (i = 0; i < ASNGN_MAX_POOL; i++) free(fresh[i].path);
+  for (i = 0; i < ASNGN_MAX_POOL; i++) {
+    free(fresh[i].path); free(fresh[i].base_url);
+    free(fresh[i].remote_model); free(fresh[i].api_key_env);
+    free(fresh[i].api_grammar);
+    free(fresh[i].reasoning_effort);
+  }
   return asngn_seterr(c, ASNGN_ERR_CONFIG,
                       "config: models.pool: invalid entry (need unique id, "
-                      "path, optional ctx/threads/embedding/dim)");
+                       "embedded path or OpenAI base_url/model)");
 }
 
 /* models.roles: role name -> pool id. */
@@ -544,8 +625,9 @@ static asngn_err cfg_apply_sampling(asngn_ctx *c, asngn_config *cfg,
                                     const xcdn_value_t *v) {
   static const struct { const char *name; size_t off; } TASKS[] = {
     { "classify", OFF(s_classify) }, { "decide", OFF(s_decide) },
-    { "answer", OFF(s_answer) },     { "compress", OFF(s_compress) },
-    { "adapt", OFF(s_adapt) },       { "judge", OFF(s_judge) },
+    { "draft", OFF(s_draft) },       { "answer", OFF(s_answer) },
+    { "compress", OFF(s_compress) }, { "adapt", OFF(s_adapt) },
+    { "judge", OFF(s_judge) },
   };
   size_t i, t;
   if (v == NULL || v->type != XCDN_VAL_OBJECT)

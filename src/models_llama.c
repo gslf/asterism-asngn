@@ -54,6 +54,8 @@
 #pragma warning(pop)
 #endif
 
+#include "llama_guard.h"
+
 #if !defined(ASNGN_NO_THREADS)
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -133,6 +135,10 @@ typedef struct {
   int dim;                    /* embedding models only                   */
   bool embedding;
   bool encoder_only;
+  bool kv_cache;
+  bool no_think;
+  llama_token *cached_prompt;
+  int32_t cached_prompt_n;
   /* Per-call cancel pointer for the ggml abort callback: installed at
    * the top of generate() and cleared on exit, guarded by cancel_mu
    * because the ggml worker threads read it mid-decode. */
@@ -160,6 +166,21 @@ static bool mll_cancelled(volatile int *cancel) {
   return cancel != NULL && *cancel != 0;
 }
 
+/* Qwen thinking templates may retain an empty leading think envelope even
+ * after /no_think. It is transport metadata, not answer or file content. */
+static void mll_strip_think_envelope(char *text) {
+  char *p = text, *end, *body;
+  if (text == NULL) return;
+  while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+  if (strncmp(p, "<think>", 7) != 0) return;
+  end = strstr(p + 7, "</think>");
+  if (end == NULL) return;
+  body = end + 8;
+  while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n')
+    body++;
+  memmove(text, body, strlen(body) + 1);
+}
+
 /* Tokenize text into a malloc'd array using the negative-return resize
  * convention (first call sizes, second call fills). *out_tok is NULL
  * when the text yields zero tokens. */
@@ -173,13 +194,15 @@ static asngn_err mll_tokenize(const struct llama_vocab *vocab,
   *out_tok = NULL;
   *out_n = 0;
   len = (int32_t)strlen(text);
-  n = llama_tokenize(vocab, text, len, NULL, 0, add_special, parse_special);
+  n = asngn_llg_tokenize(vocab, text, len, NULL, 0, add_special,
+                         parse_special);
   if (n == INT32_MIN) return ASNGN_ERR_MODEL;
   if (n < 0) n = -n;
   if (n == 0) return ASNGN_OK;
   tok = (llama_token *)malloc((size_t)n * sizeof *tok);
   if (tok == NULL) return ASNGN_ERR_NOMEM;
-  got = llama_tokenize(vocab, text, len, tok, n, add_special, parse_special);
+  got = asngn_llg_tokenize(vocab, text, len, tok, n, add_special,
+                           parse_special);
   if (got < 0) {
     free(tok);
     return ASNGN_ERR_MODEL;
@@ -242,16 +265,16 @@ static asngn_err mll_apply_template(const char *tmpl,
   msgs[1].role = "user";
   msgs[1].content = user_prompt;
 
-  need = llama_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
+  need = asngn_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
   if (need < 0 && tmpl != NULL) {
     tmpl = NULL; /* chatml fallback */
-    need = llama_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
+    need = asngn_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
   }
   if (need < 0) return ASNGN_ERR_MODEL;
   buf = (char *)malloc((size_t)need + 1);
   if (buf == NULL) return ASNGN_ERR_NOMEM;
-  got = llama_chat_apply_template(tmpl, msgs, 2, true, buf,
-                                  (int32_t)(need + 1));
+  got = asngn_llg_chat_apply_template(tmpl, msgs, 2, true, buf,
+                                      (int32_t)(need + 1));
   if (got < 0 || got > need) {
     free(buf);
     return ASNGN_ERR_MODEL;
@@ -271,8 +294,10 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
                               int *out_tokens_in, int *out_tokens_out) {
   mll_ud *u = (mll_ud *)ud;
   char *prompt = NULL;
+  char *no_think_user = NULL;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
+  int32_t prompt_start = 0;
   struct llama_sampler *chain = NULL;
   asngn_buf outbuf;
   asngn_err e;
@@ -290,9 +315,23 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     goto out;
   }
 
+  if (u->no_think) {
+    const char *src = user_prompt != NULL ? user_prompt : "";
+    size_t n = strlen(src);
+    no_think_user = (char *)malloc(n + sizeof "\n/no_think");
+    if (no_think_user == NULL) {
+      e = ASNGN_ERR_NOMEM;
+      goto out;
+    }
+    memcpy(no_think_user, src, n);
+    memcpy(no_think_user + n, "\n/no_think", sizeof "\n/no_think");
+  }
   e = mll_apply_template(u->chat_template,
                          system_prompt != NULL ? system_prompt : "",
-                         user_prompt != NULL ? user_prompt : "", &prompt);
+                         no_think_user != NULL
+                             ? no_think_user
+                             : (user_prompt != NULL ? user_prompt : ""),
+                         &prompt);
   if (e != ASNGN_OK) goto out;
 
   /* add_special true so BOS-requiring vocabs (Llama-3-class instruct
@@ -308,7 +347,21 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   }
   *out_tokens_in = (int)n_tok;
 
-  llama_memory_clear(llama_get_memory(u->lctx), true);
+  if (u->kv_cache && u->cached_prompt && u->cached_prompt_n > 0) {
+    int32_t common = 0;
+    while (common < n_tok && common < u->cached_prompt_n &&
+           tok[common] == u->cached_prompt[common]) common++;
+    /* Re-evaluate at least the last prompt token so the logits used for the
+     * first sample correspond to this prompt, not the previous completion. */
+    if (common >= n_tok) common = n_tok - 1;
+    if (common > 0 &&
+        llama_memory_seq_rm(llama_get_memory(u->lctx), -1, common, -1))
+      prompt_start = common;
+    else
+      asngn_llg_memory_clear(llama_get_memory(u->lctx), true);
+  } else {
+    asngn_llg_memory_clear(llama_get_memory(u->lctx), true);
+  }
 
   /* Fresh sampler chain per call: grammar state is per-generation, and
    * the chain shape follows the sampling params — grammar first (when
@@ -370,7 +423,7 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     llama_sampler_chain_add(chain, sm);
   }
 
-  for (i = 0; i < n_tok; i += u->n_batch) {
+  for (i = prompt_start; i < n_tok; i += u->n_batch) {
     int32_t chunk = n_tok - i < u->n_batch ? n_tok - i : u->n_batch;
     struct llama_batch batch;
     if (mll_cancelled(cancel)) {
@@ -378,7 +431,7 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
       goto out;
     }
     batch = llama_batch_get_one(tok + i, chunk);
-    if (llama_decode(u->lctx, batch) != 0) {
+    if (asngn_llg_decode(u->lctx, batch) != 0) {
       e = mll_cancelled(cancel) ? ASNGN_ERR_CANCELLED : ASNGN_ERR_MODEL;
       goto out;
     }
@@ -393,7 +446,10 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
       e = ASNGN_ERR_CANCELLED;
       goto out;
     }
-    t = llama_sampler_sample(chain, u->lctx, -1);
+    if (asngn_llg_sampler_sample(chain, u->lctx, -1, &t) != 0) {
+      /* a sampler-side exception ends the generation with what we have */
+      break;
+    }
     if (llama_vocab_is_eog(u->vocab, t)) break;
     e = mll_emit_piece(u->vocab, t, &outbuf, token_cb, token_ud);
     if (e != ASNGN_OK) goto out;
@@ -401,7 +457,7 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     if (produced >= limit || n_past >= u->n_ctx) break;
     {
       struct llama_batch batch = llama_batch_get_one(&t, 1);
-      if (llama_decode(u->lctx, batch) != 0) {
+      if (asngn_llg_decode(u->lctx, batch) != 0) {
         e = mll_cancelled(cancel) ? ASNGN_ERR_CANCELLED : ASNGN_ERR_MODEL;
         goto out;
       }
@@ -415,17 +471,35 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     e = ASNGN_ERR_NOMEM;
     goto out;
   }
+  if (u->no_think) mll_strip_think_envelope(*out_text);
   e = ASNGN_OK;
+  if (u->kv_cache) {
+    llama_token *cached =
+        (llama_token *)malloc((size_t)n_tok * sizeof *cached);
+    if (cached) {
+      memcpy(cached, tok, (size_t)n_tok * sizeof *cached);
+      free(u->cached_prompt);
+      u->cached_prompt = cached;
+      u->cached_prompt_n = n_tok;
+    }
+  }
 
 out:
   mll_set_cancel(u, NULL);
   if (chain != NULL) llama_sampler_free(chain);
   free(tok);
   free(prompt);
+  free(no_think_user);
   asngn_buf_free(&outbuf);
   if (e != ASNGN_OK && *out_text != NULL) {
     free(*out_text);
     *out_text = NULL;
+  }
+  if (e != ASNGN_OK) {
+    free(u->cached_prompt);
+    u->cached_prompt = NULL;
+    u->cached_prompt_n = 0;
+    asngn_llg_memory_clear(llama_get_memory(u->lctx), true);
   }
   return e;
 }
@@ -437,8 +511,8 @@ static int mll_count_tokens(void *ud, const char *text) {
   int32_t n;
 
   if (text == NULL) return 0;
-  n = llama_tokenize(u->vocab, text, (int32_t)strlen(text), NULL, 0, false,
-                     false);
+  n = asngn_llg_tokenize(u->vocab, text, (int32_t)strlen(text), NULL, 0,
+                         false, false);
   if (n == INT32_MIN) return -1;
   return n < 0 ? (int)-n : (int)n;
 }
@@ -487,14 +561,14 @@ static asngn_err mll_embed(void *ud, const char *text, float *out) {
 
   /* Reset any sequence state left by the previous call (NULL-safe for
    * memory-less encoder contexts). */
-  llama_memory_clear(llama_get_memory(u->lctx), true);
+  asngn_llg_memory_clear(llama_get_memory(u->lctx), true);
 
   /* llama_batch_get_one: seq 0, auto positions; with embeddings enabled
    * every token is an output, which mean pooling requires. */
   {
     struct llama_batch batch = llama_batch_get_one(tok, n_tok);
-    rc = u->encoder_only ? llama_encode(u->lctx, batch)
-                         : llama_decode(u->lctx, batch);
+    rc = u->encoder_only ? asngn_llg_encode(u->lctx, batch)
+                         : asngn_llg_decode(u->lctx, batch);
   }
   free(tok);
   if (rc != 0) return ASNGN_ERR_MODEL;
@@ -521,6 +595,7 @@ static void mll_destroy(void *ud) {
   if (u == NULL) return;
   if (u->lctx != NULL) llama_free(u->lctx);
   if (u->model != NULL) llama_model_free(u->model);
+  free(u->cached_prompt);
   os_mutex_destroy(&u->cancel_mu);
   free(u);
 }
@@ -544,6 +619,9 @@ asngn_err asngn_model_llama_create(asngn_ctx *c, const asngn_pool_entry *ent,
   if (u == NULL) return asngn_seterr(c, ASNGN_ERR_NOMEM, "out of memory");
   os_mutex_init(&u->cancel_mu);
   u->embedding = ent->embedding;
+  u->kv_cache = ent->kv_cache && !ent->embedding;
+  u->no_think = ent->reasoning_effort != NULL &&
+                strcmp(ent->reasoning_effort, "none") == 0;
 
   mparams = llama_model_default_params();
   /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps the
@@ -602,7 +680,7 @@ asngn_err asngn_model_llama_create(asngn_ctx *c, const asngn_pool_entry *ent,
     cparams.pooling_type = LLAMA_POOLING_TYPE_MEAN;
   } else {
     u->chat_template = llama_model_chat_template(u->model, NULL);
-    n_ctx = ent->ctx > 0 ? ent->ctx : 4096;
+    n_ctx = ent->ctx > 0 ? ent->ctx : 32768;
     cparams.n_ctx = (uint32_t)n_ctx;
     cparams.n_batch = MLL_N_BATCH;
     cparams.n_ubatch = MLL_N_BATCH;

@@ -43,20 +43,19 @@
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
 static const char USAGE[] =
-    "usage: asngn-mcp --root <dir> [--config <file>] "
+    "usage: asngn-mcp [--root <dir>] [--config <file>] "
     "[--workspace <dir>] [--allow-degraded]\n"
     "       asngn-mcp --help | --version\n";
 
 static const char HELP[] =
     "asngn-mcp - MCP stdio server for the Asterism Engine (asngn)\n"
     "\n"
-    "usage: asngn-mcp --root <dir> [--config <file>] "
+    "usage: asngn-mcp [--root <dir>] [--config <file>] "
     "[--workspace <dir>] [--allow-degraded]\n"
     "       asngn-mcp --help | --version\n"
     "\n"
     "options:\n"
-    "  --root <dir>     engine root directory (created if missing);"
-    " required\n"
+    "  --root <dir>     override engine root (default: ~/asngn)\n"
     "  --config <file>  optional xCDN configuration file (#asngn_config)\n"
     "  --workspace <dir> canonical coding workspace (overrides config)\n"
     "  --allow-degraded  explicitly allow missing coding dependencies\n"
@@ -1190,11 +1189,6 @@ int main(int argc, char **argv) {
       return 2;
     }
   }
-  if (!root || !*root) {
-    fprintf(stderr, "asngn-mcp: --root is required\n%s", USAGE);
-    return 2;
-  }
-
   memset(&st, 0, sizeof st);
   memset(&params, 0, sizeof params);
   params.engine_root = root;
@@ -1203,8 +1197,10 @@ int main(int argc, char **argv) {
   params.allow_degraded = allow_degraded;
   e = asngn_open(&params, &st.ctx);
   if (e != ASNGN_OK || !st.ctx) {
-    fprintf(stderr, "asngn-mcp: cannot open engine at \"%s\": %s\n",
-            root, asngn_err_name(e));
+    fprintf(stderr, "asngn-mcp: cannot open engine%s%s%s: %s\n",
+            root != NULL ? " at \"" : "",
+            root != NULL ? root : "",
+            root != NULL ? "\"" : "", asngn_err_name(e));
     return 1;
   }
   /* MCP confirmation default: the effective autoconfirm

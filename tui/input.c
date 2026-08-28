@@ -1,8 +1,8 @@
 /*
  * input.c — the asngn TUI input editor.
  *
- * A byte-buffer editor with a UTF-8-aware cursor: history (↑/↓ when the
- * editor is empty), kill/yank (Ctrl+U/K/W/Y), and multi-row layout for
+ * A byte-buffer editor with a UTF-8-aware cursor: history (Ctrl+P/N),
+ * kill/yank (Ctrl+U/K/W/Y), and multi-row layout for
  * newlines inserted with Alt+Enter / Ctrl+J. Slash-command and slug
  * completion live in main.c (they need the engine lists).
  *
@@ -13,6 +13,8 @@
 
 #include <stdlib.h>
 #include <string.h>
+
+static void ed_view_follow(tui_editor *e) { e->view_manual = 0; }
 
 void ed_init(tui_editor *e) {
   memset(e, 0, sizeof *e);
@@ -30,6 +32,8 @@ void ed_clear(tui_editor *e) {
   e->len = e->cur = 0;
   e->buf[0] = '\0';
   e->hist_pos = -1;
+  e->view_top = 0;
+  ed_view_follow(e);
 }
 
 void ed_set(tui_editor *e, const char *s) {
@@ -38,6 +42,7 @@ void ed_set(tui_editor *e, const char *s) {
   memcpy(e->buf, s, n);
   e->len = e->cur = n;
   e->buf[n] = '\0';
+  ed_view_follow(e);
 }
 
 int ed_insert(tui_editor *e, const char *s, size_t n) {
@@ -49,6 +54,7 @@ int ed_insert(tui_editor *e, const char *s, size_t n) {
   e->cur += n;
   e->buf[e->len] = '\0';
   e->hist_pos = -1; /* editing detaches from history browsing */
+  ed_view_follow(e);
   return 0;
 }
 
@@ -61,6 +67,7 @@ void ed_backspace(tui_editor *e) {
   e->cur = prev;
   e->buf[e->len] = '\0';
   e->hist_pos = -1;
+  ed_view_follow(e);
 }
 
 void ed_delete(tui_editor *e) {
@@ -71,18 +78,21 @@ void ed_delete(tui_editor *e) {
   e->len -= next - e->cur;
   e->buf[e->len] = '\0';
   e->hist_pos = -1;
+  ed_view_follow(e);
 }
 
 void ed_left(tui_editor *e) {
   if (e->cur > 0) e->cur = tui_u8_prev(e->buf, e->cur);
+  ed_view_follow(e);
 }
 
 void ed_right(tui_editor *e) {
   if (e->cur < e->len) e->cur = tui_u8_next(e->buf, e->cur);
+  ed_view_follow(e);
 }
 
-void ed_home(tui_editor *e) { e->cur = 0; }
-void ed_end(tui_editor *e) { e->cur = e->len; }
+void ed_home(tui_editor *e) { e->cur = 0; ed_view_follow(e); }
+void ed_end(tui_editor *e) { e->cur = e->len; ed_view_follow(e); }
 
 static void ed_kill_range(tui_editor *e, size_t a, size_t b) {
   if (b <= a) return;
@@ -95,6 +105,7 @@ static void ed_kill_range(tui_editor *e, size_t a, size_t b) {
   e->cur = a;
   e->buf[e->len] = '\0';
   e->hist_pos = -1;
+  ed_view_follow(e);
 }
 
 void ed_kill_to_start(tui_editor *e) { ed_kill_range(e, 0, e->cur); }
@@ -160,7 +171,17 @@ void ed_hist_down(tui_editor *e) {
     e->len = e->cur = e->saved_len;
     e->buf[e->len] = '\0';
     e->hist_pos = -1;
+    ed_view_follow(e);
   }
+}
+
+void ed_view_scroll(tui_editor *e, int rows) {
+  int max = e->view_total - e->view_rows;
+  if (max < 0) max = 0;
+  e->view_top += rows;
+  if (e->view_top < 0) e->view_top = 0;
+  if (e->view_top > max) e->view_top = max;
+  e->view_manual = max > 0;
 }
 
 /* ── layout ───────────────────────────────────────────────────────────── */

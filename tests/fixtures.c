@@ -73,6 +73,19 @@ static const char FIX_COMMANDS[] =
     "      ],\n"
     "    },\n";
 
+static const char FIX_FS_COMMANDS[] =
+    "    #command {\n"
+    "      name: \"write\",\n"
+    "      summary: \"Write a generated UTF-8 file payload.\",\n"
+    "      annotations: { destructive: true },\n"
+    "      params: [\n"
+    "        #param { name: \"path\", type: #type { kind: \"path\", "
+    "access: \"write\" }, required: true },\n"
+    "        #param { name: \"content\", type: #type { kind: \"string\" "
+    "}, required: true },\n"
+    "      ],\n"
+    "    },\n";
+
 int asngn_fix_registry(const char *root, const char *tool_id,
                        const char *tool_bin_abs, const char *behavior) {
   asngn_buf b;
@@ -122,7 +135,10 @@ int asngn_fix_registry(const char *root, const char *tool_id,
                           "    env: [],\n"
                           "  },\n"
                           "  commands: [\n");
-  if (e == ASNGN_OK) e = asngn_buf_appends(&b, FIX_COMMANDS);
+  if (e == ASNGN_OK)
+    e = asngn_buf_appends(&b,
+                          strcmp(tool_id, "fs") == 0 ? FIX_FS_COMMANDS
+                                                     : FIX_COMMANDS);
   if (e == ASNGN_OK) e = asngn_buf_appends(&b, "  ],\n}\n");
   if (e != ASNGN_OK) goto done;
 

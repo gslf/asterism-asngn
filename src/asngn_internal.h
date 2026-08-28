@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "asngn.h"
+#include "asmodel.h"
 #include "os.h"
 
 struct asper_ctx;
@@ -216,12 +217,20 @@ typedef enum { ASNGN_TRUECOLOR_AUTO = 0, ASNGN_TRUECOLOR_ON,
 typedef struct {
   char  id[32];
   char *path;       /* GGUF path, owned */
+  asmodel_backend backend;
+  char *base_url;
+  char *remote_model;
+  char *api_key_env;
+  char *api_grammar;
+  char *reasoning_effort;
   int   ctx;
   int   threads;
   bool  embedding;
   int   dim;
   int   gpu_layers; /* layers offloaded to VRAM; -1 = all (default), 0 =
                        CPU only. No-op in CPU-only llama builds. */
+  size_t ram_mb, vram_mb;
+  bool warm, kv_cache;
 } asngn_pool_entry;
 
 typedef struct {
@@ -243,8 +252,9 @@ typedef struct {
        role_compressor[32], role_adapter[32], role_judge[32],
        role_embedder[32];
   int  max_resident;
-  asngn_sampling s_classify, s_decide, s_answer, s_compress, s_adapt,
-                 s_judge;
+  int  max_ram_mb, max_vram_mb;
+  asngn_sampling s_classify, s_decide, s_draft, s_answer, s_compress,
+                 s_adapt, s_judge;
   /* routing */
   asngn_classifier_mode classifier;
   int max_escalations;
@@ -335,7 +345,8 @@ typedef struct asngn_model_iface {
   int  (*count_prompt_tokens)(void *ud, const char *system_prompt,
                               const char *user_prompt);
   asngn_err (*embed)(void *ud, const char *text, float *out); /* dim floats,
-                        L2-normalized; only on embedding models */
+                         L2-normalized; only on embedding models */
+  const char *(*last_error)(void *ud); /* optional backend diagnostic */
   void (*destroy)(void *ud);
 } asngn_model_iface;
 
@@ -354,8 +365,8 @@ typedef enum { ASNGN_ROLE_ROUTER = 0, ASNGN_ROLE_PLANNER, ASNGN_ROLE_GENERATOR,
 const char *asngn_role_name(asngn_role r);
 
 /* Task kinds drive default sampling. */
-typedef enum { ASNGN_TASK_CLASSIFY = 0, ASNGN_TASK_DECIDE, ASNGN_TASK_ANSWER,
-               ASNGN_TASK_COMPRESS, ASNGN_TASK_ADAPT,
+typedef enum { ASNGN_TASK_CLASSIFY = 0, ASNGN_TASK_DECIDE, ASNGN_TASK_DRAFT,
+               ASNGN_TASK_ANSWER, ASNGN_TASK_COMPRESS, ASNGN_TASK_ADAPT,
                ASNGN_TASK_JUDGE } asngn_task_kind;
 const char *asngn_task_name(asngn_task_kind t);
 
@@ -395,6 +406,11 @@ void      asngn_models_embed_hash(asngn_ctx *c, uint8_t out[32]);
 /* llama.cpp backend factory (models_llama.c; stub without ASNGN_WITH_LLAMA). */
 asngn_err asngn_model_llama_create(asngn_ctx *c, const asngn_pool_entry *e,
                                    asngn_model_iface *out);
+asngn_err asngn_model_openai_create(asngn_ctx *c,
+                                    const asngn_pool_entry *e,
+                                    asngn_model_iface *out);
+asngn_err asngn_shared_models_init(asngn_ctx *c);
+void asngn_shared_models_shutdown(asngn_ctx *c);
 
 /* ── token estimation (tokens.c) ──────────────────────────────────────── */
 
@@ -466,6 +482,7 @@ struct asngn_session {
 
 asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
                              asngn_session **out); /* create if missing */
+asngn_err asngn_session_workspace_activate(asngn_session *s);
 void      asngn_session_free(asngn_session *s);
 asngn_err asngn_session_save_manifest(asngn_session *s);
 asngn_err asngn_session_save_summary(asngn_session *s);
@@ -479,8 +496,22 @@ asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
 void      asngn_session_clear_blobs(asngn_session *s); /* delete files  */
 
 /* ── workspace (workspace.c) ──────────────────────────────────────────── */
+
+/* Scale and dominant language of the workspace tree, collected for free
+ * during the fingerprint walk of asngn_workspace_refresh. */
+typedef struct {
+  size_t files;         /* files visited by the fingerprint walk      */
+  size_t bytes;         /* their cumulative size                      */
+  char   language[16];  /* dominant code language by file count; ""   */
+  bool   loaded;
+} asngn_repo_stats;
+
 asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p);
 asngn_err asngn_workspace_refresh(asngn_ctx *c);
+asngn_err asngn_workspace_info_init(asngn_ctx *c, const char *root,
+                                    asngn_workspace_info *out);
+asngn_err asngn_workspace_info_refresh(asngn_ctx *c,
+                                       asngn_workspace_info *workspace);
 void      asngn_workspace_hash(asngn_ctx *c, uint8_t out[32]);
 
 /* ── ledger (ledger.c) ────────────────────────────────────────────────── */
@@ -682,15 +713,63 @@ typedef enum { ASNGN_CLASS_SIMPLE = 0, ASNGN_CLASS_MODERATE,
                ASNGN_CLASS_COMPLEX } asngn_class;
 typedef enum { ASNGN_MODE_DIRECT = 0, ASNGN_MODE_PLAN } asngn_mode;
 
+/* Task kind read off the message, ordered by increasing demand: the
+ * classifier's CLASS base score is a table over this enum. */
+typedef enum {
+  ASNGN_RTASK_CHAT = 0,  /* smalltalk, no ask                        */
+  ASNGN_RTASK_LOOKUP,    /* factual question                         */
+  ASNGN_RTASK_EXPLAIN,   /* explain / summarize / describe           */
+  ASNGN_RTASK_EDIT,      /* targeted change to named material        */
+  ASNGN_RTASK_BUILD,     /* compile / run tests / execute            */
+  ASNGN_RTASK_GENERATE,  /* write new code or tests                  */
+  ASNGN_RTASK_REFACTOR,  /* restructure existing code                */
+  ASNGN_RTASK_DEBUG      /* diagnose and fix a failure               */
+} asngn_route_task;
+
+/* astools tool families the message implies (bitmask). */
+enum {
+  ASNGN_TOOLF_FS   = 1u << 0,
+  ASNGN_TOOLF_GREP = 1u << 1,
+  ASNGN_TOOLF_GIT  = 1u << 2,
+  ASNGN_TOOLF_PROC = 1u << 3,
+  ASNGN_TOOLF_EDIT = 1u << 4
+};
+
+/* Evidence the classifier weighs beyond the message text itself.
+ * Collected by asngn_route_evidence_collect; a zeroed struct is valid
+ * (no tools, no history, no workspace, no calibration). */
 typedef struct {
-  asngn_class  klass;
-  asngn_detail detail;    /* classifier vote (never AUTO on output)  */
-  asngn_mode   mode;
+  bool   tools_available;
+  /* session history (ledger window, most recent entries) */
+  int    window;            /* entries examined                       */
+  int    escalated;         /* entries with escalations > 0           */
+  int    unreliable;        /* judge below threshold or negative fb   */
+  /* workspace scale */
+  size_t repo_files;
+  size_t repo_bytes;
+  char   repo_language[16]; /* dominant code language; "" unknown     */
+  /* eval-suite calibration (calibration/quality.xcdn)                */
+  bool   has_eval;
+  double eval_success;      /* task success rate in [0,1]             */
+} asngn_route_evidence;
+
+typedef struct {
+  asngn_class      klass;
+  asngn_detail     detail;  /* classifier vote (never AUTO on output) */
+  asngn_mode       mode;
+  asngn_route_task task;    /* heuristic verdict (evidence axis)      */
+  unsigned         toolmask;/* implied ASNGN_TOOLF_* families         */
 } asngn_route_profile;
 
-/* Heuristic classification (pure; unit-tested against the table). */
-void asngn_route_heuristic(const char *message, bool tools_available,
-                           bool recent_escalation,
+/* Fill evidence from the engine: ledger window, repo stats, eval
+ * calibration. s and t may be NULL (degrades to message-only). */
+void asngn_route_evidence_collect(asngn_ctx *c, asngn_session *s,
+                                  const struct asngn_turn_state *t,
+                                  asngn_route_evidence *out);
+/* Evidence-scored classification (pure; unit-tested against the table).
+ * ev == NULL behaves as a zeroed evidence struct. */
+void asngn_route_heuristic(const char *message,
+                           const asngn_route_evidence *ev,
                            asngn_route_profile *out);
 /* Full classification per routing.classifier (may run the nano pass).
  * aux_tokens accumulates classifier generation. */
@@ -699,6 +778,7 @@ asngn_err asngn_route_classify(asngn_ctx *c, asngn_session *s,
                                struct asngn_turn_state *t,
                                asngn_route_profile *out,
                                size_t *aux_tokens);
+const char *asngn_route_task_name(asngn_route_task k); /* "chat" ...  */
 /* Tier ladder: index of the slot one tier above/below `slot` following
  * pool declaration order over generative models; -1 when none. */
 int asngn_route_tier_up(asngn_ctx *c, int slot);
@@ -727,10 +807,25 @@ double asngn_session_qpt(const asngn_session *s);
 
 /* ── step protocol (steps.c, grammar.c) ───────────────────────────────── */
 
-/* Step text payloads (THINK/RECALL/CLARIFY) are one line of at most this
- * many bytes; the step grammar bounds its `text` rule to the same count
- * so the sampler is forced onto the terminating newline at the limit. */
-#define ASNGN_STEP_TEXT_MAX 300
+/* A decision pass emits one single-line schema-constrained action
+ * object (JSON/xCDN-style, fixed key order, no string escapes):
+ *
+ *   {action: "call", why: "…", input: <tool>.<cmd> {…},
+ *    success: "…", fallback: "…"}
+ *   {action: "recall", why: "…", input: "…", success: "…", fallback: "…"}
+ *   {action: "open", why: "…", input: "B<n>"}
+ *   {action: "think", input: "…"}
+ *   {action: "clarify", why: "…", input: "…"}
+ *   {action: "answer"}
+ *
+ * Input payloads (THINK note, RECALL/CLARIFY question) are at most
+ * ASNGN_STEP_TEXT_MAX bytes; the meta fields (why, success, fallback)
+ * at most ASNGN_STEP_META_MAX. The step grammar bounds its `text` and
+ * `meta` rules to the same counts, so at the limit the sampler is
+ * forced onto the closing quote instead of rambling into the decide
+ * max_tokens cap. */
+#define ASNGN_STEP_TEXT_MAX 2048
+#define ASNGN_STEP_META_MAX 512
 
 typedef enum { ASNGN_STEP_CALL = 0, ASNGN_STEP_RECALL, ASNGN_STEP_OPEN,
                ASNGN_STEP_THINK, ASNGN_STEP_CLARIFY,
@@ -739,7 +834,10 @@ const char *asngn_step_name(asngn_step_kind k);
 
 typedef struct {
   asngn_step_kind kind;
-  char *text;      /* RECALL/THINK/CLARIFY payload, owned            */
+  char *text;      /* RECALL/THINK/CLARIFY input payload, owned      */
+  char *why;       /* short rationale, owned, may be NULL            */
+  char *success;   /* declared success condition, owned, may be NULL */
+  char *fallback;  /* declared fallback plan, owned, may be NULL     */
   char *call_ref;  /* CALL: tool ref, owned                          */
   char *call_cmd;  /* CALL: command, owned                           */
   char *call_args; /* CALL: args object text, owned                  */
@@ -747,15 +845,16 @@ typedef struct {
 } asngn_step;
 
 void asngn_step_free(asngn_step *st);
-/* Parse one step line (defense in depth over the grammar). */
+/* Parse one action-object line (defense in depth over the grammar). */
 asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out);
 
 /* Merge the per-turn GBNF: asngn productions + astools call production
  * (grafted, renamed to avoid rule collisions) + concrete blob handles.
- * with_call/with_recall reflect sibling availability and turn options. */
+ * with_call/with_recall reflect sibling availability and turn options;
+ * with_think supports the one-pass consecutive-thinking guard. */
 asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
-                              size_t blobs_n, const char *astools_gbnf,
-                              char **out);
+                              bool with_think, size_t blobs_n,
+                              const char *astools_gbnf, char **out);
 asngn_err asngn_grammar_classify(char **out);
 asngn_err asngn_grammar_judge(char **out);
 
@@ -809,6 +908,7 @@ asngn_err asngn_siblings_recall(asngn_ctx *c, const char *question,
 asngn_err asngn_siblings_project(asngn_ctx *c, const char *slug);
 asngn_err asngn_siblings_project_sync(asngn_ctx *c, const char *want);
 asngn_err asngn_siblings_readiness(asngn_ctx *c);
+asngn_err asngn_siblings_workspace_sync(asngn_ctx *c, const char *root);
 
 /* ── control loop (loop.c) ────────────────────────────────────────────── */
 
@@ -816,6 +916,15 @@ typedef struct {
   char   *text;   /* one working-zone item, owned                    */
   size_t  tokens; /* counted with the turn's tokenizer               */
 } asngn_work_item;
+
+/* Model-visible capabilities are phase-scoped.  Only ACTION sees the tool
+ * catalog and may reach step_call; DRAFT creates an opaque tool payload;
+ * RESPONSE is the only phase whose text may reach the user. */
+typedef enum {
+  ASNGN_PHASE_ACTION = 0,
+  ASNGN_PHASE_DRAFT,
+  ASNGN_PHASE_RESPONSE
+} asngn_turn_phase;
 
 typedef struct asngn_turn_state {
   asngn_session *s;
@@ -828,6 +937,7 @@ typedef struct asngn_turn_state {
   char           span_root[37];
   /* route */
   asngn_route_profile prof;
+  asngn_route_evidence evidence; /* as weighed by the classifier     */
   asngn_detail   detail;        /* effective                         */
   int            gen_slot;      /* generator slot (escalations move) */
   int            escalations;
@@ -840,6 +950,7 @@ typedef struct asngn_turn_state {
   /* catalog + grammar snapshots (owned) */
   char          *catalog;
   char          *astools_gbnf;
+  asngn_turn_phase phase;
   /* step accounting + guards */
   int            steps, tool_calls, thinks_row, thinks_total;
   int            recalls_total;
@@ -850,11 +961,18 @@ typedef struct asngn_turn_state {
   uint8_t        osc_a[32], osc_b[32];
   int            osc_cycles;
   int            repeat_calls; /* consecutive identical-call rejections */
-  int            futile_row;   /* consecutive guard-blocked steps       */
+  int            futile_row;   /* consecutive non-progressing steps     */
   bool           call_mute;    /* withhold CALL from the next decision
-                                * pass (set when a repeat was blocked) */
+                                 * pass (set when a repeat was blocked) */
+  bool           think_mute;   /* withhold THINK for one pass after the
+                                * consecutive-thinking budget is consumed */
   bool           tools_used;
   bool           tool_ok_seen; /* at least one call succeeded this turn */
+  bool           wrote_workspace; /* a non-read_only call succeeded     */
+  bool           artifact_written; /* fs.write/edit content landed       */
+  bool           verification_attempted; /* build/test/run after mutation */
+  bool           verification_ok;  /* applicable verification succeeded  */
+  bool           answer_nudged;  /* outcome gate already bounced ANSWER */
   char         **tools_list;    /* labels for the cache entry        */
   size_t         tools_list_n;
   bool           forced_answer; /* guard/step exhaustion             */
@@ -914,7 +1032,16 @@ struct asngn_ctx {
   char         *root;          /* resolved engine root, owned        */
   char         *sessions_dir, *cache_dir, *tele_dir;
   asngn_workspace_info workspace;
+  asngn_repo_stats repo_stats; /* refreshed with the fingerprint     */
   bool          allow_degraded;
+  bool          session_workspaces; /* sessions/<slug>/workspace mode */
+
+  /* eval-suite calibration (route.c; probed once, agent thread only) */
+  struct {
+    bool    probed, present;
+    double  success;           /* task_success_rate in [0,1]         */
+    int64_t tasks, guard_trips;
+  } calib;
 
   /* error */
   char          errbuf[512];
@@ -940,11 +1067,13 @@ struct asngn_ctx {
   size_t        models_n;
   int           role_slot[ASNGN_ROLE_COUNT];
   os_mutex      models_mu;
+  asmodel_manager *shared_models;
 
   /* siblings */
   struct asper_ctx   *asper;
   struct astools_ctx *astools;
   bool          asper_ok, astools_ok;
+  char         *astools_workspace_active; /* canonical root, owned      */
   char         *astools_catalog;   /* cached, owned                  */
   char         *astools_grammar;   /* cached, owned                  */
   asngn_tool_note *notes;          /* annotation cache               */

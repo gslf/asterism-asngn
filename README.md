@@ -39,14 +39,16 @@ any shell with CMake and git on PATH).
 
 ### 2. Clone the workspace
 
-asngn expects its two sibling repositories next to it (paths can be
-overridden with `ASNGN_ASPER_DIR` / `ASNGN_ASTOOLS_DIR`):
+asngn expects its three sibling repositories next to it (paths can be
+overridden with `ASNGN_ASPER_DIR` / `ASNGN_ASTOOLS_DIR` /
+`ASNGN_ASMODEL_DIR`):
 
 ```
 asterism/
 ├── asterism-asngn     (this repo)
 ├── asterism-asper     (memory sibling; brings llama.cpp)
-└── asterism-astools   (tools sibling; brings the patched xCDN-C)
+├── asterism-astools   (tools sibling; brings the patched xCDN-C)
+└── asterism-asmodel   (shared model runtime)
 ```
 
 Same commands on every platform — `--recurse-submodules` matters, the
@@ -57,6 +59,7 @@ mkdir asterism && cd asterism
 git clone --recurse-submodules https://github.com/gslf/asterism-asngn
 git clone --recurse-submodules https://github.com/gslf/asterism-asper
 git clone --recurse-submodules https://github.com/gslf/asterism-astools
+git clone https://github.com/gslf/asterism-asmodel
 ```
 
 ### 3. Configure and build

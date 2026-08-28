@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   integrated-build-test:
     strategy:
@@ -18,19 +21,26 @@ jobs:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: asterism-asngn
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asper
+          ref: 7ce9e8f0091387d829d5d95acd1ed075a7ff9230
           path: asterism-asper
           submodules: recursive
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-astools
+          ref: 635e23e33c8aec72672fdde5e3376cd363e75d5c
           path: asterism-astools
           submodules: recursive
+      - uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - name: Check shared xCDN pin
         shell: pwsh
         run: |
@@ -71,18 +81,25 @@ jobs:
   linux-sanitizers:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with: { path: asterism-asngn }
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asper
+          ref: 7ce9e8f0091387d829d5d95acd1ed075a7ff9230
           path: asterism-asper
           submodules: recursive
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-astools
+          ref: 635e23e33c8aec72672fdde5e3376cd363e75d5c
           path: asterism-astools
           submodules: recursive
+      - uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - run: cmake -B build -DASNGN_WITH_LLAMA=OFF -DASNGN_SANITIZERS=ON
         working-directory: asterism-asngn
       - run: cmake --build build -j 4

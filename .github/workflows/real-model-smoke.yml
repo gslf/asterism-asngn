@@ -5,24 +5,34 @@ on:
     - cron: "17 2 * * 1"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   cpu-gguf-turn:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           path: asterism-asngn
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asper
+          ref: 7ce9e8f0091387d829d5d95acd1ed075a7ff9230
           path: asterism-asper
           submodules: recursive
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-astools
+          ref: 635e23e33c8aec72672fdde5e3376cd363e75d5c
           path: asterism-astools
           submodules: recursive
+      - uses: actions/checkout@v7
+        with:
+          repository: gslf/asterism-asmodel
+          ref: f84adc2962e93f82261ae9c1cfc19d60513198e5
+          path: asterism-asmodel
       - name: Cache verified GGUF sources
         uses: actions/cache@v4
         with:

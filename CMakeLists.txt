@@ -50,7 +50,7 @@ foreach(dep_dir "${ASNGN_ASPER_DIR}" "${ASNGN_ASTOOLS_DIR}" "${ASNGN_ASMODEL_DIR
   if(NOT EXISTS "${dep_dir}/CMakeLists.txt")
     message(FATAL_ERROR "sibling missing: ${dep_dir} — clone the asterism "
             "siblings next to this repository or set ASNGN_ASPER_DIR / "
-            "ASNGN_ASTOOLS_DIR")
+            "ASNGN_ASTOOLS_DIR / ASNGN_ASMODEL_DIR")
   endif()
 endforeach()
 

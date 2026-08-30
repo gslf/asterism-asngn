@@ -51,6 +51,11 @@ static int shared_count_prompt(void *ud, const char *sys, const char *user) {
   return asngn_models_count_prompt(r->ctx, r->slot, sys, user);
 }
 
+static const char *shared_last_error(void *ud) {
+  shared_ref *r = (shared_ref *)ud;
+  return asngn_last_error(r->ctx);
+}
+
 static void shared_destroy(void *ud) { free(ud); }
 
 static int shared_loader(void *ud, const asmodel_spec *spec,
@@ -72,6 +77,7 @@ static int shared_loader(void *ud, const asmodel_spec *spec,
   out->embed = spec->embedding ? shared_embed : NULL;
   out->count_tokens = shared_count;
   out->count_prompt_tokens = shared_count_prompt;
+  out->last_error = shared_last_error;
   out->destroy = shared_destroy;
   return 0;
 }

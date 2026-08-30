@@ -102,16 +102,27 @@ static void fx_emit_n(fx *f, int n) {
 /* ── event sink callback ──────────────────────────────────────────────── */
 
 typedef struct {
-  int n;
+  os_mutex mu;
+  int explicit_n;
   int bad;
 } sink_state;
 
 static void sink_cb(const char *event_xcdn, void *ud) {
   sink_state *st = ud;
-  st->n++;
+  os_mutex_lock(&st->mu);
   if (event_xcdn == NULL ||
       strncmp(event_xcdn, "#asngn_event {", 14) != 0)
     st->bad++;
+  else if (strstr(event_xcdn, "kind: \"k") != NULL)
+    st->explicit_n++;
+  os_mutex_unlock(&st->mu);
+}
+
+static void sink_snapshot(sink_state *st, int *explicit_n, int *bad) {
+  os_mutex_lock(&st->mu);
+  *explicit_n = st->explicit_n;
+  *bad = st->bad;
+  os_mutex_unlock(&st->mu);
 }
 
 /* ── tests ────────────────────────────────────────────────────────────── */
@@ -175,19 +186,26 @@ TEST(file_sink_flush) {
 TEST(event_sink_callback) {
   fx f;
   sink_state st;
+  int explicit_n, bad;
 
   ASSERT_TRUE(fx_setup(&f, "  telemetry: { ring: 8 },\n"));
   memset(&st, 0, sizeof st);
+  os_mutex_init(&st.mu);
   asngn_set_event_sink(f.c, sink_cb, &st);
   fx_emit_n(&f, 5);
-  ASSERT_EQ_INT(st.n, 5);
-  ASSERT_EQ_INT(st.bad, 0);
+  sink_snapshot(&st, &explicit_n, &bad);
+  ASSERT_EQ_INT(explicit_n, 5);
+  ASSERT_EQ_INT(bad, 0);
 
-  /* a NULL sink disables the callback */
+  /* A NULL sink disables new callbacks. Closing the context below joins the
+   * background warm-up, which may already have captured the old callback. */
   asngn_set_event_sink(f.c, NULL, NULL);
   fx_emit_n(&f, 3);
-  ASSERT_EQ_INT(st.n, 5);
   fx_drop(&f);
+  sink_snapshot(&st, &explicit_n, &bad);
+  ASSERT_EQ_INT(explicit_n, 5);
+  ASSERT_EQ_INT(bad, 0);
+  os_mutex_destroy(&st.mu);
 }
 
 TEST_LIST = {

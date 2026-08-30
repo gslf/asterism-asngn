@@ -19,7 +19,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asper
-          ref: 26fb95a0e83059f7010c50ec6a4dd5a2a532bbb0
+          ref: 5cc2d37ebcf1644e91021cc55f02f79e383e526a
           path: asterism-asper
           submodules: recursive
       - uses: actions/checkout@v7

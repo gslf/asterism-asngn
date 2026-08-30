@@ -82,6 +82,29 @@ TEST(direct_chat) {
   eng_drop(&f);
 }
 
+TEST(explicit_deadline_is_opt_in) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_submit_opts opts;
+
+  memset(&r, 0, sizeof r);
+  memset(&opts, 0, sizeof opts);
+  opts.deadline_ms = 5000;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(
+      &f.nano, "CLASS SIMPLE | DETAIL TERSE | MODE DIRECT | TASK CHAT\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "OK\n"));
+
+  ASSERT_OK(eng_turn(&f, "reply OK", &opts, NULL, &r));
+  ASSERT_TRUE(f.nano.deadline_seen[0] > 0 &&
+              f.nano.deadline_seen[0] <= 5000);
+  ASSERT_TRUE(f.light.deadline_seen[0] > 0 &&
+              f.light.deadline_seen[0] <= 5000);
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
 /* ── b. plan turn with one real tool call ─────────────────────────────── */
 
 TEST(plan_tool_turn) {
@@ -133,11 +156,9 @@ TEST(plan_tool_turn) {
 
 /* ── b2. generate turns are outcome-gated ─────────────────────────────── */
 
-/* A generation ask ("write a calculator in c++") whose planner tries to
- * answer with the code inline: the outcome gate bounces the first ANSWER
- * (nothing was written to the workspace), the planner then performs a
- * mutating call, and the answer pass is told to summarize the files
- * instead of pasting the sources. */
+/* A generation ask whose planner tries to answer before writing an artifact
+ * fails closed. Re-running DECIDE against unchanged state wastes the complete
+ * prompt and can repeat until the step budget. */
 TEST(generate_outcome_gate) {
   eng_fx f;
   asngn_turn_result r;
@@ -147,26 +168,10 @@ TEST(generate_outcome_gate) {
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS COMPLEX | DETAIL RICH | MODE PLAN\n"));
   ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm,
-                              "{action: \"call\", why: \"create the file\", "
-                              "input: fake.mut {msg: \"calc.cpp\"}, "
-                              "success: \"RESULT ok\", fallback: "
-                              "\"answer inline\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Created calc.cpp in the workspace.\n"));
-
-  ASSERT_OK(eng_turn(&f, "write a calculator in c++", NULL, NULL, &r));
-  ASSERT_EQ_STR(r.answer, "Created calc.cpp in the workspace.\n");
-
-  /* the generate-specific push framed the first decision pass, and the
-   * bounce notice reached the passes after the premature ANSWER */
+  ASSERT_EQ_INT(eng_turn(&f, "write a calculator in c++", NULL, NULL, &r),
+                ASNGN_ERR_PROTOCOL);
   ASSERT_EQ_INT(f.light.calls, 0);
-  ASSERT_EQ_INT(f.stdm.calls, 4); /* three decisions + final response */
-  /* the answer trailer switched to the summarize form */
-  ASSERT_CONTAINS(f.stdm.last_user, "Do not paste the full sources");
-
-  ASSERT_EQ_INT((long long)f.s->log_n, 2);
-  ASSERT_EQ_INT(f.s->log[1].steps, 3); /* ANSWER (bounced) + CALL + ANSWER */
+  ASSERT_EQ_INT(f.stdm.calls, 1);
   asngn_turn_result_free(&r);
   eng_drop(&f);
 }
@@ -337,6 +342,41 @@ TEST(generate_fenced_draft_then_write) {
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.tool_calls, 1);
 
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+/* A private draft can consume its full output allowance without losing the
+ * bytes already paid for. The next call receives an exact suffix/hash resume
+ * contract and only generates the remainder; the tool sees one complete
+ * artifact and the turn terminates normally. */
+TEST(generate_draft_limit_continues_losslessly) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_stats st;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup_tool(&f, "fs", "echo",
+                             "safety: { autoconfirm: \"allow\" },"));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS COMPLEX | DETAIL RICH | MODE PLAN\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm,
+      "{action: \"call\", why: \"create source\", input: "
+      "fs.write {path: \"main.c\", content: \"@asngn:draft\"}, "
+      "success: \"bytes written\", fallback: \"report failure\"}\n"));
+  ASSERT_TRUE(fake_model_push_partial_limit(
+      &f.stdm, "#include <stdio.h>\nint main(void) {"));
+  ASSERT_TRUE(fake_model_push(&f.stdm,
+                              " puts(\"ok\"); return 0; }\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Created main.c.\n"));
+
+  ASSERT_OK(eng_turn(&f, "create main.c", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "Created main.c.\n");
+  ASSERT_EQ_INT(f.stdm.calls, 5);
+  ASSERT_OK(asngn_get_stats(f.c, &st));
+  ASSERT_EQ_INT((long long)st.tool_calls, 1);
   asngn_turn_result_free(&r);
   eng_drop(&f);
 }
@@ -537,15 +577,16 @@ TEST(clarify_turn) {
   eng_drop(&f);
 }
 
-/* ── d2. degenerate decision passes escalate instead of shipping ─────── */
+/* ── d2. degenerate decisions fail closed without regeneration ───────── */
 
-TEST(degenerate_decide_recovers) {
+TEST(degenerate_decide_fails_without_regeneration) {
   /* Regression for session s-d569146b: the light planner rambled inside
    * a clarify object, the decide cap truncated the output (no trailing
    * newline), and the junk shipped verbatim as the answer. Now pass 1
    * (truncated: no newline) and pass 2 (complete but in the retired
-   * line protocol) both count as malformed, decisions escalate to the
-   * generator, and the turn answers normally. */
+   * line protocol) must not ship.  A malformed constrained result now fails
+   * closed; silently regenerating it would spend another full prompt and
+   * hide a provider-contract violation. */
   eng_fx f;
   asngn_turn_result r;
 
@@ -558,22 +599,56 @@ TEST(degenerate_decide_recovers) {
                               "me to perform any specific action with "
                               "these files? Do you need me to perform "
                               "any specific"));
-  ASSERT_TRUE(fake_model_push(&f.light,
-                              "CLARIFY | CLARIFY | Anything else?\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
-  ASSERT_TRUE(fake_model_push(&f.stdm, "Here is the list of files.\n"));
+  ASSERT_EQ_INT(eng_turn(&f, "list the files in the folder", NULL, NULL, &r),
+                ASNGN_ERR_PROTOCOL);
+  ASSERT_EQ_INT(f.light.calls, 1);
+  ASSERT_EQ_INT(f.stdm.calls, 0);
 
-  ASSERT_OK(eng_turn(&f, "list the files in the folder", NULL, NULL, &r));
-  ASSERT_EQ_INT(r.clarify, 0);
-  ASSERT_EQ_STR(r.answer, "Here is the list of files.\n");
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
 
-  /* two failed light passes, then decide + answer on the generator */
-  ASSERT_EQ_INT(f.light.calls, 2);
-  ASSERT_EQ_INT(f.stdm.calls, 2);
-  ASSERT_EQ_INT((long long)f.s->log_n, 2);
-  ASSERT_EQ_STR(f.s->log[1].mode, "plan");
-  ASSERT_EQ_INT(f.s->log[1].steps, 1); /* only the ANSWER parsed */
-  ASSERT_EQ_STR(f.s->led[0].klass, "moderate"); /* not "clarify" */
+TEST(decide_token_limit_fails_without_regeneration) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_err e;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS COMPLEX | DETAIL NORMAL | MODE PLAN | "
+                              "TASK DEBUG\n"));
+  ASSERT_TRUE(fake_model_push_error(&f.stdm, ASNGN_ERR_LIMIT));
+
+  e = eng_turn(&f, "debug the reported failure", NULL, NULL, &r);
+  ASSERT_EQ_INT(e, ASNGN_ERR_LIMIT);
+  ASSERT_EQ_INT(f.stdm.calls, 1);
+  ASSERT_EQ_INT(f.stdm.max_tokens_seen[0], 1024);
+  ASSERT_EQ_INT(f.stdm.reasoning_seen[0],
+                ASMODEL_REASONING_REQUIRED_OFF);
+  ASSERT_EQ_INT(f.stdm.require_constraint_seen[0], 1);
+  ASSERT_EQ_INT(f.stdm.deadline_seen[0], 0);
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(decide_deadline_fails_without_regeneration) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_err e;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS COMPLEX | DETAIL NORMAL | MODE PLAN | "
+                              "TASK DEBUG\n"));
+  ASSERT_TRUE(fake_model_push_error(&f.stdm, ASNGN_ERR_TIMEOUT));
+
+  e = eng_turn(&f, "debug the deadline failure", NULL, NULL, &r);
+  ASSERT_EQ_INT(e, ASNGN_ERR_TIMEOUT);
+  ASSERT_EQ_INT(f.stdm.calls, 1);
+  ASSERT_TRUE(strstr(asngn_last_error(f.c), "deadline expired") != NULL);
 
   asngn_turn_result_free(&r);
   eng_drop(&f);
@@ -584,16 +659,15 @@ TEST(degenerate_decide_recovers) {
 TEST(digestion) {
   eng_fx f;
   asngn_turn_result r;
-  FILE *bf;
 
   memset(&r, 0, sizeof r);
   /* behavior "big": result {data: "<8000 x's>"}; threshold 512 chars.
    * The digest compressor shares the light model, so the light queue is,
    * IN ORDER: decision CALL, the compressor's digest text, decision
    * ANSWER (loop.c step_call -> digest.c asngn_digest_item). */
-  ASSERT_TRUE(eng_setup(&f, "big",
-                        "context: { digest_threshold_chars: 512, "
-                        "digest_tokens: 64 },"));
+  ASSERT_TRUE(eng_setup_asper(
+      &f, "big", "context: { digest_threshold_chars: 512, "
+                 "digest_tokens: 64 },"));
   ASSERT_TRUE(fake_model_push(&f.nano,
                               "CLASS MODERATE | DETAIL NORMAL | MODE PLAN\n"));
   ASSERT_TRUE(fake_model_push(&f.light,
@@ -615,12 +689,10 @@ TEST(digestion) {
   ASSERT_CONTAINS(f.light.last_user, "digest of the result");
   ASSERT_NOT_CONTAINS(f.light.last_user, "xxxxxxxxxxxxxxxx");
 
-  /* the blob file exists under sessions/<slug>/blobs/ */
+  /* The exact payload is an Asper content-addressed object, not an
+   * ASNGN-owned session blob file. */
   ASSERT_EQ_INT((long long)f.s->blobs_n, 1);
-  ASSERT_CONTAINS(f.s->blobs[0].path, "blobs");
-  bf = fopen(f.s->blobs[0].path, "rb");
-  ASSERT_TRUE(bf != NULL);
-  fclose(bf);
+  ASSERT_CONTAINS(f.s->blobs[0].object_ref, "sha256:");
 
   /* the ledger accounted the saving */
   ASSERT_EQ_INT((long long)f.s->led_n, 1);
@@ -761,27 +833,79 @@ TEST(tool_permissions) {
   eng_drop(&f);
 }
 
+/* Asper is the authoritative transcript/context path in normal operation:
+ * exact source events feed the next turn, survive a session reopen, and no
+ * ASNGN-owned transcript or rolling-summary file is created. */
+TEST(asper_source_context_and_reopen) {
+  eng_fx f;
+  asngn_turn_result r1, r2;
+  char legacy_transcript[512], legacy_summary[512], event_log[512];
+
+  memset(&r1, 0, sizeof r1);
+  memset(&r2, 0, sizeof r2);
+  ASSERT_TRUE(eng_setup_asper(&f, "echo", NULL));
+  ASSERT_TRUE(f.c->asper_ok);
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS SIMPLE | DETAIL TERSE | MODE DIRECT\n"));
+  ASSERT_TRUE(fake_model_push(&f.nano,
+                              "CLASS SIMPLE | DETAIL TERSE | MODE DIRECT\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "alpha exact answer.\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "beta answer.\n"));
+
+  ASSERT_OK(eng_turn(&f, "remember alpha exactly", NULL, NULL, &r1));
+  ASSERT_OK(eng_turn(&f, "what came before?", NULL, NULL, &r2));
+  ASSERT_CONTAINS(f.light.last_user, "alpha exact answer.");
+
+  snprintf(legacy_transcript, sizeof legacy_transcript,
+           "%s/sessions/s1/transcript.xcdn", f.root_raw);
+  snprintf(legacy_summary, sizeof legacy_summary,
+           "%s/sessions/s1/summary.xcdn", f.root_raw);
+  snprintf(event_log, sizeof event_log,
+           "%s/memory/scopes/s1/events.log", f.root_raw);
+  ASSERT_TRUE(!os_file_exists(legacy_transcript));
+  ASSERT_TRUE(!os_file_exists(legacy_summary));
+  ASSERT_TRUE(os_file_exists(event_log));
+
+  asngn_session_close(f.s);
+  f.s = NULL;
+  ASSERT_OK(asngn_session_open(f.c, "s1", &f.s));
+  ASSERT_EQ_INT(f.s->log_n, 4);
+  ASSERT_EQ_STR(f.s->log[0].text, "remember alpha exactly");
+  ASSERT_EQ_STR(f.s->log[1].text, "alpha exact answer.\n");
+  ASSERT_EQ_STR(f.s->log[2].text, "what came before?");
+  ASSERT_EQ_STR(f.s->log[3].text, "beta answer.\n");
+
+  asngn_turn_result_free(&r1);
+  asngn_turn_result_free(&r2);
+  eng_drop(&f);
+}
+
 /* ── runner ───────────────────────────────────────────────────────────── */
 
 TEST_LIST = {
   TEST_ENTRY(direct_chat),
+  TEST_ENTRY(explicit_deadline_is_opt_in),
   TEST_ENTRY(plan_tool_turn),
   TEST_ENTRY(reference_followup_stays_direct),
   TEST_ENTRY(model_classifier_cannot_downgrade_quality),
   TEST_ENTRY(generate_outcome_gate),
   TEST_ENTRY(generate_draft_then_write),
   TEST_ENTRY(generate_fenced_draft_then_write),
+  TEST_ENTRY(generate_draft_limit_continues_losslessly),
   TEST_ENTRY(generate_draft_marker_rejected_outside_content),
   TEST_ENTRY(response_tool_protocol_never_streams),
   TEST_ENTRY(generate_decision_failure_never_answers),
   TEST_ENTRY(tool_call_log_hashes_secret_args),
   TEST_ENTRY(confirm_deny_headless),
   TEST_ENTRY(clarify_turn),
-  TEST_ENTRY(degenerate_decide_recovers),
+  TEST_ENTRY(degenerate_decide_fails_without_regeneration),
+  TEST_ENTRY(decide_token_limit_fails_without_regeneration),
+  TEST_ENTRY(decide_deadline_fails_without_regeneration),
   TEST_ENTRY(digestion),
   TEST_ENTRY(more_continuation),
   TEST_ENTRY(retry_up),
   TEST_ENTRY(tool_permissions),
+  TEST_ENTRY(asper_source_context_and_reopen),
 };
 
 RUN_ALL_TESTS()

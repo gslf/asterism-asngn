@@ -55,7 +55,8 @@ typedef enum {
   ASNGN_ERR_CONTEXT,     /* prompt exceeds the model's global context budget */
   ASNGN_ERR_UNSUPPORTED, /* disabled feature or unsupported operation       */
   ASNGN_ERR_SIBLING,     /* asper / astools failure (see asngn_last_error)  */
-  ASNGN_ERR_NOMEM        /* allocation failure                              */
+  ASNGN_ERR_NOMEM,       /* allocation failure                              */
+  ASNGN_ERR_LIMIT        /* model completion exhausted its token budget      */
 } asngn_err;
 
 /* Stable name of an error code, e.g. "ASNGN_ERR_MODEL". */
@@ -142,7 +143,7 @@ const char *asngn_session_slug(const asngn_session *s);
 asngn_err asngn_session_workspace(asngn_session *s,
                                   asngn_workspace_info *out);
 asngn_err asngn_session_pin    (asngn_session *s, size_t turn, int on);
-asngn_err asngn_session_compact(asngn_session *s);    /* fold + compact    */
+asngn_err asngn_session_compact(asngn_session *s);    /* delegate to Asper */
 
 /* One transcript entry of an open session (history replay). */
 typedef struct {
@@ -150,7 +151,7 @@ typedef struct {
   char        role[10];  /* "user" | "assistant"                        */
   const char *text;      /* points into the array allocation            */
   long long   at;        /* unix seconds UTC                            */
-  int         pinned, folded;
+  int         pinned;
   char        tier[16];  /* assistant turns: generator tier, else ""    */
 } asngn_transcript_entry;
 /* Full transcript of an open session, oldest first. *out is one
@@ -174,7 +175,7 @@ typedef void (*asngn_token_fn)(const char *utf8, void *ud);
 
 typedef struct {
   asngn_detail detail;      /* override; AUTO = controller decides         */
-  uint32_t     deadline_ms; /* 0 = safety.turn_deadline                    */
+  uint32_t     deadline_ms; /* 0 = configured default (unlimited by default) */
   int          no_tools;    /* disable CALL for this turn                  */
   int          no_cache;    /* bypass the semantic cache for this turn     */
 } asngn_submit_opts;
@@ -202,6 +203,7 @@ asngn_err asngn_submit(asngn_session *s, const char *text_utf8,
  * exactly once; later calls return the stored outcome. */
 asngn_err asngn_task_wait  (asngn_task *t, uint32_t timeout_ms,
                             asngn_turn_result *out);
+/* Immediately cancels the turn and its in-flight provider request. */
 asngn_err asngn_task_cancel(asngn_task *t);
 void      asngn_task_free  (asngn_task *t);
 
@@ -311,11 +313,9 @@ asngn_err asngn_get_models(asngn_ctx *c, asngn_model_info *out,
 typedef struct {
   size_t turns, cache_hits, cache_adapts, cache_misses;
   size_t tool_calls, tool_cache_hits, escalations, guard_trips;
-  size_t tokens_prompt, tokens_gen, tokens_saved, summary_debt;
-  size_t folds;
+  size_t tokens_prompt, tokens_gen, tokens_saved;
   double qpt_rolling;             /* rolling QpT over the last 20 turns   */
   long long last_turn_at;         /* unix seconds UTC; 0 = never          */
-  long long last_fold_at;
   long long last_sweep_at;
 } asngn_stats;
 asngn_err asngn_get_stats(asngn_ctx *c, asngn_stats *out);

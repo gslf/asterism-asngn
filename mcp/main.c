@@ -725,12 +725,8 @@ static int tool_engine_stats(server_state *st, const jx_value *args,
                       jx_int((long long)stt.tokens_gen)) == 0;
   ok &= jx_object_set(o, "tokens_saved",
                       jx_int((long long)stt.tokens_saved)) == 0;
-  ok &= jx_object_set(o, "summary_debt",
-                      jx_int((long long)stt.summary_debt)) == 0;
-  ok &= jx_object_set(o, "folds", jx_int((long long)stt.folds)) == 0;
   ok &= jx_object_set(o, "qpt_rolling", jx_finite(stt.qpt_rolling)) == 0;
   ok &= jx_object_set(o, "last_turn_at", jx_int(stt.last_turn_at)) == 0;
-  ok &= jx_object_set(o, "last_fold_at", jx_int(stt.last_fold_at)) == 0;
   ok &= jx_object_set(o, "last_sweep_at", jx_int(stt.last_sweep_at)) == 0;
   if (!ok) {
     jx_free(o);

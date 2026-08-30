@@ -558,58 +558,198 @@ asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
 
 /* ═══════════════════════ memory zone (Asper) ═══════════════════════ */
 
-asngn_err asngn_siblings_memory(asngn_ctx *c, const char *base_prompt,
-                                const char *user_message, char **out) {
-  char *prompt = NULL, *copy;
+static asngn_err sib_asper_err(asngn_ctx *c, asper_err e,
+                               const char *operation) {
+  asngn_err mapped;
+  switch (e) {
+    case ASPER_OK: return ASNGN_OK;
+    case ASPER_ERR_NOT_FOUND: mapped = ASNGN_ERR_NOT_FOUND; break;
+    case ASPER_ERR_NOMEM: mapped = ASNGN_ERR_NOMEM; break;
+    case ASPER_ERR_BUSY: mapped = ASNGN_ERR_BUSY; break;
+    case ASPER_ERR_INVALID: mapped = ASNGN_ERR_INVALID; break;
+    default: mapped = ASNGN_ERR_SIBLING; break;
+  }
+  return asngn_seterr(c, mapped, "asper %s: %s: %s", operation,
+                      asper_err_name(e),
+                      c->asper ? asper_last_error(c->asper) : "unavailable");
+}
+
+asngn_err asngn_siblings_event_append(asngn_ctx *c, const char *scope,
+                                      asngn_memory_kind kind,
+                                      const char *text,
+                                      const char *object_ref, bool pinned,
+                                      char out_id[37]) {
+  asper_event_input in;
   asper_err ae;
+  if (!c || !scope || !text) return ASNGN_ERR_INVALID;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  memset(&in, 0, sizeof in);
+  in.scope = scope;
+  in.kind = (asper_event_kind)kind;
+  in.text = text;
+  in.object_ref = object_ref;
+  in.pinned = pinned ? 1 : 0;
+  ae = asper_event_append(c->asper, &in, out_id);
+  return sib_asper_err(c, ae, "event_append");
+}
 
-  if (!c || !base_prompt || !out) return ASNGN_ERR_INVALID;
+void asngn_siblings_events_free(asngn_memory_event *events, size_t n) {
+  if (!events) return;
+  for (size_t i = 0; i < n; i++) free(events[i].text);
+  free(events);
+}
+
+asngn_err asngn_siblings_event_list(asngn_ctx *c, const char *scope,
+                                    asngn_memory_event **out, size_t *out_n) {
+  asper_event *src = NULL;
+  asngn_memory_event *dst = NULL;
+  size_t n = 0;
+  asper_err ae;
+  if (!c || !scope || !out || !out_n) return ASNGN_ERR_INVALID;
   *out = NULL;
-
-  if (!c->asper_ok) {
-    /* Degraded: system zone only, no memory block. */
-    *out = asngn_strdup(base_prompt);
-    if (!*out)
-      return asngn_seterr(c, ASNGN_ERR_NOMEM, "siblings: out of memory");
-    return ASNGN_OK;
+  *out_n = 0;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  ae = asper_event_list(c->asper, scope, &src, &n);
+  if (ae != ASPER_OK) return sib_asper_err(c, ae, "event_list");
+  if (n) {
+    dst = (asngn_memory_event *)calloc(n, sizeof *dst);
+    if (!dst) {
+      asper_events_free(src, n);
+      return ASNGN_ERR_NOMEM;
+    }
   }
-
-  ae = asper_build_prompt(c->asper, base_prompt, user_message, &prompt);
-  if (ae != ASPER_OK || !prompt) {
-    /* Memory must never kill a turn: WARN and fall back to the base. */
-    asngn_log(c, ASNGN_LOG_WARN, "asper",
-              "build_prompt failed: %s: %s; memory zone skipped",
-              asper_err_name(ae), asper_last_error(c->asper));
-    asper_free(prompt);
-    *out = asngn_strdup(base_prompt);
-    if (!*out)
-      return asngn_seterr(c, ASNGN_ERR_NOMEM, "siblings: out of memory");
-    return ASNGN_OK;
+  for (size_t i = 0; i < n; i++) {
+    memcpy(dst[i].id, src[i].id, sizeof dst[i].id);
+    dst[i].sequence = src[i].sequence;
+    dst[i].at = (asngn_time)src[i].at;
+    dst[i].kind = (asngn_memory_kind)src[i].kind;
+    dst[i].text = asngn_strdup(src[i].text ? src[i].text : "");
+    snprintf(dst[i].object_ref, sizeof dst[i].object_ref, "%s",
+             src[i].object_ref);
+    dst[i].pinned = src[i].pinned != 0;
+    if (!dst[i].text) {
+      asper_events_free(src, n);
+      asngn_siblings_events_free(dst, n);
+      return ASNGN_ERR_NOMEM;
+    }
   }
-
-  copy = asngn_strdup(prompt);
-  asper_free(prompt);
-  if (!copy)
-    return asngn_seterr(c, ASNGN_ERR_NOMEM, "siblings: out of memory");
-  *out = copy;
+  asper_events_free(src, n);
+  *out = dst;
+  *out_n = n;
   return ASNGN_OK;
 }
 
-asngn_err asngn_siblings_observe(asngn_ctx *c, int is_assistant,
-                                 const char *text) {
+asngn_err asngn_siblings_event_pin(asngn_ctx *c, const char *scope,
+                                   const char *event_id, bool pinned) {
   asper_err ae;
+  if (!c || !scope || !event_id) return ASNGN_ERR_INVALID;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  ae = asper_event_set_pinned(c->asper, scope, event_id, pinned ? 1 : 0);
+  return sib_asper_err(c, ae, "event_pin");
+}
 
-  if (!c || !text) return ASNGN_ERR_INVALID;
-  if (!c->asper_ok) return ASNGN_OK;
+asngn_err asngn_siblings_object_put(asngn_ctx *c, const void *data,
+                                    size_t len, char out_ref[72]) {
+  asper_err ae;
+  if (!c || (!data && len) || !out_ref) return ASNGN_ERR_INVALID;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  ae = asper_object_put(c->asper, data, len, out_ref);
+  return sib_asper_err(c, ae, "object_put");
+}
 
-  ae = asper_observe_turn(c->asper,
-                          is_assistant ? ASPER_ROLE_ASSISTANT
-                                       : ASPER_ROLE_USER,
-                          text);
-  if (ae != ASPER_OK)
-    /* Observation is best-effort; the curator misses one turn, that's all. */
-    asngn_log(c, ASNGN_LOG_WARN, "asper", "observe_turn failed: %s: %s",
-              asper_err_name(ae), asper_last_error(c->asper));
+asngn_err asngn_siblings_object_read(asngn_ctx *c, const char *ref,
+                                     size_t offset, size_t max_bytes,
+                                     void **out, size_t *out_len) {
+  void *src = NULL, *copy = NULL;
+  size_t n = 0;
+  asper_err ae;
+  if (!c || !ref || !out || !out_len) return ASNGN_ERR_INVALID;
+  *out = NULL;
+  *out_len = 0;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  ae = asper_object_read(c->asper, ref, offset, max_bytes, &src, &n);
+  if (ae != ASPER_OK) return sib_asper_err(c, ae, "object_read");
+  copy = malloc(n + 1);
+  if (!copy) {
+    asper_free(src);
+    return ASNGN_ERR_NOMEM;
+  }
+  if (n) memcpy(copy, src, n);
+  ((unsigned char *)copy)[n] = 0;
+  asper_free(src);
+  *out = copy;
+  *out_len = n;
+  return ASNGN_OK;
+}
+
+asngn_err asngn_siblings_checkpoint(asngn_ctx *c, const char *scope,
+                                    const char *text, char out_id[37]) {
+  asper_err ae;
+  if (!c || !scope || !text) return ASNGN_ERR_INVALID;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  ae = asper_checkpoint_commit(c->asper, scope, text, out_id);
+  return sib_asper_err(c, ae, "checkpoint");
+}
+
+asngn_err asngn_siblings_compact(asngn_ctx *c) {
+  asper_err ae;
+  if (!c) return ASNGN_ERR_INVALID;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  ae = asper_flush(c->asper, 1);
+  return sib_asper_err(c, ae, "flush");
+}
+
+typedef struct {
+  asngn_ctx *c;
+  int slot;
+} sib_token_counter;
+
+static int sib_count_tokens(const char *text, void *ud) {
+  sib_token_counter *counter = (sib_token_counter *)ud;
+  return asngn_models_count_tokens(counter->c, counter->slot, text);
+}
+
+asngn_err asngn_siblings_context(asngn_ctx *c, const char *scope,
+                                 const char *base_prompt, const char *query,
+                                 size_t history_tokens,
+                                 size_t checkpoint_tokens, int count_slot,
+                                 char **out_system, char **out_context,
+                                 size_t *out_system_tokens,
+                                 size_t *out_context_tokens) {
+  asper_context_request req;
+  asper_context_pack pack;
+  sib_token_counter counter;
+  asper_err ae;
+  if (!c || !scope || !base_prompt || !query || !out_system ||
+      !out_context) return ASNGN_ERR_INVALID;
+  *out_system = NULL;
+  *out_context = NULL;
+  if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  memset(&req, 0, sizeof req);
+  memset(&pack, 0, sizeof pack);
+  counter.c = c;
+  counter.slot = count_slot;
+  req.scope = scope;
+  req.base_system_prompt = base_prompt;
+  req.query = query;
+  req.history_tokens = history_tokens;
+  req.checkpoint_tokens = checkpoint_tokens;
+  req.count_tokens = sib_count_tokens;
+  req.count_userdata = &counter;
+  ae = asper_context_materialize(c->asper, &req, &pack);
+  if (ae != ASPER_OK) return sib_asper_err(c, ae, "context_materialize");
+  *out_system = asngn_strdup(pack.system_prompt ? pack.system_prompt : "");
+  *out_context = asngn_strdup(pack.context_text ? pack.context_text : "");
+  if (out_system_tokens) *out_system_tokens = pack.system_tokens;
+  if (out_context_tokens) *out_context_tokens = pack.context_tokens;
+  asper_context_pack_free(&pack);
+  if (!*out_system || !*out_context) {
+    free(*out_system);
+    free(*out_context);
+    *out_system = NULL;
+    *out_context = NULL;
+    return ASNGN_ERR_NOMEM;
+  }
   return ASNGN_OK;
 }
 

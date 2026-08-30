@@ -416,6 +416,10 @@ static void check_task(tui_app *a) {
   if (e == ASNGN_ERR_BUSY) return;
   asngn_task_free(a->task);
   a->task = NULL;
+  /* Task completion is the authoritative lifecycle boundary.  The
+   * terminal telemetry event normally clears this too, but the status bar
+   * must never remain stuck if an event is dropped or malformed. */
+  a->now_what[0] = '\0';
 
   if (e == ASNGN_OK) {
     chat_entry *live =
@@ -970,6 +974,14 @@ static void rate_last(tui_app *a, int signal) {
                  asngn_last_error(a->ctx));
 }
 
+static void cancel_running_turn(tui_app *a) {
+  if (a->task == NULL) return;
+  asngn_task_cancel(a->task);
+  snprintf(a->now_what, sizeof a->now_what, "cancelling");
+  a->now_t0_ms = now_ms();
+  a->structural = 1;
+}
+
 static void handle_key(tui_app *a, const tui_key *k) {
   a->dirty = 1;
 
@@ -1113,10 +1125,10 @@ static void handle_key(tui_app *a, const tui_key *k) {
     a->structural = 1;
     break;
   case TK_ESC:
-    if (a->task != NULL) asngn_task_cancel(a->task);
+    cancel_running_turn(a);
     break;
   case TK_CTRL_C:
-    if (a->task != NULL) asngn_task_cancel(a->task);
+    if (a->task != NULL) cancel_running_turn(a);
     else a->quit = 1;
     break;
   case TK_CTRL_D:

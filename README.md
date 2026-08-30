@@ -3,9 +3,11 @@
 
 An outcome-gated agentic coding engine for small local LLMs.
 
+Architecture and design: [docs/SPECS.md](docs/SPECS.md).
 
-- **Zoned context** — system · memory (Asper) · tool catalog (astools) · rolling summary · verbatim turns · working zone, each under a hard token budget, assembled deterministically (golden-tested).
-- **Folding** — old turns compress into the rolling summary via the light model, with an extractive fallback; oversized tool output is digested to a short summary plus an on-disk blob the model can reopen slice by slice (`OPEN B1`).
+
+- **Lossless zoned context** — Asper owns exact scoped events, semantic memory, checkpoints and content-addressed objects; each call materializes only the best bounded view with the consuming model's tokenizer.
+- **Continuation instead of retry** — partial output returned at a token ceiling is preserved. Artifact drafts resume from a hashed exact prefix, while oversized tool output becomes a short view plus an Asper object reopenable via `OPEN B1`.
 - **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; coding and complex work is orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
 - **Semantic cache** — embedding-keyed reuse and light-tier adaptation of previous answers; tool-touched entries are never replayed, only surfaced as plan hints; a world-epoch counter ties cache validity to destructive tool activity. A separate exact-key cache short-circuits repeated read-only tool calls.
 - **Safety** — input/plan/action/output gates, identical-call and oscillation guards, stall watchdog, step and tool caps, secret redaction, human confirmation for destructive tools, an optional judge pass — all measured in the ledger, never hidden.
@@ -273,9 +275,10 @@ sessions, memory, cache, telemetry, logs, models, or generated workspaces.
 
 By default `integration.astools.workspace: "session"` gives every session an
 isolated writable tree at `sessions/<slug>/workspace/`. Relative tool paths
-are resolved only there. Engine metadata (`session.xcdn`, transcript, ledger,
-blobs) stays beside the workspace and is never exposed as the tool working
-directory. Set a concrete workspace path, or pass `--workspace`, only when a
+are resolved only there. Operational metadata (`session.xcdn`, ledger) stays
+beside the workspace; all conversation/checkpoint/object memory lives under
+Asper's `memory/` root and is never exposed as the tool working directory.
+Set a concrete workspace path, or pass `--workspace`, only when a
 session is deliberately meant to operate on an external checkout.
 
 ## Shared model runtime and API providers
@@ -299,8 +302,7 @@ Every pool entry may be an embedded GGUF or an OpenAI-compatible endpoint:
         base_url: "http://127.0.0.1:1234/v1",
         model: "qwen3-8b",
         api_key_env: "LOCAL_LLM_API_KEY",
-        api_grammar: "lmstudio", // "none" | "llama" | "vllm" | "lmstudio"
-        reasoning_effort: "none", // suppress hidden reasoning when supported
+        provider: "lmstudio", // "llama-server" | "lmstudio" | "vllm"
         ctx: 32768, warm: true, kv_cache: true,
       },
       {
@@ -321,10 +323,21 @@ Every pool entry may be an embedded GGUF or an OpenAI-compatible endpoint:
 ```
 
 `api_key_env` is the name of an environment variable, not the credential.
-`reasoning_effort` is optional (`none`, `minimal`, `low`, `medium`, or
-`high`). For reasoning-capable local models in LM Studio, `none` avoids
-spending most of a tool turn on hidden reasoning before the constrained
-decision.
+`provider` selects an asmodel protocol profile; OpenAI-shaped endpoints are
+not assumed to have interchangeable extensions. Decision, classifier, and
+judge calls require constrained output and reasoning-off per request. Draft
+and answer calls keep the model's normal reasoning behavior. An unsupported
+combination fails closed instead of dropping a control. Provider selection is
+explicit; reasoning policy is exclusively per request.
+Remote long-form calls use Chat Completions SSE on LM Studio, llama.cpp server,
+and vLLM. Token budgets, not elapsed time, bound inference by default:
+`safety.turn_deadline` and `safety.stall_timeout` are both `PT0S` (disabled).
+`Esc`, `Ctrl+C`, or `asngn_task_cancel()` immediately aborts the in-flight
+provider request. A client may still opt into a per-turn `deadline_ms`, and an
+operator may configure a nonzero stall timeout; neither path retries.
+When an endpoint reports `finish_reason=length`, asmodel returns the decoded
+partial bytes with the limit status. ASNGN consumes them only in resumable
+phases; it never pays again for the same completed prefix.
 `ram_mb`/`vram_mb` may be declared per entry when automatic estimates
 are not appropriate; the manager evicts the least-recently-used idle model
 to stay within resident, RAM and VRAM budgets. `warm: false` leaves a slot
@@ -384,11 +397,10 @@ profile is equivalent to:
     rich_tokens:   10240,      // /detail rich, or --detail rich
   },
   context: {                   // zone budgets inside the 32k window
-    summary_tokens:  3072,
-    verbatim_tokens: 8192,
+    memory_checkpoint_tokens: 3072,
+    memory_history_tokens:    8192,
     working_tokens:  6144,
     safety_margin:   512,
-    fold_tokens:     1536,
     digest_threshold_chars: 32768,
     digest_tokens:   2048,
     pinned_max:      32,
@@ -397,7 +409,9 @@ profile is equivalent to:
     astools: { catalog_chars: 24000 },
   },
   safety: {
-    turn_deadline: "PT10M",    // long rich answers need the headroom
+    // Disabled: token budgets bound work; Esc/Ctrl+C cancels manually.
+    turn_deadline: "PT0S",
+    stall_timeout: "PT0S",
   },
 }
 ```
@@ -415,8 +429,7 @@ the text insertion point during editing; arrows at the right edge indicate
 hidden rows. `Alt+↑` / `Alt+↓` scroll this viewport one line without
 moving the insertion point, and `Alt+PgUp` / `Alt+PgDn` scroll it one page.
 Typing or moving the insertion point resumes automatic following. Pressing
-`Enter` sends the prompt and clears the prompt bar immediately, including
-while ASNGN is waiting for a session fold.
+`Enter` sends the prompt and clears the prompt bar immediately.
 
 Chat and input history use separate controls:
 

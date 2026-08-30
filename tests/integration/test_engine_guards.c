@@ -376,6 +376,34 @@ TEST(cancel_turn) {
   eng_drop(&f);
 }
 
+TEST(cancel_reaches_inflight_provider) {
+  eng_fx f;
+  asngn_task task;
+  asngn_turn_state turn;
+
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  memset(&task, 0, sizeof task);
+  memset(&turn, 0, sizeof turn);
+  task.ctx = f.c;
+  task.turn = &turn;
+
+  os_mutex_lock(&f.c->q_mu);
+  f.c->call_active = 1;
+  f.c->call_turn = &turn;
+  f.c->call_cancel = 0;
+  os_mutex_unlock(&f.c->q_mu);
+
+  ASSERT_OK(asngn_task_cancel(&task));
+  ASSERT_EQ_INT(turn.cancel, 1);
+  ASSERT_EQ_INT(f.c->call_cancel, 1);
+
+  os_mutex_lock(&f.c->q_mu);
+  f.c->call_active = 0;
+  f.c->call_turn = NULL;
+  os_mutex_unlock(&f.c->q_mu);
+  eng_drop(&f);
+}
+
 /* ── runner ───────────────────────────────────────────────────────────── */
 
 TEST_LIST = {
@@ -388,6 +416,7 @@ TEST_LIST = {
   TEST_ENTRY(tool_cap),
   TEST_ENTRY(input_gate),
   TEST_ENTRY(cancel_turn),
+  TEST_ENTRY(cancel_reaches_inflight_provider),
 };
 
 RUN_ALL_TESTS()

@@ -47,12 +47,20 @@ typedef struct {
   char *last_user;    /* copy of the most recent user prompt    */
   char *last_grammar; /* copy of the most recent GBNF (or NULL) */
   int calls;          /* generate() invocations                 */
+  int max_tokens_seen[32]; /* generation cap for each call       */
+  asmodel_reasoning_mode reasoning_seen[32];
+  int require_constraint_seen[32];
+  int64_t deadline_seen[32];
 } fake_model;
 
 void fake_model_init(fake_model *fm);
 void fake_model_dispose(fake_model *fm);
 /* Queue one scripted reply (copied). 1 = ok, 0 = out of memory. */
 int fake_model_push(fake_model *fm, const char *reply);
+/* Queue a deterministic backend error for one generation call. */
+int fake_model_push_error(fake_model *fm, asngn_err error);
+/* Queue an output-limit result that still owns the supplied partial text. */
+int fake_model_push_partial_limit(fake_model *fm, const char *partial);
 asngn_model_iface fake_model_iface(fake_model *fm);
 
 typedef struct {

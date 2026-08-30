@@ -82,7 +82,7 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->s_answer.max_tokens = 0; /* per detail level */
   cfg->s_answer.repeat_penalty = 0.0;
   cfg->s_compress.temp = 0.2; cfg->s_compress.top_p = 0.9;
-  cfg->s_compress.max_tokens = 0; /* fold/digest tokens */
+  cfg->s_compress.max_tokens = 0; /* digest/Asper curator policy */
   cfg->s_compress.repeat_penalty = 0.0;
   cfg->s_adapt.temp = 0.3; cfg->s_adapt.top_p = 0.9;
   cfg->s_adapt.max_tokens = 0; /* per detail level */
@@ -98,11 +98,10 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->normal_tokens = 4096;
   cfg->rich_tokens = 10240;
 
-  cfg->summary_tokens = 3072;
-  cfg->verbatim_tokens = 8192;
+  cfg->memory_checkpoint_tokens = 3072;
+  cfg->memory_history_tokens = 8192;
   cfg->working_tokens = 6144;
   cfg->safety_margin = 512;
-  cfg->fold_tokens = 1536;
   cfg->digest_threshold_chars = 32768;
   cfg->digest_tokens = 2048;
   cfg->pinned_max = 32;
@@ -120,8 +119,10 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->max_steps = 16;
   cfg->max_tool_calls = 8;
   cfg->think_limit = 2;
-  cfg->turn_deadline_s = 120;               /* PT120S */
-  cfg->stall_timeout_s = 20;                /* PT20S  */
+  /* Token budgets bound inference work. Time-based cancellation is opt-in:
+   * zero lets a slow but progressing model finish under user control. */
+  cfg->turn_deadline_s = 0;
+  cfg->stall_timeout_s = 0;
   cfg->autoconfirm = ASNGN_CONFIRM_PROMPT;
   cfg->redact_context = true;
 
@@ -171,8 +172,6 @@ void asngn_config_free(asngn_config *cfg) {
     free(cfg->pool[i].base_url);
     free(cfg->pool[i].remote_model);
     free(cfg->pool[i].api_key_env);
-    free(cfg->pool[i].api_grammar);
-    free(cfg->pool[i].reasoning_effort);
   }
   free(cfg->tele_path);
   free(cfg->log_path);
@@ -228,6 +227,7 @@ typedef enum {
   K_INT,   /* int >= 1                                   */
   K_I64,   /* int64 >= 0                                 */
   K_DUR,   /* duration -> int64 seconds, positive        */
+  K_ODUR,  /* optional duration -> seconds, 0 = disabled */
   K_F01,   /* double in [0,1]                            */
   K_BOOL,
   K_STR,   /* strdup-replace char*                       */
@@ -265,11 +265,12 @@ static const cfg_key CFG_KEYS[] = {
   { "detail", "normal_tokens", K_INT, OFF(normal_tokens), 0, NULL },
   { "detail", "rich_tokens",   K_INT, OFF(rich_tokens), 0, NULL },
 
-  { "context", "summary_tokens",   K_INT, OFF(summary_tokens), 0, NULL },
-  { "context", "verbatim_tokens",  K_INT, OFF(verbatim_tokens), 0, NULL },
+  { "context", "memory_checkpoint_tokens", K_INT,
+    OFF(memory_checkpoint_tokens), 0, NULL },
+  { "context", "memory_history_tokens", K_INT,
+    OFF(memory_history_tokens), 0, NULL },
   { "context", "working_tokens",   K_INT, OFF(working_tokens), 0, NULL },
   { "context", "safety_margin",    K_INT, OFF(safety_margin), 0, NULL },
-  { "context", "fold_tokens",      K_INT, OFF(fold_tokens), 0, NULL },
   { "context", "digest_threshold_chars", K_INT,
     OFF(digest_threshold_chars), 0, NULL },
   { "context", "digest_tokens",    K_INT, OFF(digest_tokens), 0, NULL },
@@ -288,8 +289,8 @@ static const cfg_key CFG_KEYS[] = {
   { "safety", "max_steps",      K_INT, OFF(max_steps), 0, NULL },
   { "safety", "max_tool_calls", K_INT, OFF(max_tool_calls), 0, NULL },
   { "safety", "think_limit",    K_INT, OFF(think_limit), 0, NULL },
-  { "safety", "turn_deadline",  K_DUR, OFF(turn_deadline_s), 0, NULL },
-  { "safety", "stall_timeout",  K_DUR, OFF(stall_timeout_s), 0, NULL },
+  { "safety", "turn_deadline",  K_ODUR, OFF(turn_deadline_s), 0, NULL },
+  { "safety", "stall_timeout",  K_ODUR, OFF(stall_timeout_s), 0, NULL },
   { "safety", "autoconfirm",    K_ENUM, OFF(autoconfirm), 0, CONFIRM_MAP },
   { "safety", "redact_context", K_BOOL, OFF(redact_context), 0, NULL },
 
@@ -363,6 +364,19 @@ static asngn_err cfg_apply(asngn_ctx *c, asngn_config *cfg, const cfg_key *k,
     if (s == NULL || !asngn_duration_parse(s, &secs) || secs <= 0)
       return asngn_seterr(c, ASNGN_ERR_CONFIG,
                           "config: %s.%s: expected a positive ISO 8601 "
+                          "duration", k->group, k->key);
+    *(int64_t *)dst = secs;
+    return ASNGN_OK;
+  }
+  case K_ODUR: {
+    const char *s = NULL;
+    int64_t secs = 0;
+    if (v != NULL &&
+        (v->type == XCDN_VAL_DURATION || v->type == XCDN_VAL_STRING))
+      s = v->data.string;
+    if (s == NULL || !asngn_duration_parse(s, &secs) || secs < 0)
+      return asngn_seterr(c, ASNGN_ERR_CONFIG,
+                          "config: %s.%s: expected a non-negative ISO 8601 "
                           "duration", k->group, k->key);
     *(int64_t *)dst = secs;
     return ASNGN_OK;
@@ -475,12 +489,13 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
   for (i = 0; i < n; i++) {
     const xcdn_node_t *en = xcdn_array_get(v, i);
     const xcdn_value_t *eo = en != NULL ? en->value : NULL;
-    const char *id, *path, *backend_s, *base_url, *remote_model;
-    const char *api_key_env, *api_grammar, *reasoning_effort;
+    const char *id, *path, *backend_s, *base_url, *remote_model, *provider_s;
+    const char *api_key_env;
     int64_t ctx = 0, threads = 4, dim = 0, gpu_layers = -1;
     int64_t ram_mb = 0, vram_mb = 0;
     bool embedding = false, warm = true, kv_cache = true;
     asmodel_backend backend = ASMODEL_BACKEND_EMBEDDED;
+    asmodel_remote_provider remote_provider = ASMODEL_REMOTE_AUTO;
     const xcdn_value_t *f;
     size_t j;
     if (eo == NULL || eo->type != XCDN_VAL_OBJECT) goto bad_entry;
@@ -489,18 +504,22 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
     backend_s = asngn_xstr(asngn_xfield(eo, "backend"));
     base_url = asngn_xstr(asngn_xfield(eo, "base_url"));
     remote_model = asngn_xstr(asngn_xfield(eo, "model"));
+    provider_s = asngn_xstr(asngn_xfield(eo, "provider"));
     api_key_env = asngn_xstr(asngn_xfield(eo, "api_key_env"));
-    api_grammar = asngn_xstr(asngn_xfield(eo, "api_grammar"));
-    reasoning_effort = asngn_xstr(asngn_xfield(eo, "reasoning_effort"));
-    if (api_grammar && strcmp(api_grammar, "none") != 0 &&
-        strcmp(api_grammar, "llama") != 0 &&
-        strcmp(api_grammar, "vllm") != 0 &&
-        strcmp(api_grammar, "lmstudio") != 0) goto bad_entry;
-    if (reasoning_effort && strcmp(reasoning_effort, "none") != 0 &&
-        strcmp(reasoning_effort, "minimal") != 0 &&
-        strcmp(reasoning_effort, "low") != 0 &&
-        strcmp(reasoning_effort, "medium") != 0 &&
-        strcmp(reasoning_effort, "high") != 0) goto bad_entry;
+    if (provider_s != NULL) {
+      if (strcmp(provider_s, "auto") == 0)
+        remote_provider = ASMODEL_REMOTE_AUTO;
+      else if (strcmp(provider_s, "generic") == 0)
+        remote_provider = ASMODEL_REMOTE_GENERIC;
+      else if (strcmp(provider_s, "llama-server") == 0 ||
+               strcmp(provider_s, "llama") == 0)
+        remote_provider = ASMODEL_REMOTE_LLAMA_SERVER;
+      else if (strcmp(provider_s, "lmstudio") == 0)
+        remote_provider = ASMODEL_REMOTE_LMSTUDIO;
+      else if (strcmp(provider_s, "vllm") == 0)
+        remote_provider = ASMODEL_REMOTE_VLLM;
+      else goto bad_entry;
+    }
     if (backend_s != NULL) {
       if (strcmp(backend_s, "openai") == 0) backend = ASMODEL_BACKEND_OPENAI;
       else if (strcmp(backend_s, "embedded") != 0) goto bad_entry;
@@ -543,21 +562,15 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
     fresh[i].base_url = base_url ? cfg_dup(base_url) : NULL;
     fresh[i].remote_model = remote_model ? cfg_dup(remote_model) : NULL;
     fresh[i].api_key_env = api_key_env ? cfg_dup(api_key_env) : NULL;
-    fresh[i].api_grammar = api_grammar ? cfg_dup(api_grammar) : NULL;
-    fresh[i].reasoning_effort = reasoning_effort
-                                    ? cfg_dup(reasoning_effort) : NULL;
+    fresh[i].remote_provider = remote_provider;
     fresh[i].ram_mb = (size_t)ram_mb; fresh[i].vram_mb = (size_t)vram_mb;
     fresh[i].warm = warm; fresh[i].kv_cache = kv_cache;
     if (fresh[i].path == NULL || (base_url && !fresh[i].base_url) ||
         (remote_model && !fresh[i].remote_model) ||
-        (api_key_env && !fresh[i].api_key_env) ||
-        (api_grammar && !fresh[i].api_grammar) ||
-        (reasoning_effort && !fresh[i].reasoning_effort)) {
+        (api_key_env && !fresh[i].api_key_env)) {
       for (j = 0; j <= i; j++) {
         free(fresh[j].path); free(fresh[j].base_url);
         free(fresh[j].remote_model); free(fresh[j].api_key_env);
-        free(fresh[j].api_grammar);
-        free(fresh[j].reasoning_effort);
       }
       return ASNGN_ERR_NOMEM;
     }
@@ -565,8 +578,6 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
   for (i = 0; i < ASNGN_MAX_POOL; i++) {
     free(cfg->pool[i].path); free(cfg->pool[i].base_url);
     free(cfg->pool[i].remote_model); free(cfg->pool[i].api_key_env);
-    free(cfg->pool[i].api_grammar);
-    free(cfg->pool[i].reasoning_effort);
   }
   memcpy(cfg->pool, fresh, sizeof fresh);
   cfg->pool_n = n;
@@ -575,8 +586,6 @@ bad_entry:
   for (i = 0; i < ASNGN_MAX_POOL; i++) {
     free(fresh[i].path); free(fresh[i].base_url);
     free(fresh[i].remote_model); free(fresh[i].api_key_env);
-    free(fresh[i].api_grammar);
-    free(fresh[i].reasoning_effort);
   }
   return asngn_seterr(c, ASNGN_ERR_CONFIG,
                       "config: models.pool: invalid entry (need unique id, "

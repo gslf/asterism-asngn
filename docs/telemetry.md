@@ -23,7 +23,7 @@ and unknown `data` fields (forward compatibility).
 | `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated) — answer via `asngn_confirm` |
 | `guard`       | `guard` — one of `stall`, `identical_call`, `oscillation`, `step_budget`, `think_limit`, `recall_limit`, `futile_steps`, `tool_cap`, `working_trim`, `budget_pressure`, `outcome_gate`, `response_protocol` |
 | `answer`      | `tokens`, `capped`                                     |
-| `turn_end`    | (empty), or `cancelled: true`                          |
+| `turn_end`    | `ok`, `cancelled`, `error` (stable `asngn_err` name, empty on success). Exactly one is emitted for every submitted turn, including phase failures. |
 | `error`       | `message`                                              |
 
 Sinks: an in-memory ring of `telemetry.ring` events (always on;

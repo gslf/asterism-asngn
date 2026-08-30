@@ -4,8 +4,8 @@
  * The assembled prompt is a fixed sequence of zones, split across the
  * (system, user) message pair every backend consumes:
  *
- *   system_text: [1 system+directive] [2 memory] [3 catalog] [4 summary]
- *   user_text:   [5 verbatim] [6 working + current message + instruction]
+ *   system_text: [1 system+directive] [2 Asper semantic memory] [3 catalog]
+ *   user_text:   [4 Asper scoped context] [5 current operational turn]
  *
  * Assembly is a pure function of session state, configuration, and turn
  * state: identical inputs produce byte-identical prompts (golden-tested).
@@ -156,7 +156,7 @@ static asngn_err working_render(asngn_buf *b, const asngn_turn_state *t,
 static asngn_err verbatim_build(asngn_ctx *c, asngn_session *s,
                                 const asngn_turn_state *t, int count_slot,
                                 char **out_text, size_t *out_tokens) {
-  size_t budget = (size_t)c->cfg.verbatim_tokens;
+  size_t budget = (size_t)c->cfg.memory_history_tokens;
   size_t used = 0;
   size_t n = s->log_n;
   size_t i;
@@ -180,7 +180,7 @@ static asngn_err verbatim_build(asngn_ctx *c, asngn_session *s,
   /* pass 1: pinned turns, oldest first, whole-item budget */
   for (i = 0; i < n - skip_last; i++) {
     const asngn_turn *tr = &s->log[i];
-    if (!tr->pinned || tr->folded) continue;
+    if (!tr->pinned) continue;
     {
       asngn_buf one;
       size_t cost;
@@ -198,7 +198,7 @@ static asngn_err verbatim_build(asngn_ctx *c, asngn_session *s,
   /* pass 2: unpinned, newest first */
   for (i = n - skip_last; i > 0; i--) {
     const asngn_turn *tr = &s->log[i - 1];
-    if (tr->pinned || tr->folded) continue;
+    if (tr->pinned) continue;
     {
       asngn_buf one;
       size_t cost;
@@ -240,29 +240,45 @@ out:
 
 asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
                                  asngn_turn_state *t,
-                                 const char *memory_block,
+                                 const char *base_override,
                                  const char *instruction, int count_slot,
                                  asngn_prompt *out) {
   asngn_buf sys, usr;
   asngn_err e = ASNGN_OK;
-  const char *base = c->cfg.base_prompt != NULL ? c->cfg.base_prompt : "";
+  const char *base = base_override != NULL
+                         ? base_override
+                         : (c->cfg.base_prompt != NULL ? c->cfg.base_prompt : "");
   char *verb_text = NULL;
   size_t verb_tokens = 0;
+  char *asper_system = NULL, *asper_context = NULL;
+  size_t asper_system_tokens = 0, asper_context_tokens = 0;
 
   memset(out, 0, sizeof *out);
   asngn_buf_init(&sys);
   asngn_buf_init(&usr);
 
-  /* zone 1+2: base prompt (+ memory block, which embeds the base) */
-  if (memory_block != NULL && memory_block[0] != '\0') {
-    e = asngn_buf_appends(&sys, memory_block);
+  /* Asper owns every persistent/historical memory zone. */
+  if (c->asper_ok && s != NULL && t != NULL) {
+    e = asngn_siblings_context(c, s->slug, base,
+                               t->user_msg ? t->user_msg : "",
+                               (size_t)c->cfg.memory_history_tokens,
+                               (size_t)c->cfg.memory_checkpoint_tokens,
+                               count_slot,
+                               &asper_system, &asper_context,
+                               &asper_system_tokens, &asper_context_tokens);
     if (e != ASNGN_OK) goto fail;
-    if (asngn_str_has_prefix(memory_block, base)) {
-      out->tok_system = zone_tokens(c, count_slot, base);
-      out->tok_memory =
-          zone_tokens(c, count_slot, memory_block + strlen(base));
-    } else {
-      out->tok_memory = zone_tokens(c, count_slot, memory_block);
+    e = asngn_buf_appends(&sys, asper_system);
+    if (e != ASNGN_OK) goto fail;
+    out->tok_system = zone_tokens(c, count_slot, base);
+    out->tok_memory = asper_system_tokens > out->tok_system
+                          ? asper_system_tokens - out->tok_system : 0;
+    if (asper_context[0]) {
+      e = asngn_buf_appends(&usr, asper_context);
+      if (e == ASNGN_OK &&
+          asper_context[strlen(asper_context) - 1] != '\n')
+        e = asngn_buf_appendc(&usr, '\n');
+      if (e != ASNGN_OK) goto fail;
+      out->tok_memory += asper_context_tokens;
     }
   } else {
     e = asngn_buf_appends(&sys, base);
@@ -279,23 +295,8 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
     out->tok_catalog = zone_tokens(c, count_slot, t->catalog);
   }
 
-  /* zone 4: rolling summary */
-  if (s != NULL && s->summary != NULL && s->summary[0] != '\0') {
-    size_t stoks = zone_tokens(c, count_slot, s->summary);
-    if (stoks <= (size_t)c->cfg.summary_tokens) {
-      e = asngn_buf_appends(&sys, "\n\n## Conversation summary\n");
-      if (e == ASNGN_OK) e = asngn_buf_appends(&sys, s->summary);
-      if (e != ASNGN_OK) goto fail;
-      out->tok_summary = stoks;
-    } else {
-      asngn_log(c, ASNGN_LOG_WARN, "context",
-                "summary over budget (%zu > %d tok); omitted pending "
-                "re-compaction", stoks, c->cfg.summary_tokens);
-    }
-  }
-
-  /* zone 5: verbatim turns */
-  if (s != NULL) {
+  /* zone 4: in-process turns when Asper is disabled */
+  if (!c->asper_ok && s != NULL) {
     e = verbatim_build(c, s, t, count_slot, &verb_text, &verb_tokens);
     if (e != ASNGN_OK) goto fail;
     if (verb_text != NULL) {
@@ -309,7 +310,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   /* zone 6: this turn — current message, working items, instruction */
   {
     asngn_buf work;
-    size_t first = 0;
+    size_t first = c->asper_ok && t != NULL ? t->work_n : 0;
     size_t rendered_tokens = 0;
     for (;;) {
       asngn_buf_init(&work);
@@ -341,6 +342,8 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
 
   out->system_text = asngn_buf_detach(&sys);
   out->user_text = asngn_buf_detach(&usr);
+  free(asper_system);
+  free(asper_context);
   free(verb_text);
   asngn_buf_free(&sys);
   asngn_buf_free(&usr);
@@ -351,6 +354,8 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   return ASNGN_OK;
 
 fail:
+  free(asper_system);
+  free(asper_context);
   free(verb_text);
   asngn_buf_free(&sys);
   asngn_buf_free(&usr);

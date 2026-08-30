@@ -27,12 +27,20 @@ static asngn_err remote_generate(void *ud, const char *sys, const char *user,
   p.temperature = params->temp; p.top_p = params->top_p;
   p.repeat_penalty = params->repeat_penalty;
   p.max_tokens = params->max_tokens;
+  p.reasoning = params->reasoning;
+  p.reasoning_budget = params->reasoning_budget;
+  p.require_constraint = params->require_constraint ? 1 : 0;
+  p.deadline_ms = params->deadline_ms;
   bridge.fn = token_fn; bridge.ud = token_ud;
   rc = u->provider.generate(u->provider.userdata, sys, user, grammar, &p,
                             token_fn ? remote_token : NULL, &bridge, cancel,
                             out, out_in, out_gen);
   if (cancel && *cancel) return ASNGN_ERR_CANCELLED;
-  return rc == 0 ? ASNGN_OK : ASNGN_ERR_MODEL;
+  if (rc == ASMODEL_OK) return ASNGN_OK;
+  if (rc == ASMODEL_ERR_LIMIT) return ASNGN_ERR_LIMIT;
+  if (rc == ASMODEL_ERR_UNSUPPORTED) return ASNGN_ERR_UNSUPPORTED;
+  if (rc == ASMODEL_ERR_TIMEOUT) return ASNGN_ERR_TIMEOUT;
+  return ASNGN_ERR_MODEL;
 }
 
 static asngn_err remote_embed(void *ud, const char *text, float *out) {
@@ -62,6 +70,12 @@ static const char *remote_last_error(void *ud) {
              : NULL;
 }
 
+static int remote_last_generation_info(void *ud,
+                                       asmodel_generation_info *out) {
+  openai_ud *u = (openai_ud *)ud;
+  return asmodel_provider_last_generation_info(&u->provider, out);
+}
+
 static void remote_destroy(void *ud) {
   openai_ud *u = (openai_ud *)ud;
   if (!u) return;
@@ -79,8 +93,8 @@ asngn_err asngn_model_openai_create(asngn_ctx *c,
   memset(&spec, 0, sizeof spec);
   spec.id = e->id; spec.backend = ASMODEL_BACKEND_OPENAI;
   spec.base_url = e->base_url; spec.remote_model = e->remote_model;
-  spec.api_key_env = e->api_key_env; spec.api_grammar = e->api_grammar;
-  spec.reasoning_effort = e->reasoning_effort;
+  spec.api_key_env = e->api_key_env;
+  spec.remote_provider = e->remote_provider;
   spec.context_tokens = e->ctx; spec.embedding = e->embedding;
   spec.embedding_dim = e->dim;
   u = (openai_ud *)calloc(1, sizeof *u);
@@ -97,6 +111,7 @@ asngn_err asngn_model_openai_create(asngn_ctx *c,
   out->count_tokens = remote_count;
   out->count_prompt_tokens = remote_count_prompt;
   out->last_error = remote_last_error;
+  out->last_generation_info = remote_last_generation_info;
   out->destroy = remote_destroy;
   asngn_log(c, ASNGN_LOG_INFO, "model",
             "configured OpenAI-compatible '%s' -> %s (%s)", e->id,

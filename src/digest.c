@@ -78,6 +78,10 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
 
   *out = NULL;
   if (len <= (size_t)c->cfg.digest_threshold_chars) return ASNGN_OK;
+  /* Lossless large-result storage belongs to Asper.  In explicitly
+   * degraded mode keep the original result in the current turn instead of
+   * creating an ASNGN-owned blob or silently throwing bytes away. */
+  if (!c->asper_ok) return ASNGN_OK;
 
   /* blob content is redacted always */
   e = asngn_redact(text, len, &blob_text, &masked);
@@ -104,9 +108,14 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
     size_t cap = src_len < 65536 ? src_len : utf8_floor(src, 65536);
     char *clipped = asngn_strndup(src, cap);
     int slot = asngn_models_slot_for_role(c, ASNGN_ROLE_COMPRESSOR);
+    int64_t model_deadline = 0;
     if (clipped == NULL) {
       free(blob_text);
       return ASNGN_ERR_NOMEM;
+    }
+    if (t != NULL && t->deadline_mono > 0) {
+      if (t->deadline_mono <= asngn_clock_mono_ms(&c->clock)) slot = -1;
+      else model_deadline = t->deadline_mono;
     }
     if (slot >= 0) {
       char *gen = NULL;
@@ -120,7 +129,8 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
           ASNGN_OK) {
         if (asngn_models_generate(c, slot, ASNGN_TASK_COMPRESS,
                                   DIGEST_INSTRUCTION, up.data, NULL,
-                                  c->cfg.digest_tokens, NULL, NULL,
+                                  c->cfg.digest_tokens, model_deadline,
+                                  NULL, NULL,
                                   t != NULL ? &t->cancel : NULL, &gen,
                                   &tin, &tout) == ASNGN_OK &&
             gen != NULL && gen[0] != '\0') {
@@ -184,18 +194,19 @@ asngn_err asngn_digest_open_slice(asngn_ctx *c, asngn_session *s,
   (void)s;
   *out = NULL;
   if (b->slice_off >= b->size) return ASNGN_OK; /* exhausted */
-  e = os_read_file(b->path, &text, &len);
-  if (e != ASNGN_OK)
-    return asngn_seterr(c, e, "blob %s: cannot read %s", b->id, b->path);
-  if (b->slice_off >= len) {
-    free(text);
-    b->slice_off = b->size;
-    return ASNGN_OK;
+  if (!b->object_ref[0])
+    return asngn_seterr(c, ASNGN_ERR_PARSE,
+                        "blob %s has no Asper object", b->id);
+  {
+    void *raw = NULL;
+    e = asngn_siblings_object_read(c, b->object_ref, b->slice_off,
+                                   max_chars, &raw, &len);
+    if (e != ASNGN_OK) return e;
+    text = (char *)raw;
   }
   start = b->slice_off;
-  take = len - start;
-  if (max_chars > 0 && take > max_chars)
-    take = utf8_floor(text + start, max_chars);
+  take = len;
+  if (start + take < b->size) take = utf8_floor(text, take);
   if (take == 0) {
     free(text);
     b->slice_off = b->size;
@@ -203,8 +214,8 @@ asngn_err asngn_digest_open_slice(asngn_ctx *c, asngn_session *s,
   }
   asngn_buf_init(&line);
   e = asngn_buf_printf(&line, "[B?] %s \xC2\xB7 bytes %zu-%zu of %zu\n",
-                       b->label, start, start + take, len);
-  if (e == ASNGN_OK) e = asngn_buf_append(&line, text + start, take);
+                       b->label, start, start + take, b->size);
+  if (e == ASNGN_OK) e = asngn_buf_append(&line, text, take);
   free(text);
   if (e != ASNGN_OK) {
     asngn_buf_free(&line);

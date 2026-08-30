@@ -52,8 +52,9 @@ typedef struct {
  * config, the engine config (+ caller `extra` sections), then open the
  * engine with the 4 fakes and the fake clock and open session "s1".
  * 1 on success. */
-static int eng_setup_tool(eng_fx *f, const char *tool_id,
-                          const char *behavior, const char *extra) {
+static int eng_setup_tool_mode(eng_fx *f, const char *tool_id,
+                               const char *behavior, const char *extra,
+                               int asper_enable) {
   asngn_open_params p;
   asngn_model_iface ifs[4];
   const char *const ids[4] = { "nano", "light", "std", "embed" };
@@ -72,8 +73,12 @@ static int eng_setup_tool(eng_fx *f, const char *tool_id,
            f->cfg_raw);
   if (!asngn_fix_astools_config(f->astools_cfg, f->reg_raw, f->ws_raw))
     return 0;
-  if (!asngn_fix_engine_config(f->engine_cfg, f->astools_cfg, f->reg_raw,
-                               f->ws_raw, extra))
+  if (!(asper_enable
+            ? asngn_fix_engine_config_asper(
+                  f->engine_cfg, f->astools_cfg, f->reg_raw, f->ws_raw,
+                  extra)
+            : asngn_fix_engine_config(f->engine_cfg, f->astools_cfg,
+                                      f->reg_raw, f->ws_raw, extra)))
     return 0;
 
   fake_model_init(&f->nano);
@@ -101,8 +106,18 @@ static int eng_setup_tool(eng_fx *f, const char *tool_id,
   return 1;
 }
 
+static int eng_setup_tool(eng_fx *f, const char *tool_id,
+                          const char *behavior, const char *extra) {
+  return eng_setup_tool_mode(f, tool_id, behavior, extra, 0);
+}
+
 static int eng_setup(eng_fx *f, const char *behavior, const char *extra) {
   return eng_setup_tool(f, "fake", behavior, extra);
+}
+
+static inline int eng_setup_asper(eng_fx *f, const char *behavior,
+                                  const char *extra) {
+  return eng_setup_tool_mode(f, "fake", behavior, extra, 1);
 }
 
 static void eng_drop(eng_fx *f) {

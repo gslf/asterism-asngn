@@ -31,7 +31,7 @@ static int fx_write_config(fx *f, const char *extra) {
   if (fp == NULL) return 0;
   ok = fprintf(fp,
                "#asngn_config {\n"
-               "  integration: { asper: { enable: false }, "
+               "  integration: { asper: { enable: true, root: \"memory\" }, "
                "astools: { enable: false, workspace: \".\" } },\n"
                "  validation: { judge: \"off\" },\n"
                "  routing: { classifier: \"heuristic\" },\n"
@@ -133,7 +133,7 @@ TEST(create_layout_and_busy) {
   ASSERT_EQ_STR(asngn_session_slug(s), "alpha");
   snprintf(path, sizeof path, "%s/sessions/alpha/session.xcdn", f.root);
   ASSERT_TRUE(os_file_exists(path));
-  snprintf(path, sizeof path, "%s/sessions/alpha/blobs", f.root);
+  snprintf(path, sizeof path, "%s/memory", f.root);
   ASSERT_TRUE(os_file_exists(path));
 
   /* a second open of the same slug is BUSY while the handle lives */
@@ -196,8 +196,7 @@ TEST(manifest_project_persists) {
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
   ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
-  /* asper disabled: siblings say UNSUPPORTED, the project stays
-   * session-local and still lands in the manifest */
+  /* Session/project metadata is restored while Asper owns memory. */
   ASSERT_OK(asngn_session_project(s, "proj-x"));
   ASSERT_EQ_STR(s->project, "proj-x");
   asngn_session_close(s);

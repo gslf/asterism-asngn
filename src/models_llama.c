@@ -136,7 +136,6 @@ typedef struct {
   bool embedding;
   bool encoder_only;
   bool kv_cache;
-  bool no_think;
   llama_token *cached_prompt;
   int32_t cached_prompt_n;
   /* Per-call cancel pointer for the ggml abort callback: installed at
@@ -144,21 +143,27 @@ typedef struct {
    * because the ggml worker threads read it mid-decode. */
   os_mutex cancel_mu;
   volatile int *cancel_flag;
+  int64_t deadline_at_ms;
 } mll_ud;
 
 static bool mll_abort_cb(void *data) {
   mll_ud *u = (mll_ud *)data;
   volatile int *flag;
+  int64_t deadline_at;
 
   os_mutex_lock(&u->cancel_mu);
   flag = u->cancel_flag;
+  deadline_at = u->deadline_at_ms;
   os_mutex_unlock(&u->cancel_mu);
-  return flag != NULL && *flag != 0;
+  return (flag != NULL && *flag != 0) ||
+         (deadline_at > 0 && os_monotonic_ms() >= deadline_at);
 }
 
-static void mll_set_cancel(mll_ud *u, volatile int *cancel) {
+static void mll_set_cancel(mll_ud *u, volatile int *cancel,
+                           int64_t deadline_at_ms) {
   os_mutex_lock(&u->cancel_mu);
   u->cancel_flag = cancel;
+  u->deadline_at_ms = deadline_at_ms;
   os_mutex_unlock(&u->cancel_mu);
 }
 
@@ -166,19 +171,8 @@ static bool mll_cancelled(volatile int *cancel) {
   return cancel != NULL && *cancel != 0;
 }
 
-/* Qwen thinking templates may retain an empty leading think envelope even
- * after /no_think. It is transport metadata, not answer or file content. */
-static void mll_strip_think_envelope(char *text) {
-  char *p = text, *end, *body;
-  if (text == NULL) return;
-  while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
-  if (strncmp(p, "<think>", 7) != 0) return;
-  end = strstr(p + 7, "</think>");
-  if (end == NULL) return;
-  body = end + 8;
-  while (*body == ' ' || *body == '\t' || *body == '\r' || *body == '\n')
-    body++;
-  memmove(text, body, strlen(body) + 1);
+static bool mll_expired(int64_t deadline_at_ms) {
+  return deadline_at_ms > 0 && os_monotonic_ms() >= deadline_at_ms;
 }
 
 /* Tokenize text into a malloc'd array using the negative-return resize
@@ -294,7 +288,6 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
                               int *out_tokens_in, int *out_tokens_out) {
   mll_ud *u = (mll_ud *)ud;
   char *prompt = NULL;
-  char *no_think_user = NULL;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
   int32_t prompt_start = 0;
@@ -303,34 +296,40 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   asngn_err e;
   int32_t i, n_past;
   int produced, limit;
+  int64_t deadline_at = p->deadline_ms > 0
+                            ? os_monotonic_ms() + p->deadline_ms
+                            : 0;
+  bool hit_eog = false;
 
   *out_text = NULL;
   *out_tokens_in = 0;
   *out_tokens_out = 0;
   asngn_buf_init(&outbuf);
-  mll_set_cancel(u, cancel);
+  mll_set_cancel(u, cancel, deadline_at);
 
-  if (mll_cancelled(cancel)) {
-    e = ASNGN_ERR_CANCELLED;
+  if (mll_cancelled(cancel) || mll_expired(deadline_at)) {
+    e = mll_expired(deadline_at) ? ASNGN_ERR_TIMEOUT : ASNGN_ERR_CANCELLED;
     goto out;
   }
 
-  if (u->no_think) {
-    const char *src = user_prompt != NULL ? user_prompt : "";
-    size_t n = strlen(src);
-    no_think_user = (char *)malloc(n + sizeof "\n/no_think");
-    if (no_think_user == NULL) {
-      e = ASNGN_ERR_NOMEM;
-      goto out;
-    }
-    memcpy(no_think_user, src, n);
-    memcpy(no_think_user + n, "\n/no_think", sizeof "\n/no_think");
+  /* Embedded llama.cpp has no portable per-request thinking switch in its C
+   * chat-template API.  A constrained micro-decision is still an absolute
+   * reasoning-off contract because the grammar makes reasoning tokens
+   * illegal.  Do not pretend that a model-specific prompt suffix can provide
+   * the same guarantee for unconstrained output. */
+  if (p->reasoning == ASMODEL_REASONING_REQUIRED_OFF && gbnf == NULL) {
+    e = ASNGN_ERR_UNSUPPORTED;
+    goto out;
   }
+  if (p->reasoning == ASMODEL_REASONING_REQUIRED_ON ||
+      p->reasoning == ASMODEL_REASONING_BUDGETED) {
+    e = ASNGN_ERR_UNSUPPORTED;
+    goto out;
+  }
+
   e = mll_apply_template(u->chat_template,
                          system_prompt != NULL ? system_prompt : "",
-                         no_think_user != NULL
-                             ? no_think_user
-                             : (user_prompt != NULL ? user_prompt : ""),
+                         user_prompt != NULL ? user_prompt : "",
                          &prompt);
   if (e != ASNGN_OK) goto out;
 
@@ -426,13 +425,14 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   for (i = prompt_start; i < n_tok; i += u->n_batch) {
     int32_t chunk = n_tok - i < u->n_batch ? n_tok - i : u->n_batch;
     struct llama_batch batch;
-    if (mll_cancelled(cancel)) {
-      e = ASNGN_ERR_CANCELLED;
+    if (mll_cancelled(cancel) || mll_expired(deadline_at)) {
+      e = mll_expired(deadline_at) ? ASNGN_ERR_TIMEOUT : ASNGN_ERR_CANCELLED;
       goto out;
     }
     batch = llama_batch_get_one(tok + i, chunk);
     if (asngn_llg_decode(u->lctx, batch) != 0) {
-      e = mll_cancelled(cancel) ? ASNGN_ERR_CANCELLED : ASNGN_ERR_MODEL;
+      e = mll_expired(deadline_at) ? ASNGN_ERR_TIMEOUT
+          : mll_cancelled(cancel) ? ASNGN_ERR_CANCELLED : ASNGN_ERR_MODEL;
       goto out;
     }
   }
@@ -442,15 +442,18 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   produced = 0;
   while (produced < limit) {
     llama_token t;
-    if (mll_cancelled(cancel)) {
-      e = ASNGN_ERR_CANCELLED;
+    if (mll_cancelled(cancel) || mll_expired(deadline_at)) {
+      e = mll_expired(deadline_at) ? ASNGN_ERR_TIMEOUT : ASNGN_ERR_CANCELLED;
       goto out;
     }
     if (asngn_llg_sampler_sample(chain, u->lctx, -1, &t) != 0) {
-      /* a sampler-side exception ends the generation with what we have */
+      e = ASNGN_ERR_MODEL;
+      goto out;
+    }
+    if (llama_vocab_is_eog(u->vocab, t)) {
+      hit_eog = true;
       break;
     }
-    if (llama_vocab_is_eog(u->vocab, t)) break;
     e = mll_emit_piece(u->vocab, t, &outbuf, token_cb, token_ud);
     if (e != ASNGN_OK) goto out;
     produced++;
@@ -458,7 +461,8 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     {
       struct llama_batch batch = llama_batch_get_one(&t, 1);
       if (asngn_llg_decode(u->lctx, batch) != 0) {
-        e = mll_cancelled(cancel) ? ASNGN_ERR_CANCELLED : ASNGN_ERR_MODEL;
+        e = mll_expired(deadline_at) ? ASNGN_ERR_TIMEOUT
+            : mll_cancelled(cancel) ? ASNGN_ERR_CANCELLED : ASNGN_ERR_MODEL;
         goto out;
       }
     }
@@ -471,7 +475,10 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     e = ASNGN_ERR_NOMEM;
     goto out;
   }
-  if (u->no_think) mll_strip_think_envelope(*out_text);
+  if (!hit_eog && (produced >= limit || n_past >= u->n_ctx)) {
+    e = ASNGN_ERR_LIMIT;
+    goto out;
+  }
   e = ASNGN_OK;
   if (u->kv_cache) {
     llama_token *cached =
@@ -485,13 +492,13 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   }
 
 out:
-  mll_set_cancel(u, NULL);
+  mll_set_cancel(u, NULL, 0);
   if (chain != NULL) llama_sampler_free(chain);
   free(tok);
   free(prompt);
-  free(no_think_user);
   asngn_buf_free(&outbuf);
-  if (e != ASNGN_OK && *out_text != NULL) {
+  /* LIMIT is resumable: retain every decoded byte for the coordinator. */
+  if (e != ASNGN_OK && e != ASNGN_ERR_LIMIT && *out_text != NULL) {
     free(*out_text);
     *out_text = NULL;
   }
@@ -620,8 +627,6 @@ asngn_err asngn_model_llama_create(asngn_ctx *c, const asngn_pool_entry *ent,
   os_mutex_init(&u->cancel_mu);
   u->embedding = ent->embedding;
   u->kv_cache = ent->kv_cache && !ent->embedding;
-  u->no_think = ent->reasoning_effort != NULL &&
-                strcmp(ent->reasoning_effort, "none") == 0;
 
   mparams = llama_model_default_params();
   /* -1 = every layer in VRAM (llama.h: negative means all); 0 keeps the

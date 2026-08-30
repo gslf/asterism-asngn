@@ -238,7 +238,7 @@ TEST(verbatim_budget_pin_first) {
   /* tiny verbatim budget: 8 tokens (~32 rendered bytes) */
   ASSERT_TRUE(fx_setup(&f,
                        "  cache: { enable: false },\n"
-                       "  context: { verbatim_tokens: 8 },\n"));
+                       "  context: { memory_history_tokens: 8 },\n"));
   ASSERT_OK(asngn_session_open(f.c, "tight", &s));
   for (i = 0; i < 4; i++) {
     static const char *const roles[] = {
@@ -299,7 +299,7 @@ TEST(verbatim_skips_oversized_recent_turn) {
 
   ASSERT_TRUE(fx_setup(&f,
                        "  cache: { enable: false },\n"
-                       "  context: { verbatim_tokens: 8 },\n"));
+                       "  context: { memory_history_tokens: 8 },\n"));
   ASSERT_OK(asngn_session_open(f.c, "skip-large", &s));
   for (i = 0; i < 4; i++) {
     memset(&tr, 0, sizeof tr);
@@ -354,37 +354,6 @@ TEST(working_budget_counts_mandatory_prompt) {
   fx_drop(&f);
 }
 
-TEST(summary_zone) {
-  fx f;
-  asngn_session *s = NULL;
-  asngn_turn_state t;
-  asngn_prompt p;
-  char msg[] = "third question";
-  int slot;
-
-  ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
-  ASSERT_OK(asngn_session_open(f.c, "summ", &s));
-  free(s->summary);
-  s->summary = asngn_strdup("Summary note.");
-  ASSERT_TRUE(s->summary != NULL);
-  fx_probe_state(&f, s, msg, &t, &slot);
-  ASSERT_TRUE(slot >= 0);
-
-  ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
-  /* zone 4 sits after the base prompt (no memory, no catalog) and
-   * before the user text — inline golden for the whole system text */
-  ASSERT_EQ_STR(p.system_text,
-                "You are a capable, honest local assistant.\n\n"
-                "## Conversation summary\nSummary note.");
-  ASSERT_TRUE(p.tok_summary > 0);
-  ASSERT_EQ_STR(p.user_text,
-                "## This turn\nuser: third question\n\nINSTR\n");
-  asngn_prompt_free(&p);
-  fx_probe_dispose(&t);
-  asngn_session_close(s);
-  fx_drop(&f);
-}
-
 TEST(global_budget_reports_zones) {
   fx f;
   asngn_session *s = NULL;
@@ -420,7 +389,6 @@ TEST_LIST = {
   TEST_ENTRY(verbatim_budget_pin_first),
   TEST_ENTRY(verbatim_skips_oversized_recent_turn),
   TEST_ENTRY(working_budget_counts_mandatory_prompt),
-  TEST_ENTRY(summary_zone),
   TEST_ENTRY(global_budget_reports_zones),
 };
 

@@ -84,11 +84,10 @@ TEST(defaults_spot_check) {
   ASSERT_EQ_INT(cfg.rich_tokens, 10240);
 
   /* context */
-  ASSERT_EQ_INT(cfg.summary_tokens, 3072);
-  ASSERT_EQ_INT(cfg.verbatim_tokens, 8192);
+  ASSERT_EQ_INT(cfg.memory_checkpoint_tokens, 3072);
+  ASSERT_EQ_INT(cfg.memory_history_tokens, 8192);
   ASSERT_EQ_INT(cfg.working_tokens, 6144);
   ASSERT_EQ_INT(cfg.safety_margin, 512);
-  ASSERT_EQ_INT(cfg.fold_tokens, 1536);
   ASSERT_EQ_INT(cfg.digest_threshold_chars, 32768);
   ASSERT_EQ_INT(cfg.digest_tokens, 2048);
   ASSERT_EQ_INT(cfg.pinned_max, 32);
@@ -106,8 +105,8 @@ TEST(defaults_spot_check) {
   /* safety */
   ASSERT_EQ_INT(cfg.max_steps, 16);
   ASSERT_EQ_INT(cfg.max_tool_calls, 8);
-  ASSERT_EQ_INT(cfg.turn_deadline_s, 120);
-  ASSERT_EQ_INT(cfg.stall_timeout_s, 20);
+  ASSERT_EQ_INT(cfg.turn_deadline_s, 0);
+  ASSERT_EQ_INT(cfg.stall_timeout_s, 0);
   ASSERT_EQ_INT(cfg.autoconfirm, ASNGN_CONFIRM_PROMPT);
   ASSERT_TRUE(cfg.redact_context);
 
@@ -130,9 +129,11 @@ TEST(overlay_overrides) {
   static const char *body =
     "#asngn_config {\n"
     "  detail: { default: \"terse\" },\n"
-    "  context: { summary_tokens: 300 },\n"
+    "  context: { memory_checkpoint_tokens: 300, "
+    "memory_history_tokens: 700 },\n"
     "  cache: { ttl: r\"P1D\" },\n"
-    "  safety: { autoconfirm: \"deny\" },\n"
+    "  safety: { autoconfirm: \"deny\", turn_deadline: r\"PT0S\", "
+    "stall_timeout: r\"PT0S\" },\n"
     "  models: {\n"
     "    roles: { generator: \"light\" },\n"
     "    pool: [\n"
@@ -159,9 +160,12 @@ TEST(overlay_overrides) {
   ASSERT_OK(asngn_config_load(c, &cfg, path));
 
   ASSERT_EQ_INT(cfg.detail_default, ASNGN_DETAIL_TERSE);
-  ASSERT_EQ_INT(cfg.summary_tokens, 300);
+  ASSERT_EQ_INT(cfg.memory_checkpoint_tokens, 300);
+  ASSERT_EQ_INT(cfg.memory_history_tokens, 700);
   ASSERT_EQ_INT(cfg.cache_ttl_s, 86400);            /* r"P1D"           */
   ASSERT_EQ_INT(cfg.autoconfirm, ASNGN_CONFIRM_DENY);
+  ASSERT_EQ_INT(cfg.turn_deadline_s, 0);
+  ASSERT_EQ_INT(cfg.stall_timeout_s, 0);
   ASSERT_EQ_STR(cfg.role_generator, "light");
   ASSERT_EQ_INT((long long)cfg.pool_n, 2);          /* pool replaced    */
   ASSERT_EQ_STR(cfg.pool[0].id, "big");
@@ -216,7 +220,7 @@ TEST(hard_errors_are_config) {
 TEST(unknown_keys_warn_and_skip) {
   static const char *body =
     "#asngn_config {\n"
-    "  context: { wibble: 1, summary_tokens: 275 },\n"
+    "  context: { wibble: 1, memory_checkpoint_tokens: 275 },\n"
     "  wibble: { x: 1 },\n"
     "}\n";
   char dir[256], path[300];
@@ -228,7 +232,7 @@ TEST(unknown_keys_warn_and_skip) {
   ASSERT_TRUE(write_text(path, body));
   asngn_config_defaults(&cfg);
   ASSERT_OK(asngn_config_load(c, &cfg, path));
-  ASSERT_EQ_INT(cfg.summary_tokens, 275); /* known sibling key applied  */
+  ASSERT_EQ_INT(cfg.memory_checkpoint_tokens, 275);
   asngn_config_free(&cfg);
   asngn_test_rmtree(dir);
   bare_ctx_free(c);
@@ -239,8 +243,7 @@ TEST(openai_compatible_pool_entry) {
     "#asngn_config { models: { max_ram_mb: 12000, max_vram_mb: 8000, "
     "pool: [{ id: \"remote\", backend: \"openai\", "
     "base_url: \"http://127.0.0.1:1234/v1\", model: \"qwen-local\", "
-    "api_key_env: \"LM_STUDIO_KEY\", api_grammar: \"llama\", "
-    "reasoning_effort: \"none\", "
+    "api_key_env: \"LM_STUDIO_KEY\", provider: \"lmstudio\", "
     "ctx: 16384, warm: false, kv_cache: true }] } }\n";
   char dir[256], path[300];
   asngn_ctx *c = bare_ctx();
@@ -256,8 +259,7 @@ TEST(openai_compatible_pool_entry) {
   ASSERT_EQ_STR(cfg.pool[0].base_url, "http://127.0.0.1:1234/v1");
   ASSERT_EQ_STR(cfg.pool[0].remote_model, "qwen-local");
   ASSERT_EQ_STR(cfg.pool[0].api_key_env, "LM_STUDIO_KEY");
-  ASSERT_EQ_STR(cfg.pool[0].api_grammar, "llama");
-  ASSERT_EQ_STR(cfg.pool[0].reasoning_effort, "none");
+  ASSERT_EQ_INT(cfg.pool[0].remote_provider, ASMODEL_REMOTE_LMSTUDIO);
   ASSERT_EQ_INT(cfg.pool[0].ctx, 16384);
   ASSERT_TRUE(!cfg.pool[0].warm);
   ASSERT_TRUE(cfg.pool[0].kv_cache);
@@ -269,7 +271,8 @@ TEST(openai_compatible_pool_entry) {
 }
 
 TEST(bare_object_form_accepted) {
-  static const char *body = "{ context: { summary_tokens: 250 } }\n";
+  static const char *body =
+      "{ context: { memory_checkpoint_tokens: 250 } }\n";
   char dir[256], path[300];
   asngn_ctx *c = bare_ctx();
   asngn_config cfg;
@@ -279,7 +282,7 @@ TEST(bare_object_form_accepted) {
   ASSERT_TRUE(write_text(path, body));
   asngn_config_defaults(&cfg);
   ASSERT_OK(asngn_config_load(c, &cfg, path));
-  ASSERT_EQ_INT(cfg.summary_tokens, 250);
+  ASSERT_EQ_INT(cfg.memory_checkpoint_tokens, 250);
   asngn_config_free(&cfg);
   asngn_test_rmtree(dir);
   bare_ctx_free(c);

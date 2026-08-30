@@ -1,16 +1,13 @@
 /*
  * session.c — the asngn session store.
  *
- * One directory per session under <root>/sessions/<slug>/:
+ * Operational data lives under <root>/sessions/<slug>/. Conversation memory
+ * is authoritative in Asper.
+ *
+ * One directory per session contains:
  *   session.xcdn      #asngn_session manifest (atomic replace)
- *   transcript.xcdn   append stream of #turn values (torn-tail rule),
- *                     fsync'd per append so a committed turn is at least
- *                     as durable as the manifest that counts it;
- *                     rewritten atomically when fold flags change
- *   summary.xcdn      #asngn_summary (atomic replace)
  *   ledger.xcdn       append stream (ledger.c)
- *   blobs/<id>.txt    digested full texts; the blob index is
- *                     per-turn state, the files persist for the user
+ *   workspace/        optional isolated working tree
  *
  * MIT License — per aspera ad astra.
  */
@@ -57,7 +54,6 @@ static xcdn_node_t *turn_build_node(const asngn_turn *t) {
   ok = ok && asngn_xobj_put(obj, "at", mk_time(t->at));
   ok = ok && asngn_xobj_put(obj, "text", mk_str(t->text));
   ok = ok && asngn_xobj_put(obj, "pinned", xcdn_value_bool(t->pinned));
-  ok = ok && asngn_xobj_put(obj, "folded", xcdn_value_bool(t->folded));
   if (ok && t->klass[0] != '\0') {
     xcdn_value_t *route = xcdn_value_object();
     ok = route != NULL;
@@ -116,8 +112,6 @@ static bool turn_from_node(const xcdn_node_t *node, asngn_turn *out) {
   if (out->text == NULL) return false;
   v = asngn_xfield(obj, "pinned");
   if (v != NULL && asngn_xbool(v, &b)) out->pinned = b;
-  v = asngn_xfield(obj, "folded");
-  if (v != NULL && asngn_xbool(v, &b)) out->folded = b;
   route = asngn_xfield(obj, "route");
   if (route != NULL && route->type == XCDN_VAL_OBJECT) {
     int64_t steps = 0;
@@ -137,18 +131,40 @@ static bool turn_from_node(const xcdn_node_t *node, asngn_turn *out) {
   return true;
 }
 
+static asngn_err turn_from_object(asngn_ctx *c, const char *object_ref,
+                                  asngn_turn *out) {
+  void *data = NULL;
+  size_t len = 0;
+  xcdn_document_t *doc = NULL;
+  xcdn_error_t xe;
+  asngn_err e;
+  memset(out, 0, sizeof *out);
+  e = asngn_siblings_object_read(c, object_ref, 0, 0, &data, &len);
+  if (e != ASNGN_OK) return e;
+  memset(&xe, 0, sizeof xe);
+  doc = xcdn_parse_str((const char *)data, len, &xe);
+  free(data);
+  if (!doc || doc->values_len != 1 ||
+      !xcdn_node_has_tag(doc->values[0], "turn") ||
+      !turn_from_node(doc->values[0], out)) {
+    if (doc) xcdn_document_free(doc);
+    return asngn_seterr(c, ASNGN_ERR_PARSE,
+                        "session: invalid Asper turn object");
+  }
+  xcdn_document_free(doc);
+  return ASNGN_OK;
+}
+
 /* ── manifest ─────────────────────────────────────────────────────────── */
 
 asngn_err asngn_session_save_manifest(asngn_session *s) {
   asngn_ctx *c = s->ctx;
   xcdn_value_t *obj = xcdn_value_object();
-  xcdn_value_t *pins = xcdn_value_array();
   xcdn_node_t *node = NULL;
   asngn_buf buf;
   asngn_err e = ASNGN_ERR_NOMEM;
   char *path = NULL;
-  size_t i;
-  bool ok = obj != NULL && pins != NULL;
+  bool ok = obj != NULL;
 
   /* Persist the current worktree identity, not merely the fingerprint from
    * session open; editor/build changes are first-class workspace state.
@@ -160,9 +176,6 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
   }
 
   asngn_buf_init(&buf);
-  for (i = 0; ok && i < s->log_n; i++)
-    if (s->log[i].pinned)
-      ok = asngn_xarr_push(pins, xcdn_value_int((int64_t)s->log[i].n));
   ok = ok && asngn_xobj_put(obj, "slug", mk_str(s->slug));
   ok = ok && asngn_xobj_put(obj, "created_at", mk_time(s->created_at));
   ok = ok && asngn_xobj_put(obj, "turns",
@@ -191,15 +204,6 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
     if (ok) ok = asngn_xobj_put(obj, "workspace", w);
     else if (w != NULL) xcdn_value_free(w);
   }
-  if (ok) {
-    xcdn_node_t *pn = xcdn_node_new(pins);
-    if (pn != NULL) {
-      pins = NULL; /* owned by pn — put_node consumes it even on failure */
-      ok = asngn_xobj_put_node(obj, "pinned", pn);
-    } else {
-      ok = false;
-    }
-  }
   ok = ok && asngn_xobj_put(obj, "redact_context",
                             xcdn_value_bool(s->redact_context));
   if (!ok) goto out;
@@ -220,7 +224,6 @@ out:
   asngn_buf_free(&buf);
   if (node != NULL) xcdn_node_free(node);
   if (obj != NULL) xcdn_value_free(obj);
-  if (pins != NULL) xcdn_value_free(pins);
   return e;
 }
 
@@ -262,87 +265,7 @@ static void sess_apply_manifest(asngn_session *s, const xcdn_node_t *node) {
   /* pinned list is applied after the transcript loads (needs ordinals) */
 }
 
-static void sess_apply_pins(asngn_session *s, const xcdn_node_t *node) {
-  const xcdn_value_t *obj, *pins;
-  size_t i, j;
-  if (node == NULL || node->value == NULL ||
-      node->value->type != XCDN_VAL_OBJECT)
-    return;
-  obj = node->value;
-  pins = asngn_xfield(obj, "pinned");
-  if (pins == NULL || pins->type != XCDN_VAL_ARRAY) return;
-  for (i = 0; i < xcdn_array_len(pins); i++) {
-    const xcdn_node_t *pn = xcdn_array_get(pins, i);
-    int64_t n;
-    if (pn == NULL || !asngn_xint(pn->value, &n)) continue;
-    for (j = 0; j < s->log_n; j++)
-      if (s->log[j].n == (size_t)n) s->log[j].pinned = true;
-  }
-}
-
-/* ── summary ──────────────────────────────────────────────────────────── */
-
-asngn_err asngn_session_save_summary(asngn_session *s) {
-  asngn_ctx *c = s->ctx;
-  xcdn_value_t *obj = xcdn_value_object();
-  xcdn_node_t *node = NULL;
-  asngn_buf buf;
-  asngn_err e = ASNGN_ERR_NOMEM;
-  char *path = NULL;
-  bool ok = obj != NULL;
-
-  asngn_buf_init(&buf);
-  ok = ok && asngn_xobj_put(obj, "text", mk_str(s->summary));
-  ok = ok && asngn_xobj_put(obj, "debt",
-                            xcdn_value_int((int64_t)s->summary_debt));
-  if (!ok) goto out;
-  node = xcdn_node_new(obj);
-  if (node == NULL) goto out;
-  obj = NULL;
-  if (!asngn_xnode_tag(node, "asngn_summary")) goto out;
-  e = asngn_xnode_write(node, true, &buf);
-  if (e != ASNGN_OK) goto out;
-  e = asngn_buf_appendc(&buf, '\n');
-  if (e != ASNGN_OK) goto out;
-  path = sess_path(s, "summary.xcdn");
-  if (path == NULL) { e = ASNGN_ERR_NOMEM; goto out; }
-  e = asngn_write_atomic(c, path, buf.data, buf.len);
-
-out:
-  free(path);
-  asngn_buf_free(&buf);
-  if (node != NULL) xcdn_node_free(node);
-  if (obj != NULL) xcdn_value_free(obj);
-  return e;
-}
-
-static void sess_load_summary(asngn_session *s) {
-  asngn_ctx *c = s->ctx;
-  char *path = sess_path(s, "summary.xcdn");
-  struct xcdn_document *doc = NULL;
-  if (path == NULL) return;
-  if (asngn_stream_load(c, path, "summary", &doc) == ASNGN_OK &&
-      doc != NULL) {
-    xcdn_document_t *d = (xcdn_document_t *)doc;
-    if (d->values_len > 0 && d->values[0] != NULL &&
-        d->values[0]->value != NULL &&
-        d->values[0]->value->type == XCDN_VAL_OBJECT) {
-      const xcdn_value_t *obj = d->values[0]->value;
-      const char *text = asngn_xstr(asngn_xfield(obj, "text"));
-      int64_t debt = 0;
-      if (text != NULL) {
-        free(s->summary);
-        s->summary = asngn_strdup(text);
-      }
-      if (asngn_xint(asngn_xfield(obj, "debt"), &debt) && debt >= 0)
-        s->summary_debt = (size_t)debt;
-    }
-  }
-  if (doc != NULL) xcdn_document_free((xcdn_document_t *)doc);
-  free(path);
-}
-
-/* ── transcript ───────────────────────────────────────────────────────── */
+/* ── transcript view ──────────────────────────────────────────────────── */
 
 static asngn_err sess_log_reserve(asngn_session *s) {
   if (s->log_n < s->log_cap) return ASNGN_OK;
@@ -361,102 +284,80 @@ asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t) {
   asngn_buf line;
   asngn_err e;
   xcdn_node_t *node;
+  char object_ref[72] = {0};
+  char event_id[37] = {0};
 
   e = sess_log_reserve(s);
   if (e != ASNGN_OK) return e;
   asngn_buf_init(&line);
-  node = turn_build_node(t);
-  e = sess_node_line(node, &line);
-  if (e != ASNGN_OK) {
-    asngn_buf_free(&line);
-    return asngn_seterr(c, e, "session %s: turn serialization failed",
-                        s->slug);
+  if (c->asper_ok) {
+    node = turn_build_node(t);
+    e = sess_node_line(node, &line);
+    if (e != ASNGN_OK) {
+      asngn_buf_free(&line);
+      return asngn_seterr(c, e, "session %s: turn serialization failed",
+                          s->slug);
+    }
+    e = asngn_siblings_object_put(c, line.data, line.len, object_ref);
+    if (e == ASNGN_OK)
+      e = asngn_siblings_event_append(
+          c, s->slug,
+          strcmp(t->role, "assistant") == 0 ? ASNGN_MEM_ASSISTANT
+                                             : ASNGN_MEM_USER,
+          t->text ? t->text : "", object_ref, t->pinned, event_id);
+  } else {
+    /* Asper-disabled operation is intentionally ephemeral.  The in-memory
+     * turn remains usable for this process, but ASNGN never becomes a second
+     * persistent memory owner. */
+    e = ASNGN_OK;
   }
-  e = asngn_stream_append(c, &s->transcript_st, line.data, line.len);
   asngn_buf_free(&line);
   if (e != ASNGN_OK) return e;
 
   s->log[s->log_n] = *t;
   s->log[s->log_n].text = asngn_strdup(t->text);
   if (s->log[s->log_n].text == NULL) return ASNGN_ERR_NOMEM;
+  if (event_id[0]) memcpy(s->log[s->log_n].event_id, event_id, 37);
   s->log_n++;
   return ASNGN_OK;
 }
 
-asngn_err asngn_session_rewrite_transcript(asngn_session *s) {
-  asngn_ctx *c = s->ctx;
-  asngn_buf buf;
-  asngn_err e = ASNGN_OK;
-  size_t i;
-  char *path;
-
-  asngn_buf_init(&buf);
-  for (i = 0; i < s->log_n && e == ASNGN_OK; i++) {
-    xcdn_node_t *node = turn_build_node(&s->log[i]);
-    e = sess_node_line(node, &buf);
-    if (e == ASNGN_OK) e = asngn_buf_appendc(&buf, '\n');
-  }
-  if (e != ASNGN_OK) {
-    asngn_buf_free(&buf);
-    return asngn_seterr(c, e, "session %s: transcript rewrite failed",
-                        s->slug);
-  }
-  path = sess_path(s, "transcript.xcdn");
-  if (path == NULL) {
-    asngn_buf_free(&buf);
-    return ASNGN_ERR_NOMEM;
-  }
-  /* close the appender across the atomic replace, then reopen */
-  asngn_stream_close(&s->transcript_st);
-  e = asngn_write_atomic(c, path, buf.data, buf.len);
-  if (e == ASNGN_OK)
-    e = asngn_stream_open(c, &s->transcript_st, path, true);
-  free(path);
-  asngn_buf_free(&buf);
-  return e;
-}
-
-static asngn_err sess_load_transcript(asngn_session *s) {
-  asngn_ctx *c = s->ctx;
-  char *path = sess_path(s, "transcript.xcdn");
-  struct xcdn_document *docp = NULL;
-  xcdn_document_t *doc;
+/* Load the authoritative transcript view from Asper. Every conversation event
+ * must refer to the complete serialized turn object. */
+static asngn_err sess_load_asper(asngn_session *s) {
+  asngn_memory_event *events = NULL;
+  size_t n = 0;
   asngn_err e;
-  size_t i;
-
-  if (path == NULL) return ASNGN_ERR_NOMEM;
-  e = asngn_stream_load(c, path, "transcript", &docp);
-  free(path);
+  if (!s->ctx->asper_ok) return ASNGN_ERR_UNSUPPORTED;
+  e = asngn_siblings_event_list(s->ctx, s->slug, &events, &n);
   if (e != ASNGN_OK) return e;
-  doc = (xcdn_document_t *)docp;
-  if (doc == NULL) return ASNGN_OK;
-  for (i = 0; i < doc->values_len; i++) {
-    xcdn_node_t *node = doc->values[i];
+  for (size_t i = 0; i < n; i++) {
     asngn_turn t;
-    if (!xcdn_node_has_tag(node, "turn")) {
-      asngn_log(c, ASNGN_LOG_WARN, "session",
-                "%s: transcript value %zu is not #turn; skipped", s->slug,
-                i);
+    if (events[i].kind != ASNGN_MEM_USER &&
+        events[i].kind != ASNGN_MEM_ASSISTANT)
       continue;
+    memset(&t, 0, sizeof t);
+    if (!events[i].object_ref[0]) {
+      e = asngn_seterr(s->ctx, ASNGN_ERR_PARSE,
+                       "session %s: event %s has no turn object",
+                       s->slug, events[i].id);
+      goto out;
     }
-    if (!turn_from_node(node, &t)) {
-      free(t.text);
-      asngn_log(c, ASNGN_LOG_WARN, "session",
-                "%s: transcript value %zu invalid; skipped", s->slug, i);
-      continue;
-    }
+    e = turn_from_object(s->ctx, events[i].object_ref, &t);
+    if (e != ASNGN_OK) goto out;
+    memcpy(t.event_id, events[i].id, 37);
+    t.pinned = events[i].pinned;
     e = sess_log_reserve(s);
     if (e != ASNGN_OK) {
       free(t.text);
-      xcdn_document_free(doc);
-      return e;
+      goto out;
     }
     s->log[s->log_n++] = t;
+    if (t.n > s->turns) s->turns = t.n;
   }
-  xcdn_document_free(doc);
-  if (s->log_n > 0 && s->log[s->log_n - 1].n > s->turns)
-    s->turns = s->log[s->log_n - 1].n;
-  return ASNGN_OK;
+out:
+  asngn_siblings_events_free(events, n);
+  return e;
 }
 
 /* ── blobs ───────────────────────────────────────────────────────────── */
@@ -465,8 +366,7 @@ asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
                                  const char *label, const char *text,
                                  size_t len, asngn_blob **out) {
   asngn_ctx *c = s->ctx;
-  char name[64];
-  char *bdir = NULL, *bpath = NULL;
+  char object_ref[72] = {0};
   asngn_blob *b;
   asngn_err e;
 
@@ -478,28 +378,22 @@ asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
     s->blobs = nb;
     s->blobs_cap = cap;
   }
-  bdir = sess_path(s, "blobs");
-  if (bdir == NULL) return ASNGN_ERR_NOMEM;
-  snprintf(name, sizeof name, "%s.txt", invocation_id);
-  bpath = os_path_join(bdir, name);
-  free(bdir);
-  if (bpath == NULL) return ASNGN_ERR_NOMEM;
-  e = os_write_file(bpath, text, len);
-  if (e != ASNGN_OK) {
-    free(bpath);
-    return asngn_seterr(c, e, "session %s: blob write failed", s->slug);
+  if (c->asper_ok) {
+    e = asngn_siblings_object_put(c, text, len, object_ref);
+    if (e != ASNGN_OK) return e;
+  } else {
+    return ASNGN_ERR_UNSUPPORTED;
   }
   b = &s->blobs[s->blobs_n];
   memset(b, 0, sizeof *b);
   b->id = asngn_strdup(invocation_id);
   b->label = asngn_strdup(label);
-  b->path = bpath;
+  if (object_ref[0]) memcpy(b->object_ref, object_ref, sizeof b->object_ref);
   b->size = len;
   b->slice_off = 0;
   if (b->id == NULL || b->label == NULL) {
     free(b->id);
     free(b->label);
-    free(b->path);
     return ASNGN_ERR_NOMEM;
   }
   s->blobs_n++;
@@ -512,7 +406,6 @@ void asngn_session_clear_blobs(asngn_session *s) {
   for (i = 0; i < s->blobs_n; i++) {
     free(s->blobs[i].id);
     free(s->blobs[i].label);
-    free(s->blobs[i].path);
   }
   s->blobs_n = 0;
 }
@@ -522,7 +415,6 @@ void asngn_session_clear_blobs(asngn_session *s) {
 void asngn_session_free(asngn_session *s) {
   size_t i;
   if (s == NULL) return;
-  asngn_stream_close(&s->transcript_st);
   asngn_stream_close(&s->ledger_st);
   for (i = 0; i < s->log_n; i++) free(s->log[i].text);
   free(s->log);
@@ -531,7 +423,6 @@ void asngn_session_free(asngn_session *s) {
   for (i = 0; i < s->allow_n; i++) free(s->allow[i]);
   free(s->allow);
   free(s->led);
-  free(s->summary);
   free(s->project);
   free(s->last_user_msg);
   free(s->last_answer);
@@ -543,7 +434,7 @@ void asngn_session_free(asngn_session *s) {
 asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
                              asngn_session **out) {
   asngn_session *s;
-  char *mpath = NULL, *tpath = NULL, *lpath = NULL, *bdir = NULL;
+  char *mpath = NULL, *lpath = NULL;
   char *wdir = NULL;
   struct xcdn_document *mdoc = NULL;
   asngn_err e;
@@ -561,9 +452,8 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   s->created_at = asngn_clock_now(&c->clock);
   s->redact_context = c->cfg.redact_context;
   s->workspace = c->workspace;
-  s->summary = asngn_strdup("");
   s->dir = os_path_join(c->sessions_dir, slug);
-  if (s->dir == NULL || s->summary == NULL) {
+  if (s->dir == NULL) {
     e = ASNGN_ERR_NOMEM;
     goto fail;
   }
@@ -585,16 +475,6 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
     }
     s->workspace_loaded = true;
   }
-  bdir = sess_path(s, "blobs");
-  if (bdir == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
-  e = os_mkdir_p(bdir);
-  free(bdir);
-  bdir = NULL;
-  if (e != ASNGN_OK) {
-    e = asngn_seterr(c, e, "session %s: cannot create blobs/", slug);
-    goto fail;
-  }
-
   /* manifest (phase 1: scalars) */
   mpath = sess_path(s, "session.xcdn");
   if (mpath == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
@@ -621,25 +501,19 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   }
   if (!session_workspace) s->workspace = c->workspace;
 
-  /* transcript */
-  e = sess_load_transcript(s);
-  if (e != ASNGN_OK) goto fail;
+  /* Authoritative source is Asper. */
+  if (c->asper_ok) {
+    e = sess_load_asper(s);
+    if (e != ASNGN_OK) goto fail;
+  }
   if (mdoc != NULL) {
-    xcdn_document_t *d = (xcdn_document_t *)mdoc;
-    if (d->values_len > 0) sess_apply_pins(s, d->values[0]);
-    xcdn_document_free(d);
+    xcdn_document_free((xcdn_document_t *)mdoc);
     mdoc = NULL;
   }
 
-  /* summary */
-  sess_load_summary(s);
-
   /* appenders */
-  tpath = sess_path(s, "transcript.xcdn");
   lpath = sess_path(s, "ledger.xcdn");
-  if (tpath == NULL || lpath == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
-  e = asngn_stream_open(c, &s->transcript_st, tpath, true);
-  if (e != ASNGN_OK) goto fail;
+  if (lpath == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
   e = asngn_stream_open(c, &s->ledger_st, lpath, true);
   if (e != ASNGN_OK) goto fail;
 
@@ -654,7 +528,6 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   }
 
   free(mpath);
-  free(tpath);
   free(lpath);
   free(wdir);
   *out = s;
@@ -663,7 +536,6 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
 fail:
   if (mdoc != NULL) xcdn_document_free((xcdn_document_t *)mdoc);
   free(mpath);
-  free(tpath);
   free(lpath);
   free(wdir);
   asngn_session_free(s);

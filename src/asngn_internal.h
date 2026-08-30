@@ -221,8 +221,7 @@ typedef struct {
   char *base_url;
   char *remote_model;
   char *api_key_env;
-  char *api_grammar;
-  char *reasoning_effort;
+  asmodel_remote_provider remote_provider;
   int   ctx;
   int   threads;
   bool  embedding;
@@ -262,7 +261,7 @@ typedef struct {
   asngn_detail detail_default; /* AUTO = classifier decides */
   int terse_tokens, normal_tokens, rich_tokens;
   /* context */
-  int summary_tokens, verbatim_tokens, working_tokens, fold_tokens;
+  int memory_checkpoint_tokens, memory_history_tokens, working_tokens;
   int safety_margin; /* reserved beyond requested completion tokens */
   int digest_threshold_chars, digest_tokens;
   int pinned_max;
@@ -323,6 +322,10 @@ typedef struct {
   double top_p;           /* <= 0: greedy chain without top_p */
   int    max_tokens;
   double repeat_penalty;  /* <= 1.0 = off */
+  asmodel_reasoning_mode reasoning;
+  int reasoning_budget;
+  bool require_constraint;
+  int64_t deadline_ms;   /* maximum duration for this inference; 0 = none */
 } asngn_gen_params;
 
 /* Backend vtable: scripted fakes and llama.cpp sit behind the same
@@ -347,6 +350,7 @@ typedef struct asngn_model_iface {
   asngn_err (*embed)(void *ud, const char *text, float *out); /* dim floats,
                          L2-normalized; only on embedding models */
   const char *(*last_error)(void *ud); /* optional backend diagnostic */
+  int (*last_generation_info)(void *ud, asmodel_generation_info *out);
   void (*destroy)(void *ud);
 } asngn_model_iface;
 
@@ -386,6 +390,7 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
                                 const char *system_prompt,
                                 const char *user_prompt, const char *gbnf,
                                 int max_tokens_override,
+                                int64_t deadline_mono,
                                 asngn_token_fn token_cb, void *token_ud,
                                 volatile int *cancel,
                                 char **out_text, int *out_tokens_in,
@@ -420,11 +425,11 @@ int asngn_token_heuristic(const char *text); /* UTF-8 bytes / 4, min 1 */
 
 typedef struct {
   size_t      n;          /* turn ordinal, 1-based                  */
+  char        event_id[37]; /* authoritative Asper source event id */
   char        role[10];   /* "user" | "assistant"                   */
   char       *text;       /* owned                                  */
   asngn_time  at;
   bool        pinned;
-  bool        folded;
   /* route summary, assistant turns only (empty strings otherwise)   */
   char        klass[12], detail[8], mode[8], tier[16], cache[8];
   int         steps;
@@ -433,7 +438,7 @@ typedef struct {
 typedef struct {
   char   *id;        /* invocation id (uuid), owned                 */
   char   *label;     /* "fs.read" etc., owned                       */
-  char   *path;      /* blobs/<id>.txt absolute path, owned         */
+  char    object_ref[72]; /* authoritative Asper sha256 reference    */
   size_t  size;      /* full text size in bytes                     */
   size_t  slice_off; /* next OPEN offset                            */
 } asngn_blob;
@@ -451,17 +456,13 @@ struct asngn_session {
   asngn_workspace_info workspace; /* immutable session binding       */
   bool        workspace_loaded;
   bool        redact_context;
-  /* transcript, fully resident */
+  /* process-local view of Asper source events */
   asngn_turn *log;
   size_t      log_n, log_cap;
-  /* rolling summary */
-  char       *summary;      /* owned, may be empty                   */
-  size_t      summary_debt; /* extractive-fallback folds outstanding */
-  /* blobs of the session (persisted only as files; index rebuilt)   */
+  /* turn-local handles for Asper content-addressed objects */
   asngn_blob *blobs;
   size_t      blobs_n, blobs_cap;
   /* appenders */
-  asngn_stream transcript_st;
   asngn_stream ledger_st;
   /* session allowlist: "tool.command" entries confirmed "always"    */
   char      **allow;
@@ -471,8 +472,7 @@ struct asngn_session {
   size_t      led_n, led_cap;
   int64_t     spent_tokens;  /* session lifetime total               */
   /* turn serialization */
-  bool        busy;          /* a turn (or background fold) runs     */
-  bool        bg_folding;    /* busy because of a background fold    */
+  bool        busy;          /* a turn runs                           */
   asngn_task *running;       /* borrowed pointer to the active task  */
   size_t      last_answer_turn; /* for /more and feedback            */
   bool        last_capped;
@@ -485,11 +485,8 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
 asngn_err asngn_session_workspace_activate(asngn_session *s);
 void      asngn_session_free(asngn_session *s);
 asngn_err asngn_session_save_manifest(asngn_session *s);
-asngn_err asngn_session_save_summary(asngn_session *s);
-/* Append one turn to transcript.xcdn and the in-memory log. */
+/* Append one turn to Asper and the in-memory operational view. */
 asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t);
-/* Rewrite transcript.xcdn from the in-memory log (fold flags, compact). */
-asngn_err asngn_session_rewrite_transcript(asngn_session *s);
 asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
                                  const char *label, const char *text,
                                  size_t len, asngn_blob **out);
@@ -579,7 +576,7 @@ struct asngn_turn_state; /* below */
  * byte-identical for identical inputs. */
 asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
                                  struct asngn_turn_state *t,
-                                 const char *memory_block,
+                                 const char *base_override,
                                  const char *instruction,
                                  int count_slot, asngn_prompt *out);
 asngn_err asngn_context_validate(asngn_ctx *c, int count_slot,
@@ -589,18 +586,6 @@ asngn_err asngn_context_validate_text(asngn_ctx *c, int count_slot,
                                       const char *system_text,
                                       const char *user_text,
                                       int output_reserve);
-
-/* ── folding (fold.c) ─────────────────────────────────────────────────── */
-
-/* Fold oldest unpinned turn pairs until verbatim occupancy <= 70% of
- * budget; uses the compressor role, extractive fallback on failure.
- * aux_tokens accumulates compressor generation for the ledger. */
-asngn_err asngn_fold_run(asngn_ctx *c, asngn_session *s, bool aggressive,
-                         size_t *aux_tokens);
-bool      asngn_fold_needed(asngn_ctx *c, asngn_session *s);
-/* Re-compact the summary to <= 50% of summary_tokens. */
-asngn_err asngn_fold_recompact(asngn_ctx *c, asngn_session *s,
-                               size_t *aux_tokens);
 
 /* ── digestion and blobs (digest.c) ───────────────────────────────────── */
 
@@ -898,17 +883,59 @@ asngn_err asngn_siblings_grammar(asngn_ctx *c, char **out_gbnf);
 /* Annotation lookup: parses (and caches) the tool manifest. */
 asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
                                      const char *cmd, asngn_tool_note *out);
-/* Memory zone via asper_build_prompt (block only appended to base). */
-asngn_err asngn_siblings_memory(asngn_ctx *c, const char *base_prompt,
-                                const char *user_message, char **out);
-asngn_err asngn_siblings_observe(asngn_ctx *c, int is_assistant,
-                                 const char *text);
 asngn_err asngn_siblings_recall(asngn_ctx *c, const char *question,
                                 char **out_block); /* rendered w/ cites  */
 asngn_err asngn_siblings_project(asngn_ctx *c, const char *slug);
 asngn_err asngn_siblings_project_sync(asngn_ctx *c, const char *want);
 asngn_err asngn_siblings_readiness(asngn_ctx *c);
 asngn_err asngn_siblings_workspace_sync(asngn_ctx *c, const char *root);
+
+typedef enum {
+  ASNGN_MEM_USER = 0,
+  ASNGN_MEM_ASSISTANT,
+  ASNGN_MEM_DECISION,
+  ASNGN_MEM_TOOL_CALL,
+  ASNGN_MEM_TOOL_RESULT,
+  ASNGN_MEM_DIAGNOSTIC,
+  ASNGN_MEM_CHECKPOINT,
+  ASNGN_MEM_ARTIFACT
+} asngn_memory_kind;
+
+typedef struct {
+  char id[37];
+  unsigned long long sequence;
+  asngn_time at;
+  asngn_memory_kind kind;
+  char *text;
+  char object_ref[72];
+  bool pinned;
+} asngn_memory_event;
+
+asngn_err asngn_siblings_event_append(asngn_ctx *c, const char *scope,
+                                      asngn_memory_kind kind,
+                                      const char *text,
+                                      const char *object_ref, bool pinned,
+                                      char out_id[37]);
+asngn_err asngn_siblings_event_list(asngn_ctx *c, const char *scope,
+                                    asngn_memory_event **out, size_t *out_n);
+void asngn_siblings_events_free(asngn_memory_event *events, size_t n);
+asngn_err asngn_siblings_event_pin(asngn_ctx *c, const char *scope,
+                                   const char *event_id, bool pinned);
+asngn_err asngn_siblings_object_put(asngn_ctx *c, const void *data,
+                                    size_t len, char out_ref[72]);
+asngn_err asngn_siblings_object_read(asngn_ctx *c, const char *ref,
+                                     size_t offset, size_t max_bytes,
+                                     void **out, size_t *out_len);
+asngn_err asngn_siblings_checkpoint(asngn_ctx *c, const char *scope,
+                                    const char *text, char out_id[37]);
+asngn_err asngn_siblings_compact(asngn_ctx *c);
+asngn_err asngn_siblings_context(asngn_ctx *c, const char *scope,
+                                 const char *base_prompt, const char *query,
+                                 size_t history_tokens,
+                                 size_t checkpoint_tokens, int count_slot,
+                                 char **out_system, char **out_context,
+                                 size_t *out_system_tokens,
+                                 size_t *out_context_tokens);
 
 /* ── control loop (loop.c) ────────────────────────────────────────────── */
 
@@ -945,8 +972,6 @@ typedef struct asngn_turn_state {
   /* working zone */
   asngn_work_item *work;
   size_t         work_n, work_cap;
-  /* memory zone snapshot for this turn (owned) */
-  char          *memory_block;
   /* catalog + grammar snapshots (owned) */
   char          *catalog;
   char          *astools_gbnf;
@@ -1018,7 +1043,7 @@ typedef struct {
 asngn_err asngn_workers_start(asngn_ctx *c);
 void      asngn_workers_stop(asngn_ctx *c);
 asngn_err asngn_worker_submit(asngn_ctx *c, asngn_task *t);
-/* Background maintenance (fold queue, sweeps, telemetry flush). */
+/* Background maintenance (warmup, sweeps, telemetry flush). */
 void      asngn_background_kick(asngn_ctx *c);
 asngn_err asngn_run_due_work(asngn_ctx *c);
 
@@ -1116,10 +1141,8 @@ struct asngn_ctx {
   os_cond       q_cv;
   asngn_task   *q_head, *q_tail;
   bool          stop;
-  volatile int  bg_cancel;       /* raised at shutdown: aborts folds  */
+  volatile int  bg_cancel;       /* raised at shutdown: abort warmup  */
   bool          bg_due_warm;     /* preload role models at open       */
-  bool          bg_due_fold;
-  asngn_session *bg_fold_session;  /* borrowed                       */
   int64_t       last_sweep_ms;
   bool          no_threads;
 };

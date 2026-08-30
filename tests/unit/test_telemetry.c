@@ -94,7 +94,7 @@ static void fx_emit_n(fx *f, int n) {
   int i;
   char kind[8];
   for (i = 0; i < n; i++) {
-    snprintf(kind, sizeof kind, "k%02d", i);
+    snprintf(kind, sizeof kind, "k%02u", (unsigned)i % 100u);
     asngn_tele_emit(f->c, kind, NULL, NULL, NULL, 0, NULL);
   }
 }

@@ -38,11 +38,10 @@ honestly. Token limits prevent waste; they never justify partial work.""",
 
   detail: { terse_tokens: 1024, normal_tokens: 4096, rich_tokens: 10240 },
   context: {
-    summary_tokens: 3072,
-    verbatim_tokens: 8192,
+    memory_checkpoint_tokens: 3072,
+    memory_history_tokens: 8192,
     working_tokens: 6144,
     safety_margin: 512,
-    fold_tokens: 1536,
     digest_threshold_chars: 32768,
     digest_tokens: 2048,
   },

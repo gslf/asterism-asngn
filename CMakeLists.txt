@@ -158,7 +158,6 @@ set(ASNGN_SOURCES
   src/models_openai.c
   src/models_shared.c
   src/context.c
-  src/fold.c
   src/digest.c
   src/embedcache.c
   src/cache.c

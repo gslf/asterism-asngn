@@ -36,6 +36,7 @@ const char *asngn_err_name(asngn_err e) {
   case ASNGN_ERR_UNSUPPORTED: return "ASNGN_ERR_UNSUPPORTED";
   case ASNGN_ERR_SIBLING:     return "ASNGN_ERR_SIBLING";
   case ASNGN_ERR_NOMEM:       return "ASNGN_ERR_NOMEM";
+  case ASNGN_ERR_LIMIT:       return "ASNGN_ERR_LIMIT";
   }
   return "ASNGN_ERR_?";
 }
@@ -154,7 +155,7 @@ static void ctx_locks_destroy(asngn_ctx *c) {
 }
 
 /* Defined with the turn machinery below; used by pin/compact too. */
-static void session_wait_fold_locked(asngn_ctx *c, asngn_session *s);
+static void session_lock_for_update(asngn_ctx *c, asngn_session *s);
 static asngn_err startup_readiness(asngn_ctx *c);
 
 /* Join a config path to the engine root when relative. Returns an owned
@@ -396,15 +397,20 @@ asngn_err asngn_session_workspace(asngn_session *s,
 }
 
 static asngn_err startup_readiness(asngn_ctx *c) {
-  bool seen[ASNGN_MAX_POOL] = {false};
+  bool required_slot[ASNGN_MAX_POOL] = {false};
+  bool controlled_slot[ASNGN_MAX_POOL] = {false};
+  size_t i;
   int r;
   if (c->cfg.profile != ASNGN_PROFILE_CODING) return ASNGN_OK;
   if (c->workspace.canonical_root[0] == '\0')
     return asngn_seterr(c, ASNGN_ERR_CONFIG,
                         "coding readiness failed: workspace missing");
+
+  /* Build requirements per model before validating them.  One pool slot may
+   * serve several roles; validating on the first role alone made the result
+   * depend on role order (for example compressor before judge). */
   for (r = 0; r < ASNGN_ROLE_COUNT; r++) {
     int slot = c->role_slot[r];
-    asngn_model_slot *m;
     bool required = true;
     if (r == ASNGN_ROLE_ROUTER &&
         c->cfg.classifier == ASNGN_CLASSIFIER_HEURISTIC)
@@ -421,9 +427,15 @@ static asngn_err startup_readiness(asngn_ctx *c) {
       return asngn_seterr(c, ASNGN_ERR_MODEL,
                           "coding readiness failed: role %s is unmapped",
                           asngn_role_name((asngn_role)r));
-    if (seen[slot]) continue;
-    seen[slot] = true;
-    m = &c->models[slot];
+    required_slot[slot] = true;
+    if (r == ASNGN_ROLE_PLANNER || r == ASNGN_ROLE_GENERATOR ||
+        r == ASNGN_ROLE_JUDGE || r == ASNGN_ROLE_ROUTER)
+      controlled_slot[slot] = true;
+  }
+
+  for (i = 0; i < c->models_n; i++) {
+    asngn_model_slot *m = &c->models[i];
+    if (!required_slot[i]) continue;
     /* Remote/OpenAI-compatible slots intentionally have no local weight
      * path.  Coding readiness must validate a path only for the embedded
      * backend, otherwise selecting the professional profile makes a valid
@@ -440,6 +452,23 @@ static asngn_err startup_readiness(asngn_ctx *c) {
                             "at %s; pass --allow-degraded to opt in",
                             m->cfg.id,
                             m->cfg.path != NULL ? m->cfg.path : "(null)");
+      }
+    }
+    if (!m->injected && m->cfg.backend == ASMODEL_BACKEND_OPENAI &&
+        controlled_slot[i]) {
+      asmodel_capabilities caps = {0};
+      uint64_t need = ASMODEL_CAP_ACTION_SCHEMA |
+                      ASMODEL_CAP_REASONING_OFF;
+      if (asmodel_remote_capabilities(m->cfg.remote_provider, m->cfg.ctx,
+                                      m->cfg.embedding, &caps) != 0 ||
+          (caps.flags & need) != need) {
+        return asngn_seterr(
+            c, ASNGN_ERR_UNSUPPORTED,
+            "coding readiness failed: remote model '%s' uses provider "
+            "profile '%s', which cannot guarantee constrained actions and "
+            "reasoning-off decisions; set provider to llama-server, "
+            "lmstudio, or vllm",
+            m->cfg.id, caps.profile[0] ? caps.profile : "unknown");
       }
     }
   }
@@ -519,13 +548,6 @@ void asngn_session_close(asngn_session *s) {
     busy = s->busy;
     os_rwlock_rdunlock(&s->lock);
   }
-  /* drop any pending background fold that borrows this session */
-  os_mutex_lock(&c->q_mu);
-  if (c->bg_fold_session == s) {
-    c->bg_fold_session = NULL;
-    c->bg_due_fold = false;
-  }
-  os_mutex_unlock(&c->q_mu);
   os_rwlock_wrlock(&c->lock);
   for (i = 0; i < c->sessions_n; i++) {
     if (c->sessions[i] == s) {
@@ -681,7 +703,7 @@ asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
   bool found = false, changed = false;
   if (s == NULL) return ASNGN_ERR_INVALID;
   c = s->ctx;
-  session_wait_fold_locked(c, s);
+  session_lock_for_update(c, s);
   if (s->busy) {
     os_rwlock_wrunlock(&s->lock);
     return asngn_seterr(c, ASNGN_ERR_BUSY,
@@ -700,7 +722,6 @@ asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
                               c->cfg.pinned_max);
         }
         s->log[i].pinned = true;
-        s->log[i].folded = false; /* pinned turns rejoin the verbatim */
         changed = true;
       } else if (!on) {
         if (s->log[i].pinned) {
@@ -720,9 +741,12 @@ asngn_err asngn_session_pin(asngn_session *s, size_t turn, int on) {
     return ASNGN_OK;
   }
   {
-    /* the lock stays held across the rewrite so a submitted turn cannot
-     * append into the closed-and-replaced transcript stream */
-    asngn_err e = asngn_session_rewrite_transcript(s);
+    asngn_err e = ASNGN_OK;
+    if (c->asper_ok && s->log[i].event_id[0])
+      e = asngn_siblings_event_pin(c, s->slug, s->log[i].event_id,
+                                   s->log[i].pinned);
+    else if (!c->asper_ok)
+      e = ASNGN_OK; /* ephemeral degraded-mode pin */
     if (e == ASNGN_OK) e = asngn_session_save_manifest(s);
     os_rwlock_wrunlock(&s->lock);
     return e;
@@ -766,7 +790,6 @@ asngn_err asngn_session_transcript(asngn_session *s,
     p += len + 1;
     ents[i].at = (long long)t->at;
     ents[i].pinned = t->pinned ? 1 : 0;
-    ents[i].folded = t->folded ? 1 : 0;
     snprintf(ents[i].tier, sizeof ents[i].tier, "%s", t->tier);
   }
   os_rwlock_rdunlock(&s->lock);
@@ -777,31 +800,11 @@ asngn_err asngn_session_transcript(asngn_session *s,
 
 asngn_err asngn_session_compact(asngn_session *s) {
   asngn_ctx *c;
-  size_t aux = 0;
-  asngn_err e;
   if (s == NULL) return ASNGN_ERR_INVALID;
   c = s->ctx;
-  /* claim the session like a turn: fold_run takes its own short holds
-   * and must not run under a caller-held s->lock (the compressor call
-   * would block every session API for minutes) */
-  session_wait_fold_locked(c, s);
-  if (s->busy) {
-    os_rwlock_wrunlock(&s->lock);
-    return asngn_seterr(c, ASNGN_ERR_BUSY,
-                        "session %s: a turn is running", s->slug);
-  }
-  s->busy = true;
-  os_rwlock_wrunlock(&s->lock);
-  /* a cancel raised while waiting out a background fold must not abort
-   * this deliberate one (shutdown keeps its flag) */
-  os_mutex_lock(&c->q_mu);
-  if (!c->stop) c->bg_cancel = 0;
-  os_mutex_unlock(&c->q_mu);
-  e = asngn_fold_run(c, s, true, &aux);
-  os_rwlock_wrlock(&s->lock);
-  s->busy = false;
-  os_rwlock_wrunlock(&s->lock);
-  return e;
+  if (c->asper_ok) return asngn_siblings_compact(c);
+  return asngn_seterr(c, ASNGN_ERR_UNSUPPORTED,
+                      "session compaction requires Asper");
 }
 
 /* ── stats ────────────────────────────────────────────────────────────── */
@@ -870,7 +873,6 @@ void asngn_turn_state_free(asngn_turn_state *t) {
   free(t->user_msg);
   for (i = 0; i < t->work_n; i++) free(t->work[i].text);
   free(t->work);
-  free(t->memory_block);
   free(t->catalog);
   free(t->astools_gbnf);
   free(t->call_keys);
@@ -880,22 +882,9 @@ void asngn_turn_state_free(asngn_turn_state *t) {
   memset(t, 0, sizeof *t);
 }
 
-/* Wait out a background fold and return with s->lock write-held and no
- * fold running. A user action outranks housekeeping: a fast fold gets a
- * short grace, then it is asked to step aside (it aborts the compressor
- * call, keeps the pairs already folded, and re-queues itself). */
-static void session_wait_fold_locked(asngn_ctx *c, asngn_session *s) {
-  int grace = 2;
+static void session_lock_for_update(asngn_ctx *c, asngn_session *s) {
+  (void)c;
   os_rwlock_wrlock(&s->lock);
-  while (s->busy && s->bg_folding) {
-    os_rwlock_wrunlock(&s->lock);
-    if (grace > 0) grace--;
-    else c->bg_cancel = 1;
-    os_mutex_lock(&c->q_mu);
-    os_cond_timedwait(&c->q_cv, &c->q_mu, 20); /* fold end wakes us */
-    os_mutex_unlock(&c->q_mu);
-    os_rwlock_wrlock(&s->lock);
-  }
 }
 
 static asngn_err submit_common(asngn_session *s, char *gated_msg,
@@ -929,7 +918,7 @@ static asngn_err submit_common(asngn_session *s, char *gated_msg,
   task->session = s;
   task->turn = t;
 
-  session_wait_fold_locked(c, s);
+  session_lock_for_update(c, s);
   if (s->busy) {
     os_rwlock_wrunlock(&s->lock);
     os_cond_destroy(&task->cv);
@@ -1059,6 +1048,12 @@ asngn_err asngn_task_wait(asngn_task *t, uint32_t timeout_ms,
 asngn_err asngn_task_cancel(asngn_task *t) {
   if (t == NULL) return ASNGN_ERR_INVALID;
   if (t->turn != NULL) t->turn->cancel = 1;
+  /* Abort the active provider request immediately. The worker relay remains
+   * as a race-safe fallback for cancellation between model calls. */
+  os_mutex_lock(&t->ctx->q_mu);
+  if (t->ctx->call_active && t->ctx->call_turn == t->turn)
+    t->ctx->call_cancel = 1;
+  os_mutex_unlock(&t->ctx->q_mu);
   /* wake a possible pending confirmation so the loop can observe it */
   os_mutex_lock(&t->ctx->confirm.mu);
   os_cond_broadcast(&t->ctx->confirm.cv);

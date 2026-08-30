@@ -115,8 +115,15 @@ asngn_err asngn_judge_run(asngn_ctx *c, asngn_session *s,
     return e;
   }
 
+  if (t->deadline_mono > 0 &&
+      asngn_clock_mono_ms(&c->clock) >= t->deadline_mono) {
+    free(gbnf);
+    asngn_buf_free(&ub);
+    return ASNGN_ERR_TIMEOUT;
+  }
   e = asngn_models_generate(c, slot, ASNGN_TASK_JUDGE, judge_system, ub.data,
-                            gbnf, 0, NULL, NULL, &t->cancel, &txt, &tin,
+                            gbnf, 0, t->deadline_mono, NULL, NULL, &t->cancel,
+                            &txt, &tin,
                             &tout);
   free(gbnf);
   asngn_buf_free(&ub);

@@ -20,10 +20,15 @@ static int shared_generate(void *ud, const char *sys, const char *user,
                            int *out_in, int *out_gen) {
   shared_ref *r = (shared_ref *)ud;
   shared_token_bridge bridge;
+  int64_t deadline_mono = params->deadline_ms > 0
+                              ? asngn_clock_mono_ms(&r->ctx->clock) +
+                                    params->deadline_ms
+                              : 0;
   (void)cancel;
   bridge.fn = token_fn; bridge.ud = token_ud;
   return asngn_models_generate(r->ctx, r->slot, ASNGN_TASK_JUDGE,
                                sys, user, grammar, params->max_tokens,
+                               deadline_mono,
                                token_fn ? shared_token : NULL, &bridge,
                                &r->ctx->call_cancel, out, out_in, out_gen) ==
                  ASNGN_OK ? 0 : -1;
@@ -86,8 +91,8 @@ asngn_err asngn_shared_models_init(asngn_ctx *c) {
     memset(&spec, 0, sizeof spec);
     spec.id = e->id; spec.backend = e->backend; spec.path = e->path;
     spec.base_url = e->base_url; spec.remote_model = e->remote_model;
-    spec.api_key_env = e->api_key_env; spec.api_grammar = e->api_grammar;
-    spec.reasoning_effort = e->reasoning_effort;
+    spec.api_key_env = e->api_key_env;
+    spec.remote_provider = e->remote_provider;
     spec.context_tokens = e->ctx; spec.threads = e->threads;
     spec.gpu_layers = e->gpu_layers; spec.embedding = e->embedding;
     spec.embedding_dim = e->dim; spec.kv_cache = e->kv_cache;

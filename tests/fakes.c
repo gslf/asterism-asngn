@@ -4,6 +4,7 @@
 #include "fakes.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -80,6 +81,26 @@ int fake_model_push(fake_model *fm, const char *reply) {
   return 1;
 }
 
+int fake_model_push_error(fake_model *fm, asngn_err error) {
+  char marker[48];
+  snprintf(marker, sizeof marker, "@asngn:test-error:%d", (int)error);
+  return fake_model_push(fm, marker);
+}
+
+int fake_model_push_partial_limit(fake_model *fm, const char *partial) {
+  asngn_buf marker;
+  int ok;
+  asngn_buf_init(&marker);
+  if (asngn_buf_appends(&marker, "@asngn:test-limit-partial:") != ASNGN_OK ||
+      asngn_buf_appends(&marker, partial != NULL ? partial : "") != ASNGN_OK) {
+    asngn_buf_free(&marker);
+    return 0;
+  }
+  ok = fake_model_push(fm, marker.data);
+  asngn_buf_free(&marker);
+  return ok;
+}
+
 static asngn_err fake_model_generate(void *ud, const char *system_prompt,
                                      const char *user_prompt,
                                      const char *gbnf,
@@ -90,7 +111,6 @@ static asngn_err fake_model_generate(void *ud, const char *system_prompt,
                                      int *out_tokens_out) {
   fake_model *fm = (fake_model *)ud;
   const char *reply = "{action: \"answer\"}\n";
-  (void)p;
   if (!fm || !out_text) return ASNGN_ERR_INVALID;
   if (cancel && *cancel) return ASNGN_ERR_CANCELLED;
   free(fm->last_system);
@@ -100,7 +120,27 @@ static asngn_err fake_model_generate(void *ud, const char *system_prompt,
   free(fm->last_grammar);
   fm->last_grammar = asngn_strdup(gbnf);
   fm->calls++;
+  if (fm->calls <= (int)(sizeof fm->max_tokens_seen /
+                         sizeof fm->max_tokens_seen[0])) {
+    fm->max_tokens_seen[fm->calls - 1] = p->max_tokens;
+    fm->reasoning_seen[fm->calls - 1] = p->reasoning;
+    fm->require_constraint_seen[fm->calls - 1] =
+        p->require_constraint ? 1 : 0;
+    fm->deadline_seen[fm->calls - 1] = p->deadline_ms;
+  }
   if (fm->next < fm->n) reply = fm->replies[fm->next++];
+  if (strncmp(reply, "@asngn:test-error:", 18) == 0)
+    return (asngn_err)strtol(reply + 18, NULL, 10);
+  if (strncmp(reply, "@asngn:test-limit-partial:", 26) == 0) {
+    reply += 26;
+    *out_text = asngn_strdup(reply);
+    if (!*out_text) return ASNGN_ERR_NOMEM;
+    if (token_cb) token_cb(reply, token_ud);
+    if (out_tokens_in)
+      *out_tokens_in = fake_count(system_prompt) + fake_count(user_prompt);
+    if (out_tokens_out) *out_tokens_out = fake_count(reply);
+    return ASNGN_ERR_LIMIT;
+  }
   *out_text = asngn_strdup(reply);
   if (!*out_text) return ASNGN_ERR_NOMEM;
   if (token_cb) token_cb(reply, token_ud);

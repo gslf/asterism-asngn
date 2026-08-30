@@ -202,9 +202,10 @@ done:
 
 /* ---- engine config ------------------------------------------------------- */
 
-int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
-                            const char *registry_root, const char *workspace,
-                            const char *extra) {
+static int fix_engine_config(const char *path, const char *astools_cfg_path,
+                             const char *registry_root,
+                             const char *workspace, const char *extra,
+                             int asper_enable) {
   asngn_buf b;
   asngn_err e;
   int ok = 0;
@@ -218,7 +219,12 @@ int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
                         "    pool: " ASNGN_FIX_POOL ",\n"
                         "  },\n"
                         "  integration: {\n"
-                        "    asper: { enable: false },\n"
+                        "    asper: { enable: ");
+  if (e == ASNGN_OK)
+    e = asngn_buf_appends(&b, asper_enable ? "true, root: \"memory\" },\n"
+                                              : "false },\n");
+  if (e == ASNGN_OK)
+    e = asngn_buf_appends(&b,
                         "    astools: {\n"
                         "      enable: true,\n"
                         "      root: \"");
@@ -248,4 +254,20 @@ int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
 done:
   asngn_buf_free(&b);
   return ok;
+}
+
+int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
+                            const char *registry_root, const char *workspace,
+                            const char *extra) {
+  return fix_engine_config(path, astools_cfg_path, registry_root, workspace,
+                           extra, 0);
+}
+
+int asngn_fix_engine_config_asper(const char *path,
+                                  const char *astools_cfg_path,
+                                  const char *registry_root,
+                                  const char *workspace,
+                                  const char *extra) {
+  return fix_engine_config(path, astools_cfg_path, registry_root, workspace,
+                           extra, 1);
 }

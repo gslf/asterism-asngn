@@ -72,6 +72,12 @@ int asngn_fix_astools_config(const char *path, const char *registry_root,
 int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
                             const char *registry_root, const char *workspace,
                             const char *extra);
+/* Same fixture, with Asper enabled and its store rooted at `memory`. */
+int asngn_fix_engine_config_asper(const char *path,
+                                  const char *astools_cfg_path,
+                                  const char *registry_root,
+                                  const char *workspace,
+                                  const char *extra);
 
 #ifdef __cplusplus
 }

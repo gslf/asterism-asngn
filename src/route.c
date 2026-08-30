@@ -763,24 +763,28 @@ static bool route_parse_line(const char *line, asngn_route_profile *out) {
 /* One grammar-constrained router-model pass. The user prompt carries an
  * evidence header (task, tools, language, repo scale, history) ahead of
  * the message so the nano model votes on the same evidence the heuristic
- * scored. false on any failure — the caller falls back to the heuristic
- * and the turn never fails here. */
-static bool route_model_pass(asngn_ctx *c, asngn_session *s,
-                             const char *message,
-                             const asngn_route_evidence *ev,
-                             const asngn_route_profile *heur,
-                             asngn_turn_state *t, asngn_route_profile *out,
-                             size_t *aux_tokens) {
+ * scored. A configured model classifier is part of the quality contract:
+ * failure is propagated instead of being hidden by an heuristic fallback. */
+static asngn_err route_model_pass(asngn_ctx *c, asngn_session *s,
+                                  const char *message,
+                                  const asngn_route_evidence *ev,
+                                  const asngn_route_profile *heur,
+                                  asngn_turn_state *t,
+                                  asngn_route_profile *out,
+                                  size_t *aux_tokens) {
   int slot, tin = 0, tout = 0;
   char *gbnf = NULL, *text = NULL;
   char tools[32];
   asngn_buf up;
   size_t len, cut;
-  bool ok;
+  asngn_err e;
 
   slot = asngn_models_slot_for_role(c, ASNGN_ROLE_ROUTER);
-  if (slot < 0) return false;
-  if (asngn_grammar_classify(&gbnf) != ASNGN_OK) return false;
+  if (slot < 0)
+    return asngn_seterr(c, ASNGN_ERR_MODEL,
+                        "configured model classifier is unavailable");
+  e = asngn_grammar_classify(&gbnf);
+  if (e != ASNGN_OK) return e;
 
   len = strlen(message);
   cut = route_utf8_prefix(message, len);
@@ -797,7 +801,7 @@ static bool route_model_pass(asngn_ctx *c, asngn_session *s,
           ev->repo_files, ev->escalated) != ASNGN_OK) {
     asngn_buf_free(&up);
     free(gbnf);
-    return false;
+    return ASNGN_ERR_NOMEM;
   }
   /* Give the semantic router the immediately preceding exchange.  The
    * in-flight user message is already the last transcript item, so exclude
@@ -810,7 +814,7 @@ static bool route_model_pass(asngn_ctx *c, asngn_session *s,
     if (asngn_buf_appends(&up, "conversation_context:\n") != ASNGN_OK) {
       asngn_buf_free(&up);
       free(gbnf);
-      return false;
+      return ASNGN_ERR_NOMEM;
     }
     for (i = first; i < end; i++) {
       const asngn_turn *tr = &s->log[i];
@@ -820,7 +824,7 @@ static bool route_model_pass(asngn_ctx *c, asngn_session *s,
           asngn_buf_appendc(&up, '\n') != ASNGN_OK) {
         asngn_buf_free(&up);
         free(gbnf);
-        return false;
+        return ASNGN_ERR_NOMEM;
       }
     }
   }
@@ -828,18 +832,34 @@ static bool route_model_pass(asngn_ctx *c, asngn_session *s,
       asngn_buf_append(&up, message, cut) != ASNGN_OK) {
     asngn_buf_free(&up);
     free(gbnf);
-    return false;
+    return ASNGN_ERR_NOMEM;
   }
 
-  ok = asngn_models_generate(c, slot, ASNGN_TASK_CLASSIFY, ROUTE_SYS,
-                             up.data, gbnf, 0, NULL, NULL, &t->cancel,
-                             &text, &tin, &tout) == ASNGN_OK;
+  {
+    if (t->deadline_mono > 0 &&
+        asngn_clock_mono_ms(&c->clock) >= t->deadline_mono) {
+      free(gbnf);
+      asngn_buf_free(&up);
+      return ASNGN_ERR_TIMEOUT;
+    }
+    e = asngn_models_generate(c, slot, ASNGN_TASK_CLASSIFY, ROUTE_SYS,
+                              up.data, gbnf, 0, t->deadline_mono, NULL, NULL,
+                              &t->cancel, &text, &tin, &tout);
+  }
   free(gbnf);
   asngn_buf_free(&up);
-  if (ok && aux_tokens != NULL && tout > 0) *aux_tokens += (size_t)tout;
-  ok = ok && route_parse_line(text, out);
+  if (e != ASNGN_OK) {
+    free(text);
+    return e;
+  }
+  if (aux_tokens != NULL && tout > 0) *aux_tokens += (size_t)tout;
+  if (!route_parse_line(text, out)) {
+    free(text);
+    return asngn_seterr(c, ASNGN_ERR_PROTOCOL,
+                        "model classifier violated its output schema");
+  }
   free(text);
-  return ok;
+  return ASNGN_OK;
 }
 
 /* ── telemetry (kind "classify") ──────────────────────────────────────── */
@@ -914,6 +934,7 @@ asngn_err asngn_route_classify(asngn_ctx *c, asngn_session *s,
   asngn_route_profile heur, model;
   asngn_route_evidence ev;
   const char *source = "heuristic";
+  asngn_err e;
 
   if (c == NULL || s == NULL || t == NULL || out == NULL)
     return ASNGN_ERR_INVALID;
@@ -934,8 +955,10 @@ asngn_err asngn_route_classify(asngn_ctx *c, asngn_session *s,
        * heuristic as a quality/capability floor instead of allowing a noisy
        * router pass to turn a complex rich coding task into terse output. */
       model = heur;
-      if (route_model_pass(c, s, message, &ev, &heur, t, &model,
-                           aux_tokens)) {
+      e = route_model_pass(c, s, message, &ev, &heur, t, &model,
+                           aux_tokens);
+      if (e != ASNGN_OK) return e;
+      {
         out->klass = model.klass > heur.klass ? model.klass : heur.klass;
         out->detail =
             model.detail > heur.detail ? model.detail : heur.detail;
@@ -959,8 +982,10 @@ asngn_err asngn_route_classify(asngn_ctx *c, asngn_session *s,
        * model's vote unless the heuristic says RICH — i.e. the max of
        * the two in the order TERSE < NORMAL < RICH (the enum order). */
       model = heur;
-      if (route_model_pass(c, s, message, &ev, &heur, t, &model,
-                           aux_tokens)) {
+      e = route_model_pass(c, s, message, &ev, &heur, t, &model,
+                           aux_tokens);
+      if (e != ASNGN_OK) return e;
+      {
         out->klass = model.klass > heur.klass ? model.klass : heur.klass;
         out->task = route_merge_task(heur.task, model.task);
         out->toolmask = heur.toolmask | route_task_tools(heur.task) |

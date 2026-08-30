@@ -132,26 +132,18 @@ asngn_err asngn_models_init(asngn_ctx *c) {
     s->cfg.base_url = src->base_url ? asngn_strdup(src->base_url) : NULL;
     s->cfg.remote_model = src->remote_model ? asngn_strdup(src->remote_model) : NULL;
     s->cfg.api_key_env = src->api_key_env ? asngn_strdup(src->api_key_env) : NULL;
-    s->cfg.api_grammar = src->api_grammar ? asngn_strdup(src->api_grammar) : NULL;
-    s->cfg.reasoning_effort = src->reasoning_effort
-                                  ? asngn_strdup(src->reasoning_effort) : NULL;
     if ((src->path != NULL && s->cfg.path == NULL) ||
         (src->base_url && !s->cfg.base_url) ||
         (src->remote_model && !s->cfg.remote_model) ||
-        (src->api_key_env && !s->cfg.api_key_env) ||
-        (src->api_grammar && !s->cfg.api_grammar) ||
-        (src->reasoning_effort && !s->cfg.reasoning_effort)) {
+        (src->api_key_env && !s->cfg.api_key_env)) {
       size_t j;
       free(s->cfg.path); free(s->cfg.base_url); free(s->cfg.remote_model);
-      free(s->cfg.api_key_env); free(s->cfg.api_grammar);
-      free(s->cfg.reasoning_effort);
+      free(s->cfg.api_key_env);
       for (j = 0; j < i; j++) {
         free(c->models[j].cfg.path);
         free(c->models[j].cfg.base_url);
         free(c->models[j].cfg.remote_model);
         free(c->models[j].cfg.api_key_env);
-        free(c->models[j].cfg.api_grammar);
-        free(c->models[j].cfg.reasoning_effort);
         c->models[j].cfg.path = NULL;
         os_mutex_destroy(&c->models[j].mu);
       }
@@ -247,8 +239,6 @@ void asngn_models_shutdown(asngn_ctx *c) {
     free(s->cfg.base_url);
     free(s->cfg.remote_model);
     free(s->cfg.api_key_env);
-    free(s->cfg.api_grammar);
-    free(s->cfg.reasoning_effort);
     s->cfg.path = NULL;
   }
   c->models_n = 0;
@@ -438,6 +428,7 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
                                 const char *system_prompt,
                                 const char *user_prompt, const char *gbnf,
                                 int max_tokens_override,
+                                int64_t deadline_mono,
                                 asngn_token_fn token_cb, void *token_ud,
                                 volatile int *cancel,
                                 char **out_text, int *out_tokens_in,
@@ -449,6 +440,8 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   int ti = 0, to = 0;
   int64_t t0, t1, ms;
   asngn_err e;
+  asmodel_generation_info gi;
+  bool have_gi = false;
 
   if (out_text != NULL) *out_text = NULL;
   if (out_tokens_in != NULL) *out_tokens_in = 0;
@@ -464,6 +457,20 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   p.max_tokens = max_tokens_override > 0 ? max_tokens_override
                                          : sp->max_tokens;
   p.repeat_penalty = sp->repeat_penalty;
+  p.reasoning = (task == ASNGN_TASK_DECIDE ||
+                 task == ASNGN_TASK_CLASSIFY ||
+                 task == ASNGN_TASK_JUDGE)
+                    ? ASMODEL_REASONING_REQUIRED_OFF
+                    : ASMODEL_REASONING_DEFAULT;
+  p.reasoning_budget = 0;
+  p.require_constraint = gbnf != NULL;
+  p.deadline_ms = 0;
+
+  if (deadline_mono > 0 &&
+      asngn_clock_mono_ms(&c->clock) >= deadline_mono)
+    return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
+                        "model '%s' %s deadline expired before inference",
+                        s->cfg.id, asngn_task_name(task));
 
   /* Final gate for every call, including classifier, judge, compression
    * and cache adaptation calls that do not use the zoned assembler. */
@@ -495,9 +502,24 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   }
 
   t0 = asngn_clock_mono_ms(&c->clock);
+  if (deadline_mono > 0) {
+    p.deadline_ms = deadline_mono - t0;
+    if (p.deadline_ms <= 0) {
+      os_mutex_lock(&c->models_mu);
+      slot_set_in_use(c, slot, 0);
+      os_mutex_unlock(&c->models_mu);
+      return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
+                          "model '%s' %s deadline expired before inference",
+                          s->cfg.id, asngn_task_name(task));
+    }
+  }
   os_mutex_lock(&s->mu);
   e = s->iface.generate(s->iface.ud, system_prompt, user_prompt, gbnf, &p,
                         token_cb, token_ud, cancel, &text, &ti, &to);
+  memset(&gi, 0, sizeof gi);
+  if (s->iface.last_generation_info != NULL &&
+      s->iface.last_generation_info(s->iface.ud, &gi) == 0)
+    have_gi = true;
   os_mutex_unlock(&s->mu);
   t1 = asngn_clock_mono_ms(&c->clock);
 
@@ -513,12 +535,44 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
       if (detail != NULL && detail[0] != '\0')
         snprintf(backend_error, sizeof backend_error, "%s", detail);
     }
+    if (e == ASNGN_ERR_LIMIT) {
+      if (out_tokens_in != NULL) *out_tokens_in = ti;
+      if (out_tokens_out != NULL) *out_tokens_out = to;
+      if (out_text != NULL) *out_text = text;
+      else free(text);
+      if (backend_error[0] != '\0')
+        return asngn_seterr(c, ASNGN_ERR_LIMIT,
+                            "model '%s' %s reached output limit: %s",
+                            s->cfg.id, asngn_task_name(task), backend_error);
+      return asngn_seterr(c, ASNGN_ERR_LIMIT,
+                          "model '%s' %s reached output limit",
+                          s->cfg.id, asngn_task_name(task));
+    }
     free(text);
     if (e == ASNGN_ERR_CANCELLED) return e;
+    if (e == ASNGN_ERR_TIMEOUT) {
+      if (backend_error[0] != '\0')
+        return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
+                            "model '%s' %s deadline expired: %s",
+                            s->cfg.id, asngn_task_name(task), backend_error);
+      return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
+                          "model '%s' %s deadline expired",
+                          s->cfg.id, asngn_task_name(task));
+    }
     if (backend_error[0] != '\0')
-      return asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s' %s failed: %s",
+      return asngn_seterr(c,
+                          e == ASNGN_ERR_LIMIT ? ASNGN_ERR_LIMIT
+                          : e == ASNGN_ERR_UNSUPPORTED
+                              ? ASNGN_ERR_UNSUPPORTED
+                              : ASNGN_ERR_MODEL,
+                          "model '%s' %s failed: %s",
                           s->cfg.id, asngn_task_name(task), backend_error);
-    return asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s' %s failed (%s)",
+    return asngn_seterr(c,
+                        e == ASNGN_ERR_LIMIT ? ASNGN_ERR_LIMIT
+                        : e == ASNGN_ERR_UNSUPPORTED
+                            ? ASNGN_ERR_UNSUPPORTED
+                            : ASNGN_ERR_MODEL,
+                        "model '%s' %s failed (%s)",
                         s->cfg.id, asngn_task_name(task), asngn_err_name(e));
   }
 
@@ -526,10 +580,20 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   {
     char data[256];
     double tps = ms > 0 ? (double)to / ((double)ms / 1000.0) : 0.0;
-    snprintf(data, sizeof data,
-             "{model: \"%s\", task: \"%s\", tokens_in: %d, tokens_out: %d, "
-             "ms: %lld, tps: %.1f}",
-             s->cfg.id, asngn_task_name(task), ti, to, (long long)ms, tps);
+    if (have_gi) {
+      snprintf(data, sizeof data,
+               "{model: \"%s\", task: \"%s\", tokens_in: %d, "
+               "tokens_out: %d, reasoning_tokens: %d, cached_tokens: %d, "
+               "ms: %lld, tps: %.1f}",
+               s->cfg.id, asngn_task_name(task), ti, to,
+               gi.reasoning_tokens, gi.cached_input_tokens,
+               (long long)ms, tps);
+    } else {
+      snprintf(data, sizeof data,
+               "{model: \"%s\", task: \"%s\", tokens_in: %d, "
+               "tokens_out: %d, ms: %lld, tps: %.1f}",
+               s->cfg.id, asngn_task_name(task), ti, to, (long long)ms, tps);
+    }
     asngn_tele_emit(c, "model_call", NULL, NULL, NULL, 0, data);
   }
 

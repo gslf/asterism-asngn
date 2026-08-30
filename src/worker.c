@@ -4,9 +4,9 @@
  * The agent worker drains a FIFO of submitted turns and runs each one
  * through asngn_loop_run; llama.cpp calls block on this thread with the
  * stall watchdog and the cancellation flag cascading into the backend.
- * The background worker owns folding, cache sweeps, telemetry flushes,
- * and the stall watchdog tick; it borrows model instances only while the
- * agent worker is idle, so folding never delays a turn.
+ * The background worker owns cache sweeps, telemetry flushes, model warmup
+ * and the optional stall-watchdog tick. Asper owns memory curation on its
+ * own worker.
  *
  * ASNGN_NO_THREADS builds run turns synchronously on the caller and do
  * background work inside asngn_tick.
@@ -14,6 +14,7 @@
  * MIT License — per aspera ad astra.
  */
 
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -24,8 +25,24 @@
 static void task_finish(asngn_ctx *c, asngn_task *task, asngn_err verdict) {
   asngn_turn_state *t = task->turn;
   asngn_session *s = task->session;
+  char terminal[128];
 
-  (void)c;
+  /* A turn has exactly one terminal event, regardless of which phase
+   * returned.  Emitting it here (rather than only on the success/cancel
+   * paths in loop.c) also closes the TUI live-phase marker after model,
+   * context, protocol, and token-limit failures.  Publish it before the
+   * task condition variable: once task_wait observes completion, every
+   * consumer has already been told that the live phase ended. */
+  snprintf(terminal, sizeof terminal,
+           "{ok: %s, cancelled: %s, error: \"%s\"}",
+           verdict == ASNGN_OK ? "true" : "false",
+           verdict == ASNGN_ERR_CANCELLED ? "true" : "false",
+           verdict == ASNGN_OK ? "" : asngn_err_name(verdict));
+  asngn_tele_emit(c, "turn_end", t != NULL ? t->span_root : NULL, NULL,
+                  s != NULL ? s->slug : NULL,
+                  t != NULL ? t->led.turn : 0, terminal);
+  asngn_tele_flush(c);
+
   os_mutex_lock(&task->mu);
   task->verdict = verdict;
   memset(&task->result, 0, sizeof task->result);
@@ -72,19 +89,8 @@ static void task_run(asngn_ctx *c, asngn_task *task) {
 
 /* ── background maintenance ───────────────────────────────────────────── */
 
-static bool any_session_busy(asngn_ctx *c) {
-  size_t i;
-  bool busy = false;
-  os_rwlock_rdlock(&c->lock);
-  for (i = 0; i < c->sessions_n; i++)
-    if (c->sessions[i]->busy) busy = true;
-  os_rwlock_rdunlock(&c->lock);
-  return busy;
-}
-
 asngn_err asngn_run_due_work(asngn_ctx *c) {
   int64_t now = asngn_clock_mono_ms(&c->clock);
-  asngn_session *fs = NULL;
   bool warm;
 
   /* one-shot model preload queued by asngn_open */
@@ -93,79 +99,6 @@ asngn_err asngn_run_due_work(asngn_ctx *c) {
   c->bg_due_warm = false;
   os_mutex_unlock(&c->q_mu);
   if (warm) asngn_models_warm(c);
-
-  /* queued fold: only while the agent worker is idle. The pending
-   * pair is read under q_mu; the fold itself runs under a c->lock read
-   * hold so asngn_session_close (which deregisters under the write lock)
-   * cannot free the session mid-fold. */
-  os_mutex_lock(&c->q_mu);
-  if (c->bg_due_fold) fs = c->bg_fold_session;
-  os_mutex_unlock(&c->q_mu);
-  if (fs != NULL && !any_session_busy(c)) {
-    bool live = false, claimed = false;
-    size_t i;
-    os_rwlock_rdlock(&c->lock);
-    for (i = 0; i < c->sessions_n; i++)
-      if (c->sessions[i] == fs) live = true;
-    if (live) {
-      /* Claim the session the way a turn does: fold must never hold
-       * s->lock across the compressor call (minutes on CPU — the TUI
-       * thread would block inside asngn_submit for the duration), so
-       * exclusion is by s->busy and fold takes only short holds. */
-      os_rwlock_wrlock(&fs->lock);
-      if (!fs->busy) {
-        fs->busy = true;
-        fs->bg_folding = true;
-        claimed = true;
-      }
-      os_rwlock_wrunlock(&fs->lock);
-    }
-    if (claimed) {
-      size_t aux = 0;
-      bool yielded;
-      /* a stale yield from the last fold must not abort this one; a
-       * shutdown-raised flag stays raised */
-      os_mutex_lock(&c->q_mu);
-      if (!c->stop) c->bg_cancel = 0;
-      os_mutex_unlock(&c->q_mu);
-      if (asngn_fold_needed(c, fs)) {
-        asngn_err e = asngn_fold_run(c, fs, false, &aux);
-        if (e != ASNGN_OK)
-          asngn_log(c, ASNGN_LOG_WARN, "context", "%s: fold failed: %s",
-                    fs->slug, asngn_err_name(e));
-        else
-          c->stats.folds++;
-      }
-      yielded = c->bg_cancel != 0;
-      os_rwlock_wrlock(&fs->lock);
-      fs->busy = false;
-      fs->bg_folding = false;
-      os_rwlock_wrunlock(&fs->lock);
-      /* the fold's compress phases set the live "now" marker; nothing
-       * follows them, so clear it explicitly */
-      asngn_tele_emit(c, "phase", NULL, NULL, NULL, 0,
-                      "{what: \"idle\"}");
-      /* wake a submit_common parked on the fold */
-      os_mutex_lock(&c->q_mu);
-      os_cond_broadcast(&c->q_cv);
-      /* a yielded fold stays queued and resumes once the session is
-       * idle again; a completed one is done */
-      if (!yielded && c->bg_fold_session == fs) {
-        c->bg_due_fold = false;
-        c->bg_fold_session = NULL;
-      }
-      os_mutex_unlock(&c->q_mu);
-    }
-    os_rwlock_rdunlock(&c->lock);
-    if (!live) {
-      os_mutex_lock(&c->q_mu);
-      if (c->bg_fold_session == fs) {
-        c->bg_due_fold = false;
-        c->bg_fold_session = NULL;
-      }
-      os_mutex_unlock(&c->q_mu);
-    }
-  }
 
   /* daily cache sweep */
   if (c->last_sweep_ms == 0 || now - c->last_sweep_ms > 86400000) {
@@ -180,10 +113,8 @@ asngn_err asngn_run_due_work(asngn_ctx *c) {
   return ASNGN_OK;
 }
 
-/* Stall watchdog tick: abort the in-flight model call when no
- * token has been produced for stall_timeout (2x before the first token,
- * which also covers prompt evaluation). Threaded builds only: without
- * workers the model call and the watchdog would share one thread. */
+/* Optional stall watchdog plus cancellation relay. A zero stall timeout never
+ * aborts inference automatically; user cancellation is always relayed. */
 #ifndef ASNGN_NO_THREADS
 static void stall_tick(asngn_ctx *c) {
   int64_t now, last, started, limit, silence = 0;
@@ -196,12 +127,14 @@ static void stall_tick(asngn_ctx *c) {
     now = asngn_clock_mono_ms(&c->clock);
     last = c->call_last_ms;
     started = c->call_started_ms;
-    limit = c->cfg.stall_timeout_s * 1000;
-    if (last <= started) limit *= 2; /* still evaluating the prompt */
-    silence = now - (last > started ? last : started);
-    if (silence > limit) {
-      c->call_cancel = 1;
-      stalled = true;
+    if (c->cfg.stall_timeout_s > 0) {
+      limit = c->cfg.stall_timeout_s * 1000;
+      if (last <= started) limit *= 2; /* still evaluating the prompt */
+      silence = now - (last > started ? last : started);
+      if (silence > limit) {
+        c->call_cancel = 1;
+        stalled = true;
+      }
     }
     /* a cancelled turn also aborts its in-flight call */
     if (c->call_turn != NULL && c->call_turn->cancel) c->call_cancel = 1;
@@ -287,7 +220,7 @@ void asngn_workers_stop(asngn_ctx *c) {
 #else
   os_mutex_lock(&c->q_mu);
   c->stop = true;
-  c->bg_cancel = 1; /* abort an in-flight background fold compressor */
+  c->bg_cancel = 1; /* abort an in-flight model warmup */
   /* cancel anything still queued */
   for (task = c->q_head; task != NULL; task = task->next)
     if (task->turn != NULL) task->turn->cancel = 1;

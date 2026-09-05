@@ -9,6 +9,7 @@ typedef struct {
   asngn_model_iface iface;
   const char *id;
   bool borrowed;
+  bool estimated_tokens;
   asmodel_generation_info info;
 } backend;
 typedef struct { asmodel_token_fn fn; void *ud; } token_bridge;
@@ -89,17 +90,37 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
   if (gen) *gen = to;
   return model_error(saved == ASNGN_OK ? e : saved);
 }
-static int embed(void *ud, const char *text, int is_query, float *out) {
+static int embed(void *ud, const char *const *texts, size_t count, int is_query,
+                 const asmodel_embed_params *params, float *out) {
   backend *b = ud;
   asngn_operation op;
-  int n = b->iface.count_tokens ? b->iface.count_tokens(b->iface.ud, text) : asngn_token_heuristic(text);
-  if (n < 0) n = asngn_token_heuristic(text);
-  asngn_err e = asngn_operation_begin(b->ctx, b->id, is_query ? "embed-query" : "embed-document", n, &op);
+  asmodel_embedding_info local = {0};
+  asmodel_embed_params request = *params;
+  asmodel_embedding_info *info = request.result_info ? request.result_info : &local;
+  request.result_info = info;
+  memset(info,0,sizeof *info); info->usage_known = 1;
+  int64_t reserve = 0, started = asngn_clock_mono_ms(&b->ctx->clock);
+  for (size_t i = 0; i < count; i++) {
+    int n = b->iface.count_tokens ? b->iface.count_tokens(b->iface.ud,texts[i]) : -1;
+    /* A byte estimate plus overhead is conservative, not a calibrated bound. */
+    if (n < 0 || b->estimated_tokens) {
+      size_t bytes = strlen(texts[i]);
+      n = bytes > INT32_MAX-16 ? INT32_MAX : (int)bytes+16;
+    }
+    reserve += n;
+  }
+  asngn_err e = asngn_operation_begin(b->ctx,b->id,is_query ? "embed-query" : "embed-document",reserve,&op);
   if (e != ASNGN_OK) return model_error(e);
-  e = b->iface.embed(b->iface.ud, text, is_query, out);
-  asngn_err saved = asngn_operation_end(b->ctx, &op, n, 0, false, e);
+  bool invoked = false;
+  if (request.cancel && *request.cancel) e = ASNGN_ERR_CANCELLED;
+  else if (request.deadline_ms > 0 &&
+      (request.deadline_ms -= asngn_clock_mono_ms(&b->ctx->clock)-started) <= 0) e = ASNGN_ERR_TIMEOUT;
+  else { invoked = true; e = b->iface.embed(b->iface.ud,texts,count,is_query,&request,out); }
+  if (!invoked) { memset(info,0,sizeof *info); info->usage_known = 1; }
+  asngn_err saved = asngn_operation_end(b->ctx,&op,info->input_tokens,0,info->usage_known != 0,e);
   return model_error(saved == ASNGN_OK ? e : saved);
 }
+
 static int count(void *ud, const char *text) {
   backend *b = ud;
   return b->iface.count_tokens ? b->iface.count_tokens(b->iface.ud, text) : -1;
@@ -128,6 +149,7 @@ static int loader(void *ud, const asmodel_spec *spec, asmodel_provider *out,
   if (!b) return ASMODEL_ERR_NOMEM;
   b->ctx = c; b->id = c->models[slot].cfg.id;
   b->borrowed = c->models[slot].injected;
+  b->estimated_tokens = spec->backend == ASMODEL_BACKEND_OPENAI;
   if (b->borrowed) b->iface = c->models[slot].iface;
   else e = spec->backend == ASMODEL_BACKEND_OPENAI ?
       asngn_model_openai_create(c, &c->models[slot].cfg, &b->iface) :
@@ -159,11 +181,35 @@ asngn_err asngn_shared_models_init(asngn_ctx *c) {
     s.remote_model=p->remote_model; s.api_key_env=p->api_key_env;
     s.remote_provider=p->remote_provider; s.context_tokens=p->ctx;
     s.threads=p->threads; s.gpu_layers=p->gpu_layers; s.embedding=p->embedding;
+    s.pipeline = p->pipeline;
+    if (p->embedding && p->backend == ASMODEL_BACKEND_EMBEDDED) {
+      uint8_t hash[32];
+      if (c->models[i].injected) memset(hash,0x11,sizeof hash);
+      else if (asngn_sha256_file(p->path,hash) != ASNGN_OK) memset(hash,0,sizeof hash);
+      uint8_t zero[32] = {0};
+      if (memcmp(hash,zero,sizeof hash)) {
+        asngn_sha256_hex(hash,32,s.pipeline.revision);
+        strcpy(s.pipeline.tokenizer,s.pipeline.revision);
+      } else { s.pipeline.revision[0] = 0; s.pipeline.tokenizer[0] = 0; }
+      strcpy(s.pipeline.pooling,c->models[i].injected ? "fake-bow-v1" : "llama-mean-v1");
+    }
     s.embedding_dim=p->dim; s.kv_cache=p->kv_cache; s.warm=p->warm;
     s.ram_mb=c->models[i].injected ? 0 : p->ram_mb;
     s.vram_mb=c->models[i].injected ? 0 : p->vram_mb;
     e = asmodel_manager_register(c->shared_models, &s);
     if (e != ASMODEL_OK) return asngn_from_model_error(e);
+  }
+  int slot = c->role_slot[ASNGN_ROLE_EMBEDDER];
+  if (slot >= 0) {
+    char *key = NULL;
+    asmodel_err key_error = asmodel_manager_embedding_key(c->shared_models,c->models[slot].cfg.id,&key);
+    if (key_error == ASMODEL_OK) asngn_sha256(key,strlen(key),c->embedding_hash);
+    else if (key_error == ASMODEL_ERR_UNSUPPORTED) {
+      char nonce[37]; asngn_uuid_v4(nonce);
+      asngn_sha256(nonce,strlen(nonce),c->embedding_hash);
+      asngn_log(c,ASNGN_LOG_WARN,"model","embedding pipeline revision is unknown; persistent vectors will be rebuilt on restart");
+    } else return asngn_from_model_error(key_error);
+    free(key);
   }
   return ASNGN_OK;
 }

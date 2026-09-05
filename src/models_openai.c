@@ -44,11 +44,11 @@ static asngn_err remote_generate(void *ud, const char *sys, const char *user,
   return ASNGN_ERR_MODEL;
 }
 
-static asngn_err remote_embed(void *ud, const char *text, int is_query, float *out) {
-  openai_ud *u = (openai_ud *)ud;
-  return u->provider.embed &&
-                 u->provider.embed(u->provider.userdata, text, is_query, out) == 0
-             ? ASNGN_OK : ASNGN_ERR_MODEL;
+static asngn_err remote_embed(void *ud, const char *const *texts, size_t count,
+                               int is_query, const asmodel_embed_params *params, float *out) {
+  openai_ud *u = ud;
+  return u->provider.embed ? asngn_from_model_error((asmodel_err)
+      u->provider.embed(u->provider.userdata,texts,count,is_query,params,out)) : ASNGN_ERR_UNSUPPORTED;
 }
 
 static int remote_count(void *ud, const char *text) {

@@ -12,7 +12,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, I/O fault tests | Incremental snapshots, durable approval recovery, compaction/migration, cross-process workspace coordination |
-| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas and remaining deadlines | Role/block message IR, native sequence batching, embedding pipeline identity/batch/deadline, real provider conformance |
+| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Role/block message IR, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store | Inverted text index, granular support/contradiction/revocation, dependency validity, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results | Durable resume, approvals, persistent processes, policy-consistent discovery, platform enforcement matrix, fuzzing/TSan |
@@ -43,7 +43,7 @@ trials require actual resources. No real-model result has been produced here.
   the current embedded wrapper serializes requests to one backend instance.
   This is shared residency, not native multi-sequence decoding. The former
   duplicate engine LRU/load machinery was removed.
-- Output contracts now travel explicitly through asmodel ABI 4. The remote
+- Output contracts now travel explicitly through asmodel ABI 5. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
   GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns
   its curation/review/recall schema and exact output wrapper. Astools exports typed
@@ -51,6 +51,13 @@ trials require actual resources. No real-model result has been produced here.
   JSON output metadata survives both shared-runtime adapters. Metadata strings
   preserve quotes/Unicode and reject oversized values instead of truncating intent.
   This completes the output-contract slice, not the multimodal/message IR.
+- Embedding batches retain valid leading rows, explicit consumption and cancellation/
+  timeout errors. The shared manager owns query/document prefixes for both hosts.
+  Canonical cache keys include revision, tokenizer, pooling, dimension, context
+  and preprocessing; unknown remote revisions invalidate persisted vectors on
+  restart. Native inputs are rejected when too long, never silently truncated.
+  Retrieval embeds up to 32 active/lexically relevant candidates in one batch.
+  This selection remains an uncalibrated policy, with lexical fallback on failure.
 - Remote token counting is explicitly estimated. Exact status requires a
   successful template-aware count and tokenizer/template identities. The current
   fallback admission margin is conservative but uncalibrated. Per-request
@@ -92,13 +99,19 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
+- Native CPU build against the pinned llama.cpp submodule compiles the actual
+  adapters and passes 32/32 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 32/32 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 32/32 passed.
-- Standalone Asper: 22/22; astools: 24/24; asmodel: 4/4.
+- Standalone Asper: 22/22; astools: 24/24; asmodel: 5/5.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
-  all four executables with ASan/UBSan/LeakSanitizer.
+  all five executables with ASan/UBSan/LeakSanitizer.
+- Embedding regressions cover reordered remote batches, queue expiry, cancellation,
+  partial results, invalid vectors, immutable pipeline fields and identity changes.
+  A shared-host test proves that Asper and Asngn use the host prefixes exactly once;
+  a 48-file retrieval fixture admits an active file and a late lexical candidate.
 - Explicit-schema mock tests pass without recognized grammar text; unsupported
   constraints and requests exceeding schema-inclusive admission fail before HTTP.
 - An integrated JSON-provider fixture crosses the shared manager, decodes a real

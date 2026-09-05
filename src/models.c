@@ -110,33 +110,6 @@ asngn_err asngn_models_init(asngn_ctx *c) {
     return ASNGN_OK;
   }
 
-  /* Embedder weights hash, computed once. Injected fakes hash to
-   * 32 bytes of 0x11 (the test-fake convention); a missing or unreadable
-   * file leaves zeroes. */
-  {
-    int es = c->role_slot[ASNGN_ROLE_EMBEDDER];
-    if (es >= 0) {
-      asngn_model_slot *s = &c->models[es];
-      if (s->injected) {
-        memset(c->embedding_hash, 0x11, sizeof c->embedding_hash);
-      } else if (s->cfg.backend == ASMODEL_BACKEND_OPENAI) {
-        asngn_sha256_ctx sh;
-        asngn_sha256_init(&sh);
-        if (s->cfg.base_url)
-          asngn_sha256_update(&sh, s->cfg.base_url, strlen(s->cfg.base_url));
-        if (s->cfg.remote_model)
-          asngn_sha256_update(&sh, s->cfg.remote_model,
-                              strlen(s->cfg.remote_model));
-        asngn_sha256_final(&sh, c->embedding_hash);
-      } else if (s->cfg.path != NULL && s->cfg.path[0] != '\0') {
-        if (asngn_sha256_file(s->cfg.path, c->embedding_hash) != ASNGN_OK) {
-          memset(c->embedding_hash, 0, sizeof c->embedding_hash);
-          asngn_log(c, ASNGN_LOG_WARN, "model",
-                    "cannot hash embedder weights '%s'", s->cfg.path);
-        }
-      }
-    }
-  }
   return ASNGN_OK;
 }
 
@@ -246,14 +219,28 @@ int asngn_models_count_prompt(asngn_ctx *c, int slot, const char *sys, const cha
 
 /* ---- embedding ---------------------------------------------------------- */
 
-asngn_err asngn_models_embed_kind(asngn_ctx *c, const char *text, int is_query, float *out) {
+asngn_err asngn_models_embed_many(asngn_ctx *c, const char *const *texts, size_t count,
+    int is_query, float *out, asmodel_embedding_info *info) {
   if (!c || !out) return ASNGN_ERR_INVALID;
   int slot=c->role_slot[ASNGN_ROLE_EMBEDDER];
   if (slot<0 || (size_t)slot>=c->models_n) return ASNGN_ERR_MODEL;
-  return asngn_from_model_error(asmodel_embed(c->shared_models,c->models[slot].cfg.id,text,is_query,out));
+  asmodel_embed_params params = {.result_info = info};
+  if (info) memset(info,0,sizeof *info);
+  if (!count || c->models[slot].cfg.dim <= 0 ||
+      (size_t)c->models[slot].cfg.dim > SIZE_MAX/count/sizeof(float)) return ASNGN_ERR_INVALID;
+  asngn_turn_state *turn = c->active_task ? c->active_task->turn : NULL;
+  if (turn) {
+    params.cancel = &turn->cancel;
+    if (turn->deadline_mono > 0) {
+      params.deadline_ms = turn->deadline_mono-asngn_clock_mono_ms(&c->clock);
+      if (params.deadline_ms <= 0) return ASNGN_ERR_TIMEOUT;
+    }
+  }
+  return asngn_from_model_error(asmodel_embed(c->shared_models,c->models[slot].cfg.id,
+      texts,count,is_query,&params,out,count*(size_t)c->models[slot].cfg.dim));
 }
 asngn_err asngn_models_embed(asngn_ctx *c, const char *text, float *out) {
-  return asngn_models_embed_kind(c,text,1,out);
+  return asngn_models_embed_many(c,&text,1,1,out,NULL);
 }
 
 int asngn_models_embed_dim(asngn_ctx *c) {

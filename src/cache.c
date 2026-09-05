@@ -503,6 +503,7 @@ void asngn_cache_shutdown(asngn_ctx *c) {
 
 asngn_err asngn_cache_probe(asngn_ctx *c, asngn_session *s, const char *query,
                             double adapt_bias, asngn_cache_probe_result *out) {
+  asngn_ctx *runtime = c;
   if (c->owner) c=c->owner;
   int dim;
   float *vec;
@@ -535,7 +536,7 @@ asngn_err asngn_cache_probe(asngn_ctx *c, asngn_session *s, const char *query,
   if (vec == NULL)
     return asngn_seterr(c, ASNGN_ERR_NOMEM,
                         "cache: out of memory embedding query");
-  e = asngn_models_embed(c, query, vec);
+  e = asngn_models_embed(runtime, query, vec);
   if (e != ASNGN_OK) {
     free(vec);
     asngn_log(c, ASNGN_LOG_WARN, "cache",
@@ -556,7 +557,7 @@ asngn_err asngn_cache_probe(asngn_ctx *c, asngn_session *s, const char *query,
     if (ent->vec == NULL) { /* lazy re-embed (vectors are derived data) */
       float *ev = malloc((size_t)dim * sizeof *ev);
       if (ev == NULL) continue;
-      if (asngn_models_embed(c, ent->query, ev) != ASNGN_OK) {
+      if (asngn_models_embed(runtime, ent->query, ev) != ASNGN_OK) {
         free(ev);
         continue;
       }

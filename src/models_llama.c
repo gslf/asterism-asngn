@@ -542,7 +542,7 @@ static int mll_count_prompt_tokens(void *ud, const char *system_prompt,
 
 /* ---- embedding ---------------------------------------------------------- */
 
-static asngn_err mll_embed(void *ud, const char *text, int is_query, float *out) {
+static asngn_err mll_embed_one(void *ud, const char *text, int is_query, asmodel_embedding_info *info, float *out) {
   mll_ud *u = (mll_ud *)ud;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
@@ -573,6 +573,7 @@ static asngn_err mll_embed(void *ud, const char *text, int is_query, float *out)
   /* llama_batch_get_one: seq 0, auto positions; with embeddings enabled
    * every token is an output, which mean pooling requires. */
   {
+    info->usage_known = 0;
     struct llama_batch batch = llama_batch_get_one(tok, n_tok);
     rc = u->encoder_only ? asngn_llg_encode(u->lctx, batch)
                          : asngn_llg_decode(u->lctx, batch);
@@ -580,18 +581,48 @@ static asngn_err mll_embed(void *ud, const char *text, int is_query, float *out)
   free(tok);
   if (rc != 0) return ASNGN_ERR_MODEL;
 
+  info->input_tokens = n_tok; info->usage_known = 1;
   emb = llama_get_embeddings_seq(u->lctx, 0);
   if (emb == NULL) return ASNGN_ERR_MODEL;
 
   norm = 0.0;
   for (i = 0; i < u->dim; i++) norm += (double)emb[i] * (double)emb[i];
   norm = sqrt(norm);
-  if (norm > 0.0) {
+  if (norm > 0.0 && isfinite(norm)) {
     for (i = 0; i < u->dim; i++) out[i] = (float)((double)emb[i] / norm);
   } else {
-    for (i = 0; i < u->dim; i++) out[i] = 0.0f;
+    return ASNGN_ERR_MODEL;
   }
   return ASNGN_OK;
+}
+
+/* One context evaluates batch rows sequentially; ggml observes the same
+ * cancellation/deadline contract as generation. Completed rows remain usable. */
+static asngn_err mll_embed(void *ud, const char *const *texts, size_t count,
+                           int is_query, const asmodel_embed_params *params, float *out) {
+  mll_ud *u = ud;
+  int64_t now = os_monotonic_ms();
+  int64_t deadline = params->deadline_ms > 0 ?
+      (params->deadline_ms > INT64_MAX-now ? INT64_MAX : now+params->deadline_ms) : 0;
+  asngn_err e = ASNGN_OK;
+  asmodel_embedding_info total = {0}; total.usage_known = 1;
+  mll_set_cancel(u,params->cancel,deadline);
+  for (size_t i = 0; i < count; i++) {
+    if (mll_cancelled(params->cancel)) { e = ASNGN_ERR_CANCELLED; break; }
+    if (mll_expired(deadline)) { e = ASNGN_ERR_TIMEOUT; break; }
+    asmodel_embedding_info row = {0}; row.usage_known = 1;
+    e = mll_embed_one(u,texts[i],is_query,&row,out+i*(size_t)u->dim);
+    total.usage_known = total.usage_known && row.usage_known;
+    if (row.input_tokens > INT32_MAX-total.input_tokens) total.usage_known = 0;
+    else total.input_tokens += row.input_tokens;
+    if (e != ASNGN_OK) break;
+    total.completed++;
+  }
+  if (mll_cancelled(params->cancel)) e = ASNGN_ERR_CANCELLED;
+  else if (mll_expired(deadline)) e = ASNGN_ERR_TIMEOUT;
+  if (params->result_info) *params->result_info = total;
+  mll_set_cancel(u,NULL,0);
+  return e;
 }
 
 /* ---- lifecycle ---------------------------------------------------------- */

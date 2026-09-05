@@ -49,6 +49,9 @@ typedef struct {
   int json_output;    /* test provider returns caller-owned JSON values */
   int had_schema;
   char *last_schema;
+  size_t embedding_batch_n;
+  int embedding_batches;
+  char embedded_documents[32][128];
   int calls;          /* generate() invocations                 */
   int max_tokens_seen[32]; /* generation cap for each call       */
   asmodel_reasoning_mode reasoning_seen[32];

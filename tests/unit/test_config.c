@@ -139,7 +139,8 @@ TEST(overlay_overrides) {
     "    pool: [\n"
     "      { id: \"big\", path: \"models/big.gguf\", ctx: 8192, threads: 8 },\n"
     "      { id: \"vec\", path: \"models/vec.gguf\", embedding: true,"
-    " dim: 128 },\n"
+    " dim: 128, query_prefix: \"q: \", document_prefix: \"d: \","
+    " revision: \"weights-2\", tokenizer: \"tok-1\", pooling: \"mean\" },\n"
     "    ],\n"
     "    sampling: { draft: { max_tokens: 12000 }, answer: { temp: 0.7 },"
     " decide: { repeat_penalty: 1.3 } },\n"
@@ -176,6 +177,11 @@ TEST(overlay_overrides) {
   ASSERT_TRUE(cfg.pool[1].embedding);
   ASSERT_EQ_INT(cfg.pool[1].ctx, 512);              /* implicit embed ctx */
   ASSERT_EQ_INT(cfg.pool[1].dim, 128);
+  ASSERT_EQ_STR(cfg.pool[1].pipeline.query_prefix,"q: ");
+  ASSERT_EQ_STR(cfg.pool[1].pipeline.document_prefix,"d: ");
+  ASSERT_EQ_STR(cfg.pool[1].pipeline.revision,"weights-2");
+  ASSERT_EQ_STR(cfg.pool[1].pipeline.tokenizer,"tok-1");
+  ASSERT_EQ_STR(cfg.pool[1].pipeline.pooling,"mean");
   ASSERT_EQ_DBL(cfg.s_answer.temp, 0.7, 1e-9);
   ASSERT_EQ_INT(cfg.s_draft.max_tokens, 12000);
   ASSERT_EQ_DBL(cfg.s_answer.top_p, 0.9, 1e-9);     /* untouched        */

@@ -232,6 +232,7 @@ typedef struct {
   int   threads;
   bool  embedding;
   int   dim;
+  asmodel_embedding_pipeline pipeline;
   int   gpu_layers; /* layers offloaded to VRAM; -1 = all (default), 0 =
                        CPU only. No-op in CPU-only llama builds. */
   size_t ram_mb, vram_mb;
@@ -369,7 +370,8 @@ typedef struct asngn_model_iface {
    * backends, where the engine uses a conservative fallback. */
   int  (*count_prompt_tokens)(void *ud, const char *system_prompt,
                               const char *user_prompt);
-  asngn_err (*embed)(void *ud, const char *text, int is_query, float *out); /* dim floats,
+  asngn_err (*embed)(void *ud, const char *const *texts, size_t count, int is_query,
+                       const asmodel_embed_params *params, float *out); /* count * dim floats,
                          L2-normalized; only on embedding models */
   const char *(*last_error)(void *ud); /* optional backend diagnostic */
   int (*last_generation_info)(void *ud, asmodel_generation_info *out);
@@ -406,7 +408,8 @@ int       asngn_models_slot_for_id(asngn_ctx *c, const char *id);
  * mutex, applies sampling defaults for `task` overlaid with cfg.sampling,
  * emits a model_call telemetry event, and accounts tokens. */
 asngn_err asngn_from_model_error(asmodel_err e);
-asngn_err asngn_models_embed_kind(asngn_ctx *c, const char *text, int is_query, float *out);
+asngn_err asngn_models_embed_many(asngn_ctx *c, const char *const *texts, size_t count,
+    int is_query, float *out, asmodel_embedding_info *info);
 asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
                                 const char *system_prompt,
                                 const char *user_prompt, const char *gbnf, const char *schema,

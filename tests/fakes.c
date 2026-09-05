@@ -167,10 +167,28 @@ static int fake_model_count_prompt_tokens(void *ud, const char *system_text,
   return fake_count(system_text) + fake_count(user_text) + 8;
 }
 
-static asngn_err fake_model_embed(void *ud, const char *text, int is_query, float *out) {
+static asngn_err fake_model_embed_one(void *ud, const char *text, int is_query, float *out) {
   (void)ud; (void)is_query;
   if (!text || !out) return ASNGN_ERR_INVALID;
   fake_embed_text(text, out);
+  return ASNGN_OK;
+}
+
+static asngn_err fake_model_embed(void *ud, const char *const *texts, size_t count,
+                                  int is_query, const asmodel_embed_params *params, float *out) {
+  fake_model *fm = ud;
+  if (!is_query) {
+    fm->embedding_batches++; fm->embedding_batch_n = count;
+    for (size_t i = 0; i < count && i < 32; i++)
+      snprintf(fm->embedded_documents[i],128,"%s",texts[i]);
+  }
+  if (params->result_info) memset(params->result_info,0,sizeof *params->result_info);
+  for (size_t i = 0; i < count; i++) {
+    if (params->cancel && *params->cancel) return ASNGN_ERR_CANCELLED;
+    asngn_err e = fake_model_embed_one(ud,texts[i],is_query,out+i*16);
+    if (e != ASNGN_OK) return e;
+    if (params->result_info) params->result_info->completed++;
+  }
   return ASNGN_OK;
 }
 

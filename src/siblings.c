@@ -158,7 +158,6 @@ static asngn_err sib_open_asper(asngn_ctx *c) {
         models.embedding_model_id = c->models[embed_slot].cfg.id;
         models.embedding_dim = c->models[embed_slot].cfg.dim;
       }
-      asngn_models_embed_hash(c, models.embedding_model_hash);
     }
     /* Asper's relative model paths (the shared weights files) resolve
      * under the engine root, exactly like asngn's own pool paths. */
@@ -566,6 +565,9 @@ static asngn_err sib_asper_err(asngn_ctx *c, asper_err e,
     case ASPER_OK: return ASNGN_OK;
     case ASPER_ERR_NOT_FOUND: mapped = ASNGN_ERR_NOT_FOUND; break;
     case ASPER_ERR_NOMEM: mapped = ASNGN_ERR_NOMEM; break;
+    case ASPER_ERR_TIMEOUT: mapped = ASNGN_ERR_TIMEOUT; break;
+    case ASPER_ERR_CANCELLED: mapped = ASNGN_ERR_CANCELLED; break;
+    case ASPER_ERR_LIMIT: mapped = ASNGN_ERR_LIMIT; break;
     case ASPER_ERR_BUSY: mapped = ASNGN_ERR_BUSY; break;
     case ASPER_ERR_INVALID: mapped = ASNGN_ERR_INVALID; break;
     default: mapped = ASNGN_ERR_SIBLING; break;

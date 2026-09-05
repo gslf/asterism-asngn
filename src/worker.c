@@ -88,7 +88,9 @@ static void task_finish(asngn_ctx *c, asngn_task *task, asngn_err verdict) {
 
 #ifdef ASNGN_NO_THREADS
 static void task_run(asngn_ctx *c, asngn_task *task) {
+  c->active_task = task;
   asngn_err e = asngn_loop_run(c, task->turn);
+  c->active_task = NULL;
   task_finish(c, task, e);
 }
 

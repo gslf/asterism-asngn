@@ -31,6 +31,10 @@ def verify(root, manifest, allow_engine_dirty=False):
         entry = git(path, 'ls-tree', 'HEAD', 'deps/xcdn-c').split()
         if len(entry) < 3 or entry[2] != manifest['xcdn_revision']:
             raise ValueError(f'{component}: xCDN gitlink differs from the shared pin')
+    llama = git(root / 'asterism-asper', 'ls-tree', 'HEAD', 'deps/llama.cpp').split()
+    if len(llama) < 3 or llama[2] != manifest['llama_revision']:
+        raise ValueError('asper: llama.cpp gitlink differs from the release pin')
+    resolved['llama_revision'] = manifest['llama_revision']
     resolved['xcdn_revision'] = manifest['xcdn_revision']
     return resolved
 

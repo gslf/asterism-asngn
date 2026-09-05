@@ -12,6 +12,7 @@
 
 #include "asngn_internal.h"
 #include "fakes.h"
+#include "asper.h"
 
 /* ── shared fixture ───────────────────────────────────────────────────── */
 
@@ -555,6 +556,54 @@ TEST(contextual_code_retrieval_refreshes_evidence) {
 }
 
 
+TEST(code_embeddings_prioritize_candidates_in_one_batch) {
+  fx f; asngn_session *session = NULL; asngn_turn_state t;
+  ASSERT_TRUE(fx_setup(&f,NULL)); ASSERT_OK(asngn_session_open(f.c,"batch",&session));
+  for (int i = 0; i < 48; i++) {
+    char name[32], body[128]; snprintf(name,sizeof name,"file%02d.c",i);
+    snprintf(body,sizeof body,"int routine_%d(void) { return %s; }\n",i,
+             i == 47 ? "NEEDLE_LATE_CANDIDATE" : i == 46 ? "ACTIVE_EVIDENCE" : "UNRELATED");
+    char *path = os_path_join(session->workspace.canonical_root,name);
+    ASSERT_TRUE(path != NULL); ASSERT_OK(os_write_file(path,body,strlen(body))); free(path);
+  }
+  ASSERT_OK(asngn_session_retrieval_context(session,"file46.c","NEEDLE_LATE_CANDIDATE"));
+  memset(&t,0,sizeof t); t.s = session; t.user_msg = asngn_strdup("NEEDLE_LATE_CANDIDATE");
+  ASSERT_OK(asngn_retrieval_query(session,&t,&t.retrieval_query));
+  int before = f.embed.embedding_batches;
+  ASSERT_OK(asngn_code_retrieve(f.c,&t));
+  ASSERT_EQ_INT(f.embed.embedding_batches,before+1);
+  ASSERT_EQ_INT(f.embed.embedding_batch_n,32);
+  ASSERT_TRUE(strstr(f.embed.embedded_documents[0],"ACTIVE_EVIDENCE") != NULL);
+  bool found = false;
+  for (size_t i = 0; i < f.embed.embedding_batch_n; i++)
+    if (strstr(f.embed.embedded_documents[i],"NEEDLE_LATE_CANDIDATE")) found = true;
+  ASSERT_TRUE(found); ASSERT_TRUE(strstr(t.work[0].text,"file47.c:1") != NULL);
+  asngn_turn_state_free(&t); asngn_session_close(session); fx_drop(&f);
+}
+
+
+TEST(shared_embedding_pipeline_is_authoritative) {
+  fx f; ASSERT_TRUE(fx_setup(&f,NULL));
+  asngn_close(f.c); f.c = NULL;
+  const char *cfg = "#asngn_config { integration: { asper: { enable: true, root: \"memory\" }, astools: { enable: false } }, "
+      "models: { pool: [ { id: \"nano\", path: \"none.gguf\" }, { id: \"light\", path: \"none.gguf\" }, "
+      "{ id: \"std\", path: \"none.gguf\" }, { id: \"embed\", path: \"none.gguf\", embedding: true, dim: 16, "
+      "query_prefix: \"host-query: \", document_prefix: \"host-document: \" } ] } }";
+  ASSERT_OK(os_write_file(f.cfg,cfg,strlen(cfg))); ASSERT_TRUE(fx_open_ctx(&f));
+  ASSERT_TRUE(f.c->asper != NULL);
+  float actual[16], expected[16];
+  ASSERT_OK(asngn_models_embed(f.c,"pipeline",actual)); fake_embed_text("host-query: pipeline",expected);
+  for (int i = 0; i < 16; i++) ASSERT_EQ_DBL(actual[i],expected[i],1e-6);
+  char id[37];
+  ASSERT_EQ_INT(asper_memory_insert(f.c->asper,ASPER_SECTION_CONTEXT,NULL,"pipeline memory",0,id),ASPER_OK);
+  ASSERT_EQ_STR(f.embed.embedded_documents[0],"host-document: pipeline memory");
+  uint8_t before[32], after[32]; asngn_models_embed_hash(f.c,before);
+  asngn_close(f.c); f.c = NULL; ASSERT_TRUE(fx_open_ctx(&f));
+  asngn_models_embed_hash(f.c,after); ASSERT_TRUE(!memcmp(before,after,32));
+  fx_drop(&f);
+}
+
+
 static int fail_projection(void *ud,const char *point) {
   (void)ud;return !strcmp(point,"project_ledger");
 }
@@ -582,6 +631,8 @@ TEST(uncertain_commit_blocks_until_reopen) {
 TEST_LIST = {
   TEST_ENTRY(uncertain_commit_blocks_until_reopen),
   TEST_ENTRY(contextual_code_retrieval_refreshes_evidence),
+  TEST_ENTRY(code_embeddings_prioritize_candidates_in_one_batch),
+  TEST_ENTRY(shared_embedding_pipeline_is_authoritative),
 #if !defined(_WIN32)
   TEST_ENTRY(turn_journal_crash_recovery),
 #endif

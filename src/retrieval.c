@@ -190,6 +190,39 @@ asngn_err asngn_retrieval_query(asngn_session *s, asngn_turn_state *t,
   asngn_buf_free(&q);
   return e;
 }
+/* Spend embedding work on the active file and lexical shortlist first.
+ * Remaining slots advance the corpus incrementally; this policy must be measured
+ * separately from the final hybrid ranker. A batch uses one operation receipt. */
+static void embed_candidates(asngn_ctx *c, asngn_turn_state *t, code_index *ix,
+                             asper_search_document *docs) {
+  size_t selected[32], count = 0, ranked_n = 0;
+  const char *texts[32];
+  asper_search_hit ranked[64];
+  if (ix->dim <= 0 || stopped(c,t)) return;
+  for (size_t i = 0; t->s->active_file && i < ix->n && count < 8; i++)
+    if (!ix->v[i].vec && !strcmp(ix->v[i].path,t->s->active_file)) selected[count++] = i;
+  (void)asper_hybrid_search(docs,ix->n,t->retrieval_query,NULL,0,64,ranked,&ranked_n);
+  for (size_t k = 0; k < ranked_n+ix->n && count < 32; k++) {
+    size_t i = k < ranked_n ? ranked[k].index : k-ranked_n;
+    bool have = ix->v[i].vec != NULL;
+    for (size_t j = 0; j < count; j++) if (selected[j] == i) have = true;
+    if (!have) selected[count++] = i;
+  }
+  if (!count || (size_t)ix->dim > SIZE_MAX/count/sizeof(float)) return;
+  for (size_t i = 0; i < count; i++) texts[i] = ix->v[selected[i]].text;
+  float *vectors = calloc(count*(size_t)ix->dim,sizeof *vectors);
+  if (!vectors) return;
+  asmodel_embedding_info info = {0};
+  (void)asngn_models_embed_many(c,texts,count,0,vectors,&info);
+  for (size_t i = 0; i < info.completed && i < count; i++) {
+    chunk *v = &ix->v[selected[i]];
+    v->vec = malloc((size_t)ix->dim*sizeof *v->vec);
+    if (v->vec) memcpy(v->vec,vectors+i*(size_t)ix->dim,(size_t)ix->dim*sizeof *v->vec);
+    docs[selected[i]].vector = v->vec;
+  }
+  free(vectors);
+}
+
 asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
   code_index *old = t->s->code_index, *ix = calloc(1, sizeof *ix);
   asper_search_document *docs = NULL;
@@ -231,22 +264,14 @@ asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
       qv = NULL;
     }
   }
-  size_t embedded = 0;
   for (size_t i = 0; i < ix->n; i++) {
     chunk *v = &ix->v[i];
-    if (qv && !v->vec && embedded < 32 && !stopped(c, t)) {
-      v->vec = calloc((size_t)ix->dim, sizeof *v->vec);
-      embedded++;
-      if (v->vec && asngn_models_embed_kind(c, v->text, 0, v->vec) != ASNGN_OK) {
-        free(v->vec);
-        v->vec = NULL;
-      }
-    }
     docs[i].path = v->path;
     docs[i].text = v->text;
     docs[i].symbols = NULL; /* Lexical text is not a semantic symbol index. */
     docs[i].vector = v->vec;
   }
+  if (qv) embed_candidates(c,t,ix,docs);
   if (asper_hybrid_search(docs, ix->n, t->retrieval_query, qv,
                           (size_t)(ix->dim > 0 ? ix->dim : 0), 24, hits,
                           &hn) != ASPER_OK)

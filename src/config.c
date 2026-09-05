@@ -55,6 +55,8 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg_pool_entry(&cfg->pool[3], "embed",
                  "models/multilingual-e5-small-q8_0.gguf", 512, 4,
                  true, 384, -1);
+  strcpy(cfg->pool[3].pipeline.query_prefix,"query: ");
+  strcpy(cfg->pool[3].pipeline.document_prefix,"passage: ");
   cfg->pool_n = 4;
 
   snprintf(cfg->role_router, sizeof cfg->role_router, "nano");
@@ -559,9 +561,24 @@ static asngn_err cfg_apply_pool(asngn_ctx *c, asngn_config *cfg,
     if (f != NULL && !asngn_xbool(f, &warm)) goto bad_entry;
     f = asngn_xfield(eo, "kv_cache");
     if (f != NULL && !asngn_xbool(f, &kv_cache)) goto bad_entry;
+    if (ctx > INT32_MAX || threads > INT32_MAX || dim > INT32_MAX || gpu_layers > INT32_MAX)
+      goto bad_entry;
     cfg_pool_entry(&fresh[i], id, path != NULL ? path : "", (int)ctx,
                    (int)threads, embedding,
                    (int)dim, (int)gpu_layers);
+    /* Bounds are part of the input contract: never silently truncate metadata. */
+    asmodel_embedding_pipeline *pipeline = &fresh[i].pipeline;
+    const char *keys[] = {"revision","tokenizer","pooling","query_prefix","document_prefix"};
+    char *values[] = {pipeline->revision,pipeline->tokenizer,pipeline->pooling,
+                      pipeline->query_prefix,pipeline->document_prefix};
+    size_t sizes[] = {sizeof pipeline->revision,sizeof pipeline->tokenizer,sizeof pipeline->pooling,
+                      sizeof pipeline->query_prefix,sizeof pipeline->document_prefix};
+    for (size_t k = 0; k < 5; k++) {
+      f = asngn_xfield(eo,keys[k]);
+      const char *text = asngn_xstr(f);
+      if (f && (!text || strlen(text) >= sizes[k])) goto bad_entry;
+      if (text) strcpy(values[k],text);
+    }
     fresh[i].backend = backend;
     fresh[i].base_url = base_url ? cfg_dup(base_url) : NULL;
     fresh[i].remote_model = remote_model ? cfg_dup(remote_model) : NULL;

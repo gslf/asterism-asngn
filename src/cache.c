@@ -100,6 +100,30 @@ static double cache_dot(const float *a, const float *b, int dim) {
 
 /* Scope, project, and TTL eligibility. Epoch and tools_used
  * rules are applied by the outcome logic, not here. */
+static bool dependencies(asngn_ctx *c, asngn_session *s, char out[65]) {
+  asngn_sha256_ctx h;
+  uint8_t digest[32];
+  asngn_workspace_info w = s->workspace;
+  out[0] = 0;
+  /* Until memory exposes a revision token, its mutable context cannot be
+   * proven equivalent. Evidence and tool-plan caches remain independent. */
+  if (c->asper_ok || asngn_workspace_info_refresh(c, &w) != ASNGN_OK) return false;
+  asngn_sha256_init(&h);
+  const char *fields[] = {w.fingerprint, c->cfg.base_prompt, s->objective, s->active_file};
+  for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++) {
+    const char *v = fields[i] ? fields[i] : "";
+    asngn_sha256_update(&h, v, strlen(v) + 1);
+  }
+  for (size_t i = 0; i < s->log_n; i++) {
+    asngn_sha256_update(&h, s->log[i].role, strlen(s->log[i].role) + 1);
+    asngn_sha256_update(&h, s->log[i].text, strlen(s->log[i].text) + 1);
+  }
+  asngn_sha256_update(&h, &s->security_profile, sizeof s->security_profile);
+  asngn_sha256_final(&h, digest);
+  asngn_sha256_hex(digest, 32, out);
+  return true;
+}
+
 static bool cache_eligible(const asngn_cache_entry *e, const asngn_session *s,
                            asngn_time now) {
   if (e->scope != ASNGN_SCOPE_GLOBAL) {
@@ -150,6 +174,7 @@ static xcdn_node_t *cache_entry_node(const asngn_cache_entry *e) {
   ok = ok && asngn_xobj_put(obj, "project",
                             e->project != NULL ? xcdn_value_string(e->project)
                                                : xcdn_value_null());
+  ok = ok && asngn_xobj_put(obj, "dependencies", xcdn_value_string(e->dependencies));
   ok = ok && asngn_xobj_put(obj, "epoch", xcdn_value_int((int64_t)e->epoch));
   ok = ok && asngn_xobj_put(
                  obj, "query",
@@ -235,6 +260,9 @@ static bool cache_entry_from_node(asngn_ctx *c, const xcdn_node_t *node,
   if (asngn_xint(asngn_xfield(obj, "epoch"), &n) && n >= 0)
     out->epoch = (uint64_t)n;
 
+  sv = asngn_xstr(asngn_xfield(obj, "dependencies"));
+  if (!sv || strlen(sv) >= sizeof out->dependencies) goto fail;
+  strcpy(out->dependencies, sv);
   sv = asngn_xstr(asngn_xfield(obj, "query"));
   if (sv == NULL) goto fail;
   out->query = asngn_strdup(sv);
@@ -490,6 +518,9 @@ asngn_err asngn_cache_probe(asngn_ctx *c, asngn_session *s, const char *query,
   out->outcome = ASNGN_CACHE_MISS;
   if (!c->cfg.cache_enable) return ASNGN_OK;
 
+  char dependency_hash[65];
+  if (!dependencies(c, s, dependency_hash)) return ASNGN_OK;
+
   dim = asngn_models_embed_dim(c);
   if (dim <= 0) {
     asngn_log(c, ASNGN_LOG_WARN, "cache",
@@ -519,6 +550,7 @@ asngn_err asngn_cache_probe(asngn_ctx *c, asngn_session *s, const char *query,
     asngn_cache_entry *ent = &c->cache[i];
     double cos;
     if (!cache_eligible(ent, s, now)) continue;
+    if (strcmp(ent->dependencies, dependency_hash)) continue;
     if (ent->vec == NULL) { /* lazy re-embed (vectors are derived data) */
       float *ev = malloc((size_t)dim * sizeof *ev);
       if (ev == NULL) continue;
@@ -685,6 +717,7 @@ asngn_err asngn_cache_insert(asngn_ctx *c, asngn_session *s, const char *query,
   snprintf(ent.tier, sizeof ent.tier, "%s", tier != NULL ? tier : "");
 
   ok = true;
+  (void)dependencies(c, s, ent.dependencies);
   ent.query = asngn_strdup(query);
   ok = ok && ent.query != NULL;
   if (ok) {

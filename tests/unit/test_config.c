@@ -323,7 +323,22 @@ TEST(missing_file_errors) {
   bare_ctx_free(c);
 }
 
+TEST(doctor_reports_missing_inputs_without_creating_state) {
+  char dir[256], root[300];
+  asngn_open_params p = {0};
+  char *report = NULL;
+  ASSERT_TRUE(asngn_test_tmpdir(dir));
+  snprintf(root, sizeof root, "%s/uncreated", dir);
+  p.engine_root = root;
+  ASSERT_ERR(asngn_diagnose(&p, &report), ASNGN_ERR_CONFIG);
+  ASSERT_TRUE(report && strstr(report, "weights missing"));
+  ASSERT_TRUE(!os_file_exists(root));
+  asngn_free(report);
+  asngn_test_rmtree(dir);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(doctor_reports_missing_inputs_without_creating_state),
   TEST_ENTRY(defaults_spot_check),
   TEST_ENTRY(overlay_overrides),
   TEST_ENTRY(hard_errors_are_config),

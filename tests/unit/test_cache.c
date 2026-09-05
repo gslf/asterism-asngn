@@ -163,70 +163,35 @@ TEST(cosine_geometry) {
   ASSERT_TRUE(fx_cos(Q_HIT, Q_MISS) < 0.85);
 }
 
-TEST(miss_then_verbatim_hit) {
+TEST(conversation_change_invalidates_answer) {
   fx f;
   asngn_session *s = NULL;
   asngn_turn_result r;
-  asngn_stats st;
-
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "cache1", &s));
-
-  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Response A.\n", &r));
+  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Response A.\n", NULL));
+  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Response B uses the new conversation.\n", &r));
   ASSERT_EQ_STR(r.cache, "miss");
-  ASSERT_EQ_STR(r.answer, "Response A.\n");
+  ASSERT_EQ_STR(r.answer, "Response B uses the new conversation.\n");
+  ASSERT_EQ_INT(r.tokens_saved, 0);
+  ASSERT_EQ_INT(f.light.calls, 2);
   asngn_turn_result_free(&r);
-  ASSERT_OK(asngn_get_stats(f.c, &st));
-  ASSERT_EQ_INT((long long)st.cache_misses, 1);
-  ASSERT_EQ_INT((long long)st.cache_hits, 0);
-  ASSERT_EQ_INT((long long)asngn_cache_count(f.c), 1);
-
-  /* the same question again: verbatim reuse, zero generation */
-  ASSERT_TRUE(fx_turn(&f, s, Q_HIT, NULL, &r));
-  ASSERT_EQ_STR(r.cache, "hit");
-  ASSERT_EQ_STR(r.answer, "Response A.\n");
-  ASSERT_TRUE(r.tokens_saved > 0);
-  asngn_turn_result_free(&r);
-  ASSERT_EQ_INT(f.light.calls, 1); /* no second generation */
-  ASSERT_EQ_INT(f.stdm.calls, 0); /* the generator was not consulted */
-  ASSERT_OK(asngn_get_stats(f.c, &st));
-  ASSERT_EQ_INT((long long)st.cache_hits, 1);
-  ASSERT_EQ_INT((long long)st.cache_misses, 1);
-  ASSERT_EQ_INT((long long)s->led_n, 2);
-  ASSERT_EQ_STR(s->led[1].cache, "hit");
-  ASSERT_TRUE(s->led[1].sv_cache > 0);
-  /* hit turns insert nothing new */
-  ASSERT_EQ_INT((long long)asngn_cache_count(f.c), 1);
   asngn_session_close(s);
   fx_drop(&f);
 }
 
-TEST(paraphrase_adapt) {
+TEST(paraphrase_does_not_override_dependencies) {
   fx f;
   asngn_session *s = NULL;
   asngn_turn_result r;
-  asngn_stats st;
-
   ASSERT_TRUE(fx_setup(&f));
   ASSERT_OK(asngn_session_open(f.c, "cache2", &s));
   ASSERT_TRUE(fx_turn(&f, s, Q_HIT, "Response A.\n", NULL));
-
-  /* overlapping paraphrase: cos ~0.926 lands in [adapt, hit) — the
-   * adapter (light role) rewrites the cached answer */
-  ASSERT_TRUE(fake_model_push(&f.light, "Response adapted.\n"));
-  ASSERT_TRUE(fx_turn(&f, s, Q_ADAPT, NULL, &r));
-  ASSERT_EQ_STR(r.cache, "adapt");
-  ASSERT_EQ_STR(r.answer, "Response adapted.\n");
+  ASSERT_TRUE(fx_turn(&f, s, Q_ADAPT, "Fresh response.\n", &r));
+  ASSERT_EQ_STR(r.cache, "miss");
+  ASSERT_EQ_STR(r.answer, "Fresh response.\n");
+  ASSERT_EQ_INT(r.tokens_saved, 0);
   asngn_turn_result_free(&r);
-  ASSERT_EQ_INT(f.stdm.calls, 0);  /* generator never consulted */
-  ASSERT_EQ_INT(f.light.calls, 2); /* first-turn generation + adapt */
-  ASSERT_EQ_STR(s->led[1].cache, "adapt");
-  ASSERT_EQ_STR(s->led[1].tier, "light");
-  ASSERT_TRUE(s->led[1].sv_cache > 0);
-  ASSERT_OK(asngn_get_stats(f.c, &st));
-  ASSERT_EQ_INT((long long)st.cache_adapts, 1);
-  /* adapt turns do not insert a new entry */
-  ASSERT_EQ_INT((long long)asngn_cache_count(f.c), 1);
   asngn_session_close(s);
   fx_drop(&f);
 }
@@ -363,8 +328,8 @@ TEST(persistence_across_reopen) {
 
 TEST_LIST = {
   TEST_ENTRY(cosine_geometry),
-  TEST_ENTRY(miss_then_verbatim_hit),
-  TEST_ENTRY(paraphrase_adapt),
+  TEST_ENTRY(conversation_change_invalidates_answer),
+  TEST_ENTRY(paraphrase_does_not_override_dependencies),
   TEST_ENTRY(probe_direct_outcomes),
   TEST_ENTRY(epoch_blocks_hit_allows_adapt),
   TEST_ENTRY(tools_used_excluded_plan_hint),

@@ -195,6 +195,27 @@ void os_rwlock_wrunlock(os_rwlock *l)
 
 /* ---- filesystem --------------------------------------------------------- */
 
+FILE *os_store_lock(const char *path) {
+    wchar_t *w = os_u8_to_wide(path);
+    HANDLE h;
+    int fd;
+    FILE *f;
+    if (!w) return NULL;
+    h = CreateFileW(w, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+                    FILE_ATTRIBUTE_NORMAL, NULL);
+    free(w);
+    if (h == INVALID_HANDLE_VALUE) return NULL;
+    fd = _open_osfhandle((intptr_t)h, _O_RDWR | _O_BINARY);
+    if (fd < 0) { CloseHandle(h); return NULL; }
+    f = _fdopen(fd, "r+b");
+    if (!f) _close(fd);
+    return f;
+}
+
+/* Win32 atomic replacements use MOVEFILE_WRITE_THROUGH below. Portable
+ * directory fsync is unavailable; this does not claim power-loss durability. */
+asngn_err os_sync_parent(const char *path) { (void)path; return ASNGN_OK; }
+
 asngn_err os_file_replace(const char *src, const char *dst)
 {
     wchar_t *ws, *wd;
@@ -462,6 +483,8 @@ static asngn_err os_list_kind(const char *path, int want_dirs,
         char *name;
         int is_dir = (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0;
 
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT)
+            continue;
         if (want_dirs != is_dir)
             continue;
         if (is_dir && (wcscmp(fd.cFileName, L".") == 0 ||

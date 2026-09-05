@@ -256,21 +256,9 @@ static asngn_err led_reserve(asngn_session *s) {
  * soft ceiling tracks spend observed live in this process. */
 static void led_account(asngn_session *s, const asngn_ledger_entry *e,
                         bool live) {
-  asngn_ctx *c = s->ctx;
-  size_t total = asngn_ledger_total_tokens(e);
-  asngn_time day = e->at / 86400;
-  s->spent_tokens += (int64_t)total;
-  if (!live) return;
-  os_rwlock_wrlock(&c->lock);
-  if (c->daily_day != day) {
-    /* first spend seen for this unix day resets the counter */
-    if (day > c->daily_day) {
-      c->daily_day = day;
-      c->daily_spent = 0;
-    }
-  }
-  if (e->at / 86400 == c->daily_day) c->daily_spent += (int64_t)total;
-  os_rwlock_wrunlock(&c->lock);
+  /* Conversation totals are a projection, never an inference charge. */
+  (void)live;
+  s->spent_tokens += (int64_t)asngn_ledger_total_tokens(e);
 }
 
 /* ── public (internal) API ────────────────────────────────────────────── */

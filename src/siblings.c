@@ -120,6 +120,7 @@ static size_t sib_utf8_clip(const char *s, size_t len, size_t max) {
 /* ═══════════════════════ open / close ═══════════════════════ */
 
 static asngn_err sib_open_asper(asngn_ctx *c) {
+  if (asper_abi_version() != ASPER_ABI_VERSION) return ASNGN_ERR_CONFIG;
   char *root, *conf = NULL;
   asngn_err e;
 

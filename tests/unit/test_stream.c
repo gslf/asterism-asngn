@@ -168,7 +168,74 @@ TEST(write_atomic_replaces_without_tmp) {
   bare_ctx_free(c);
 }
 
+static int fail_io(void *ud, const char *point) {
+  return !strcmp((const char *)ud, point);
+}
+
+TEST(wal_checksum_and_io_faults) {
+  char dir[256], path[300];
+  asngn_ctx *c = bare_ctx();
+  asngn_stream st;
+  xcdn_document_t *doc = NULL;
+  const char *points[] = {"stream_short_write", "stream_flush", "stream_sync"};
+  uint64_t size, after;
+  ASSERT_TRUE(c && asngn_test_tmpdir(dir));
+  snprintf(path, sizeof path, "%s/wal.xcdn", dir);
+  ASSERT_OK(asngn_stream_open(c, &st, path, true));
+  ASSERT_OK(asngn_wal_append(c, &st, "{n:1}", 5));
+  ASSERT_OK(os_file_size(path, &size));
+  for (size_t i = 0; i < 3; i++) {
+    c->fault = fail_io; c->fault_ud = (void *)points[i];
+    ASSERT_ERR(asngn_wal_append(c, &st, "{n:2}", 5), ASNGN_ERR_IO);
+    if (i < 2) {
+      ASSERT_OK(os_file_size(path, &after));
+      ASSERT_EQ_INT(after, size);
+    }
+  }
+  /* An fsync error leaves an uncertain complete frame but closes the stream. */
+  c->fault = NULL;
+  ASSERT_ERR(asngn_wal_append(c, &st, "{n:3}", 5), ASNGN_ERR_IO);
+  asngn_stream_close(&st);
+  ASSERT_OK(asngn_wal_load(c, path, &doc));
+  ASSERT_EQ_INT(doc->values_len, 2);
+  xcdn_document_free(doc); doc = NULL;
+  char *text = asngn_test_read_file(path, NULL);
+  char *changed = text ? strstr(text, "{n:1}") : NULL;
+  ASSERT_TRUE(changed != NULL);
+  changed[3] = '9'; /* Still valid xCDN: only the checksum detects this. */
+  ASSERT_OK(asngn_write_atomic(c, path, text, strlen(text)));
+  free(text);
+  ASSERT_ERR(asngn_wal_load(c, path, &doc), ASNGN_ERR_PARSE);
+  ASSERT_TRUE(doc == NULL);
+  asngn_test_rmtree(dir); bare_ctx_free(c);
+}
+
+TEST(wal_only_repairs_incomplete_tail) {
+  char dir[256], path[300];
+  asngn_ctx *c = bare_ctx();
+  asngn_stream st;
+  xcdn_document_t *doc = NULL;
+  uint64_t size, after;
+  ASSERT_TRUE(c && asngn_test_tmpdir(dir));
+  snprintf(path, sizeof path, "%s/wal.xcdn", dir);
+  ASSERT_OK(asngn_stream_open(c, &st, path, true));
+  ASSERT_OK(asngn_wal_append(c, &st, "{n:1}", 5));
+  asngn_stream_close(&st);
+  ASSERT_OK(os_file_size(path, &size));
+  FILE *f = fopen(path, "ab");
+  ASSERT_TRUE(f != NULL);
+  fputs("// asngn-wal-v1 5 aaaa", f); fclose(f);
+  ASSERT_OK(asngn_wal_load(c, path, &doc));
+  ASSERT_EQ_INT(doc->values_len, 1);
+  xcdn_document_free(doc);
+  ASSERT_OK(os_file_size(path, &after));
+  ASSERT_EQ_INT(size, after);
+  asngn_test_rmtree(dir); bare_ctx_free(c);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(wal_checksum_and_io_faults),
+  TEST_ENTRY(wal_only_repairs_incomplete_tail),
   TEST_ENTRY(stream_append_then_load),
   TEST_ENTRY(stream_load_missing_file_is_ok_null),
   TEST_ENTRY(stream_torn_tail_truncates),

@@ -43,6 +43,8 @@
 #define os_rwlock_wrlock     asngn_x_rwlock_wrlock
 #define os_rwlock_wrunlock   asngn_x_rwlock_wrunlock
 #define os_file_replace      asngn_x_file_replace
+#define os_store_lock        asngn_x_store_lock
+#define os_sync_parent       asngn_x_sync_parent
 #define os_fsync             asngn_x_fsync
 #define os_mkdir_p           asngn_x_mkdir_p
 #define os_file_exists       asngn_x_file_exists
@@ -130,6 +132,9 @@ void os_rwlock_wrunlock(os_rwlock *l);
 asngn_err os_file_replace(const char *src, const char *dst);
 /* fsync/_commit an open stream. */
 asngn_err os_fsync(FILE *f);
+asngn_err os_sync_parent(const char *path);
+/* Exclusive store ownership; fclose releases the lock, never unlink it. */
+FILE *os_store_lock(const char *path);
 /* Create directory and any missing parents. Existing dir is OK. */
 asngn_err os_mkdir_p(const char *path);
 int       os_file_exists(const char *path);   /* 1 = yes */
@@ -148,7 +153,8 @@ asngn_err os_file_size(const char *path, uint64_t *out);
 /* Rename within the same directory tree, replacing target if present
  * (log rotation). */
 asngn_err os_rename(const char *src, const char *dst);
-/* List regular file names (no dirs) in path, malloc'd array of malloc'd
+/* List regular files and link names (no dirs); readers must reject links.
+ * Names in path, malloc'd array of malloc'd
  * names, unsorted; caller frees each + array. Missing dir => 0 entries. */
 asngn_err os_list_dir(const char *path, char ***out_names, size_t *out_n);
 /* Immediate subdirectories only (session enumeration); same contract. */

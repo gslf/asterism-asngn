@@ -542,11 +542,12 @@ static int mll_count_prompt_tokens(void *ud, const char *system_prompt,
 
 /* ---- embedding ---------------------------------------------------------- */
 
-static asngn_err mll_embed(void *ud, const char *text, float *out) {
+static asngn_err mll_embed(void *ud, const char *text, int is_query, float *out) {
   mll_ud *u = (mll_ud *)ud;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
   const float *emb;
+  (void)is_query; /* Input preprocessing belongs to the request owner. */
   double norm;
   asngn_err e;
   int i, rc;
@@ -563,8 +564,7 @@ static asngn_err mll_embed(void *ud, const char *text, float *out) {
     free(tok);
     return e;
   }
-  if (n_tok > u->n_ctx)
-    n_tok = u->n_ctx; /* truncate: whole-input embedding is best effort */
+  if (n_tok > u->n_ctx) { free(tok); return ASNGN_ERR_LIMIT; }
 
   /* Reset any sequence state left by the previous call (NULL-safe for
    * memory-less encoder contexts). */

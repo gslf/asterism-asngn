@@ -37,6 +37,7 @@ static const struct { const char *ext; const char *lang; } ws_langs[] = {
 
 typedef struct {
   size_t files, bytes;
+  bool incomplete;
   size_t ext_count[WS_LANG_N];
 } ws_scan;
 
@@ -84,9 +85,12 @@ static void hash_tree(asngn_sha256_ctx *h, ws_scan *scan, const char *root,
                                    : asngn_strdup(root);
   char **files = NULL, **dirs = NULL;
   size_t nf = 0, nd = 0, i;
-  if (dir == NULL || depth > 64) { free(dir); return; }
-  if (os_list_dir(dir, &files, &nf) != ASNGN_OK) nf = 0;
-  if (os_list_dirs(dir, &dirs, &nd) != ASNGN_OK) nd = 0;
+  if (dir == NULL || depth > 64 || scan->files > 65536 ||
+      scan->bytes > 256 * 1024 * 1024) {
+    scan->incomplete = true; free(dir); return;
+  }
+  if (os_list_dir(dir, &files, &nf) != ASNGN_OK) { nf = 0; scan->incomplete = true; }
+  if (os_list_dirs(dir, &dirs, &nd) != ASNGN_OK) { nd = 0; scan->incomplete = true; }
   if (nf > 1) qsort(files, nf, sizeof *files, name_cmp);
   if (nd > 1) qsort(dirs, nd, sizeof *dirs, name_cmp);
   for (i = 0; i < nf; i++) {
@@ -95,13 +99,14 @@ static void hash_tree(asngn_sha256_ctx *h, ws_scan *scan, const char *root,
     char *full = rel != NULL ? os_path_join(root, rel) : NULL;
     char *data = NULL;
     size_t len = 0;
-    if (full != NULL && os_read_file(full, &data, &len) == ASNGN_OK) {
+    if (full != NULL && asngn_workspace_read(root, rel, 8 * 1024 * 1024,
+                                                &data, &len) == ASNGN_OK) {
       uint64_t n = (uint64_t)len;
       asngn_sha256_update(h, rel, strlen(rel) + 1);
       asngn_sha256_update(h, &n, sizeof n);
       asngn_sha256_update(h, data, len);
       ws_scan_file(scan, files[i], len);
-    }
+    } else scan->incomplete = true;
     free(data); free(full); free(rel); free(files[i]);
   }
   for (i = 0; i < nd; i++) {
@@ -226,7 +231,7 @@ static void hash_optional_file(asngn_sha256_ctx *h, const char *root,
   char *data = NULL;
   size_t len = 0;
   asngn_sha256_update(h, name, strlen(name) + 1);
-  if (path != NULL && os_read_file(path, &data, &len) == ASNGN_OK) {
+  if (path != NULL && asngn_workspace_read(root, name, 1024 * 1024, &data, &len) == ASNGN_OK) {
     uint64_t n = (uint64_t)len;
     asngn_sha256_update(h, &n, sizeof n);
     asngn_sha256_update(h, data, len);
@@ -294,6 +299,7 @@ asngn_err asngn_workspace_info_refresh(asngn_ctx *c,
   hash_optional_file(&h, workspace->repository_root, ".gitignore");
   hash_optional_file(&h, workspace->canonical_root, ".asterismignore");
   hash_tree(&h, &scan, workspace->canonical_root, "", 0);
+  if (scan.incomplete) { workspace->fingerprint[0] = 0; return ASNGN_ERR_LIMIT; }
   asngn_sha256_final(&h, digest);
   asngn_sha256_hex(digest, sizeof digest, workspace->fingerprint);
   ws_scan_finish(&scan, &c->repo_stats);

@@ -147,12 +147,17 @@ set(ASNGN_SOURCES
   src/sha256.c
   src/log.c
   src/xutil.c
+  src/wal.c
   src/stream.c
   src/config.c
+  src/doctor.c
   src/session.c
   src/turn_journal.c
   src/workspace.c
+  src/workspace_read.c
   src/ledger.c
+  src/operation_replay.c
+  src/operations.c
   src/tokens.c
   src/models.c
   src/models_llama.c
@@ -168,6 +173,7 @@ set(ASNGN_SOURCES
   src/detail.c
   src/grammar.c
   src/steps.c
+  src/verification.c
   src/loop.c
   src/safety.c
   src/redact.c
@@ -278,7 +284,7 @@ endif()
 
 # ── asngn-mcp ───────────────────────────────────────────────────────────────
 if(ASNGN_BUILD_MCP)
-  add_executable(asngn-mcp mcp/main.c src/json.c)
+  add_executable(asngn-mcp mcp/main.c mcp/tasks.c src/json.c)
   target_include_directories(asngn-mcp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

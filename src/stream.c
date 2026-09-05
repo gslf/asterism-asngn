@@ -17,6 +17,10 @@
 #include "asngn_internal.h"
 #include "xcdn.h"
 
+static bool fault(asngn_ctx *c, const char *point) {
+  return c->fault && c->fault(c->fault_ud, point);
+}
+
 /* ═══════════════════════ open / close ═══════════════════════ */
 
 asngn_err asngn_stream_open(asngn_ctx *c, asngn_stream *st, const char *path,
@@ -33,6 +37,10 @@ asngn_err asngn_stream_open(asngn_ctx *c, asngn_stream *st, const char *path,
     return asngn_seterr(c, ASNGN_ERR_IO, "stream: cannot open %s", path);
   }
   st->sync = sync;
+  if (sync && os_sync_parent(path) != ASNGN_OK) {
+    asngn_stream_close(st);
+    return ASNGN_ERR_IO;
+  }
   return ASNGN_OK;
 }
 
@@ -64,11 +72,14 @@ asngn_err asngn_stream_append(asngn_ctx *c, asngn_stream *st,
   if (fseek(st->fp, 0, SEEK_END) == 0) good_off = ftell(st->fp);
 
   ok = true;
-  if (len > 0 && fwrite(line, 1, len, st->fp) != len) ok = false;
+  if (fault(c, "stream_short_write")) {
+    if (len > 1) (void)fwrite(line, 1, len / 2, st->fp);
+    ok = false;
+  } else if (len > 0 && fwrite(line, 1, len, st->fp) != len) ok = false;
   if (ok && (len == 0 || line[len - 1] != '\n') &&
       fwrite("\n", 1, 1, st->fp) != 1)
     ok = false;
-  if (ok && fflush(st->fp) != 0) ok = false;
+  if (ok && (fault(c, "stream_flush") || fflush(st->fp) != 0)) ok = false;
 
   if (!ok) {
     bool recovered = false;
@@ -90,7 +101,8 @@ asngn_err asngn_stream_append(asngn_ctx *c, asngn_stream *st,
   }
 
   if (st->sync) {
-    asngn_err e = os_fsync(st->fp);
+    asngn_err e = fault(c, "stream_sync") ? ASNGN_ERR_IO : os_fsync(st->fp);
+    if (e != ASNGN_OK) { fclose(st->fp); st->fp = NULL; }
     if (e != ASNGN_OK)
       return asngn_seterr(c, e, "stream: fsync failed: %s", st->path);
   }

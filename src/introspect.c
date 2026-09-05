@@ -92,12 +92,10 @@ asngn_err asngn_get_models(asngn_ctx *c, asngn_model_info *out,
                    "judge");
     model_role_cat(m->roles, sizeof m->roles, c->cfg.role_embedder,
                    p->id, "embedder");
-    os_mutex_lock(&c->models_mu);
-    m->resident = (i < c->models_n &&
-                   (c->models[i].loaded || c->models[i].injected))
-                      ? 1
-                      : 0;
-    os_mutex_unlock(&c->models_mu);
+    asmodel_model_stats states[ASNGN_MAX_POOL];
+    size_t count=asmodel_manager_stats(c->shared_models,states,ASNGN_MAX_POOL);
+    m->resident=0;
+    for (size_t j=0;j<count;j++) if (!strcmp(states[j].id,p->id)) m->resident=states[j].resident;
   }
   return ASNGN_OK;
 }

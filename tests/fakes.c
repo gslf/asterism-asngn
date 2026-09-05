@@ -163,8 +163,8 @@ static int fake_model_count_prompt_tokens(void *ud, const char *system_text,
   return fake_count(system_text) + fake_count(user_text) + 8;
 }
 
-static asngn_err fake_model_embed(void *ud, const char *text, float *out) {
-  (void)ud;
+static asngn_err fake_model_embed(void *ud, const char *text, int is_query, float *out) {
+  (void)ud; (void)is_query;
   if (!text || !out) return ASNGN_ERR_INVALID;
   fake_embed_text(text, out);
   return ASNGN_OK;

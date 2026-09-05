@@ -6,12 +6,12 @@ An outcome-gated agentic coding engine for small local LLMs.
 Architecture and design: [docs/SPECS.md](docs/SPECS.md).
 
 
-- **Lossless zoned context** — Asper owns exact scoped events, semantic memory, checkpoints and content-addressed objects; each call materializes only the best bounded view with the consuming model's tokenizer.
+- **Lossless zoned context** — Asper owns exact scoped events, semantic memory, checkpoints and content-addressed objects; each call materializes only the best bounded view with explicit exact/estimated token accounting.
 - **Continuation instead of retry** — partial output returned at a token ceiling is preserved. Artifact drafts resume from a hashed exact prefix, while oversized tool output becomes a short view plus an Asper object reopenable via `OPEN B1`.
 - **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; coding and complex work is orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
 - **Semantic cache** — embedding-keyed reuse and light-tier adaptation of previous answers; tool-touched entries are never replayed, only surfaced as plan hints; a world-epoch counter ties cache validity to destructive tool activity. A separate exact-key cache short-circuits repeated read-only tool calls.
 - **Safety** — input/plan/action/output gates, identical-call and oscillation guards, stall watchdog, step and tool caps, secret redaction, human confirmation for destructive tools, an optional judge pass — all measured in the ledger, never hidden.
-- **Telemetry** — every token attributed to a zone, role, and tier; the per-turn ledger records spend and savings. QpT remains diagnostic only: coding quality is gated by task success, passing tests, applicable patches, valid tool calls, regressions, latency, and memory.
+- **Telemetry** — per-turn attribution and savings plus a separate, durable operation log for inference consumption, including failed or cancelled calls. Unknown usage retains its reservation. QpT remains diagnostic only: coding quality is gated by task success, passing tests, applicable patches, valid tool calls, regressions, latency, and memory.
 
 ---
 
@@ -49,7 +49,7 @@ overridden with `ASNGN_ASPER_DIR` / `ASNGN_ASTOOLS_DIR` /
 asterism/
 ├── asterism-asngn     (this repo)
 ├── asterism-asper     (memory sibling; brings llama.cpp)
-├── asterism-astools   (tools sibling; brings the patched xCDN-C)
+├── asterism-astools   (tools sibling; brings the pinned xCDN-C)
 └── asterism-asmodel   (shared model runtime)
 ```
 
@@ -69,24 +69,11 @@ git clone https://github.com/gslf/asterism-asmodel
 All commands run from inside `asterism-asngn`. Pick **one** configure line
 (CPU or GPU), then build.
 
-No manual step is needed for the vendored llama.cpp: asper ships local
-patches under `asterism-asper/deps/patches/llama/` (currently one that
-stops a grammar-sampler edge case from aborting the whole process) and its
-CMake applies them to the `deps/llama.cpp` submodule at configure time,
-idempotently — a fresh clone or a submodule re-checkout just needs a
-re-run of cmake, which happens on the next build anyway. `git` must be on
-PATH (it already is if you cloned). The submodule will show up as
-"modified content" in `git status`; that is the applied patch, not local
-noise. If a future submodule bump makes a patch stop applying, the
-configure fails loudly with instructions instead of silently building an
-unpatched llama.
-
-The engine is model-agnostic by construction: every llama.cpp call that
-model-controlled data reaches (tokenize, chat template, decode/encode,
-sampler) goes through `src/llama_guard.cpp`, a C++ shim that converts any
-exception llama.cpp lets escape into a normal model error. A model whose
-tokenizer, template, or grammar interaction misbehaves degrades that one
-turn; it can no longer kill the process.
+The build consumes Asper's pinned, unmodified llama.cpp submodule. CMake
+configuration never patches a dependency working tree. Native calls go through
+`src/llama_guard.cpp`, which translates escaping C++ exceptions into model
+errors; it does not contain `abort`, segmentation faults or process termination.
+Use a separate serving process when native crash isolation is required.
 
 #### Linux
 

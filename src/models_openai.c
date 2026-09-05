@@ -43,10 +43,10 @@ static asngn_err remote_generate(void *ud, const char *sys, const char *user,
   return ASNGN_ERR_MODEL;
 }
 
-static asngn_err remote_embed(void *ud, const char *text, float *out) {
+static asngn_err remote_embed(void *ud, const char *text, int is_query, float *out) {
   openai_ud *u = (openai_ud *)ud;
   return u->provider.embed &&
-                 u->provider.embed(u->provider.userdata, text, 1, out) == 0
+                 u->provider.embed(u->provider.userdata, text, is_query, out) == 0
              ? ASNGN_OK : ASNGN_ERR_MODEL;
 }
 
@@ -58,9 +58,7 @@ static int remote_count(void *ud, const char *text) {
 
 static int remote_count_prompt(void *ud, const char *sys, const char *user) {
   openai_ud *u = (openai_ud *)ud;
-  if (u->provider.count_prompt_tokens)
-    return u->provider.count_prompt_tokens(u->provider.userdata, sys, user);
-  return remote_count(ud, sys) + remote_count(ud, user) + 16;
+  return asmodel_provider_measure_prompt(&u->provider, sys, user).admission_tokens;
 }
 
 static const char *remote_last_error(void *ud) {

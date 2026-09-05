@@ -39,6 +39,7 @@
 #include "asngn.h"
 #include "asngn_internal.h" /* the one sanctioned internal touch; see above */
 #include "json.h"
+#include "tasks.h"
 
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
@@ -86,6 +87,7 @@ typedef struct {
   asngn_ctx *ctx;
   asngn_session *sessions[MAX_SESSIONS];
   size_t sessions_n;
+  mcp_job *jobs[32];
 } server_state;
 
 /* ═══════════════════════ small helpers ═══════════════════════ */
@@ -342,6 +344,60 @@ static int state_session(server_state *st, const char *slug,
   st->sessions[st->sessions_n++] = s;
   *out_s = s;
   return TOOL_OK;
+}
+
+static int tool_agent_submit(server_state *st, const jx_value *args,
+                              jx_value **out, const char **msg) {
+  const char *message = NULL, *session = NULL;
+  asngn_session *s = NULL;
+  size_t slot = 0;
+  asngn_err e;
+  int rc;
+  if (arg_str(args, "message", &message, msg) != 1 ||
+      arg_str(args, "session", &session, msg) < 0) BADP("message/session must be strings");
+  while (slot < 32 && st->jobs[slot]) slot++;
+  if (slot == 32) return engine_fail(st, ASNGN_ERR_BUSY, out);
+  rc = state_session(st, session, &s, out);
+  if (rc != TOOL_OK) return rc;
+  e = mcp_job_submit(s, message, &st->jobs[slot]);
+  if (e != ASNGN_OK) return engine_fail(st, e, out);
+  *out = jx_object();
+  if (!*out || jx_object_set(*out, "task_id", jx_string(mcp_job_id(st->jobs[slot]))) != 0) {
+    jx_free(*out); *out = NULL; return TOOL_OOM;
+  }
+  return TOOL_OK;
+}
+
+static int job_request(server_state *st, const jx_value *args, jx_value **out,
+                        const char **msg, int cancel, int release) {
+  const char *id = NULL;
+  unsigned long long cursor = 0;
+  asngn_err e;
+  if (arg_str(args, "task_id", &id, msg) != 1) BADP("task_id must be a string");
+  const jx_value *v = jx_object_get(args, "cursor");
+  if (v) {
+    if (!jx_is_int(v) || jx_int_value(v) < 0) BADP("cursor must be nonnegative");
+    cursor = (unsigned long long)jx_int_value(v);
+  }
+  for (size_t i = 0; i < 32; i++) if (st->jobs[i] && !strcmp(id, mcp_job_id(st->jobs[i]))) {
+    if (cancel) (void)mcp_job_cancel(st->jobs[i]);
+    e = mcp_job_poll(st->jobs[i], cursor, out);
+    if (e != ASNGN_OK) return engine_fail(st, e, out);
+    if (release && jx_bool_value(jx_object_get(*out, "done"))) {
+      mcp_job_free(st->jobs[i]); st->jobs[i] = NULL;
+    }
+    return TOOL_OK;
+  }
+  return engine_fail(st, ASNGN_ERR_NOT_FOUND, out);
+}
+static int tool_agent_poll(server_state *s, const jx_value *a, jx_value **o, const char **m) {
+  return job_request(s, a, o, m, 0, 0);
+}
+static int tool_agent_cancel(server_state *s, const jx_value *a, jx_value **o, const char **m) {
+  return job_request(s, a, o, m, 1, 0);
+}
+static int tool_agent_release(server_state *s, const jx_value *a, jx_value **o, const char **m) {
+  return job_request(s, a, o, m, 0, 1);
 }
 
 static int tool_agent_ask(server_state *st, const jx_value *args,
@@ -843,6 +899,14 @@ typedef struct {
 } tool_def;
 
 static const tool_def TOOLS[] = {
+    {"agent_submit", "Submit asynchronously; returns a task ID.",
+     "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"},\"session\":{\"type\":\"string\"}},\"required\":[\"message\"]}", tool_agent_submit},
+    {"agent_poll", "Read retained events using a cursor; gaps are explicit.",
+     "{\"type\":\"object\",\"properties\":{\"task_id\":{\"type\":\"string\"},\"cursor\":{\"type\":\"integer\",\"minimum\":0}},\"required\":[\"task_id\"]}", tool_agent_poll},
+    {"agent_cancel", "Cancel a submitted task and return its current state.",
+     "{\"type\":\"object\",\"properties\":{\"task_id\":{\"type\":\"string\"}},\"required\":[\"task_id\"]}", tool_agent_cancel},
+    {"agent_release", "Release a completed task; running tasks remain available.",
+     "{\"type\":\"object\",\"properties\":{\"task_id\":{\"type\":\"string\"}},\"required\":[\"task_id\"]}", tool_agent_release},
     {"agent_ask",
      "Run one full agent turn; returns the answer plus the route summary "
      "and token counts. Blocking, bounded by the engine turn deadline.",
@@ -1318,6 +1382,7 @@ int main(int argc, char **argv) {
     free(line);
   }
 
+  for (size_t i = 0; i < 32; i++) mcp_job_free(st.jobs[i]);
   while (st.sessions_n > 0) {
     asngn_session_close(st.sessions[--st.sessions_n]);
   }

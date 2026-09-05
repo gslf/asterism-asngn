@@ -78,3 +78,5 @@ build-*/
 /demo/
 /demo-*/
 *.log
+
+__pycache__/

@@ -143,6 +143,10 @@ struct xcdn_value;
 struct xcdn_node;
 struct xcdn_document;
 
+bool asngn_verification_command(const char *ref, const char *cmd,
+                                const char *args);
+bool asngn_verification_result_ok(const char *text);
+
 bool asngn_xobj_put(struct xcdn_value *obj, const char *key,
                     struct xcdn_value *val);            /* wraps in a node */
 bool asngn_xobj_put_node(struct xcdn_value *obj, const char *key,
@@ -189,6 +193,8 @@ asngn_err asngn_stream_append(asngn_ctx *c, asngn_stream *st,
  * good offset with a WARN; a parse error before the tail is fatal
  * (ASNGN_ERR_PARSE). Missing file: *out_doc = NULL, ASNGN_OK. Caller
  * frees *out_doc with xcdn_document_free. `what` names the file in logs. */
+asngn_err asngn_wal_append(asngn_ctx *c, asngn_stream *st, const char *record, size_t n);
+asngn_err asngn_wal_load(asngn_ctx *c, const char *path, struct xcdn_document **out);
 asngn_err asngn_stream_load(asngn_ctx *c, const char *path, const char *what,
                             struct xcdn_document **out_doc);
 
@@ -312,10 +318,24 @@ typedef struct {
   asngn_confirm_mode mcp_autoconfirm;
 } asngn_config;
 
+char *asngn_default_engine_root(void);
 void      asngn_config_defaults(asngn_config *cfg);
 asngn_err asngn_config_load(asngn_ctx *c, asngn_config *cfg,
                             const char *path); /* NULL = defaults only */
 void      asngn_config_free(asngn_config *cfg);
+
+typedef struct {
+  char id[37];
+  const char *model, *kind;
+  int64_t reserved, day;
+  bool active;
+} asngn_operation;
+asngn_err asngn_operation_begin(asngn_ctx *c, const char *model,
+                                 const char *kind, int64_t reserve,
+                                 asngn_operation *op);
+asngn_err asngn_operation_end(asngn_ctx *c, asngn_operation *op,
+                               int ti, int to, bool known, asngn_err outcome);
+asngn_err asngn_operations_load(asngn_ctx *c);
 
 /* ── model runtime (models.c, models_llama.c) ─────────────────────────── */
 
@@ -334,7 +354,7 @@ typedef struct {
  * interface. generate() applies the model's chat template to the
  * (system, user) pair; gbnf NULL = unconstrained; token_cb may be NULL;
  * *cancel is polled at least once per produced token; out_tokens_in /
- * out_tokens_out report exact prompt/generated token counts. */
+ * out_tokens_out report provider counts when available; inspect usage_known. */
 typedef struct asngn_model_iface {
   void *ud;
   asngn_err (*generate)(void *ud, const char *system_prompt,
@@ -345,11 +365,11 @@ typedef struct asngn_model_iface {
                         char **out_text, int *out_tokens_in,
                         int *out_tokens_out);
   int  (*count_tokens)(void *ud, const char *text); /* < 0 on error */
-  /* Exact chat-template-aware prompt count; optional for injected legacy
+  /* Chat-template-aware prompt count; optional for injected
    * backends, where the engine uses a conservative fallback. */
   int  (*count_prompt_tokens)(void *ud, const char *system_prompt,
                               const char *user_prompt);
-  asngn_err (*embed)(void *ud, const char *text, float *out); /* dim floats,
+  asngn_err (*embed)(void *ud, const char *text, int is_query, float *out); /* dim floats,
                          L2-normalized; only on embedding models */
   const char *(*last_error)(void *ud); /* optional backend diagnostic */
   int (*last_generation_info)(void *ud, asmodel_generation_info *out);
@@ -388,6 +408,8 @@ int       asngn_models_slot_for_id(asngn_ctx *c, const char *id);
 /* Run one generation on a role's model: lazy-loads, takes the instance
  * mutex, applies sampling defaults for `task` overlaid with cfg.sampling,
  * emits a model_call telemetry event, and accounts tokens. */
+asngn_err asngn_from_model_error(asmodel_err e);
+asngn_err asngn_models_embed_kind(asngn_ctx *c, const char *text, int is_query, float *out);
 asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
                                 const char *system_prompt,
                                 const char *user_prompt, const char *gbnf,
@@ -520,6 +542,8 @@ asngn_err asngn_workspace_info_init(asngn_ctx *c, const char *root,
                                     asngn_workspace_info *out);
 asngn_err asngn_workspace_info_refresh(asngn_ctx *c,
                                        asngn_workspace_info *workspace);
+asngn_err asngn_workspace_read(const char *root, const char *relative,
+                                size_t cap, char **out, size_t *len);
 void      asngn_workspace_hash(asngn_ctx *c, uint8_t out[32]);
 
 /* ── ledger (ledger.c) ────────────────────────────────────────────────── */
@@ -634,6 +658,7 @@ typedef struct {
   char       *session;   /* owned, NULL when scope global            */
   char       *project;   /* owned, nullable                          */
   uint64_t    epoch;
+  char        dependencies[65];
   char       *query;     /* owned                                    */
   char       *answer;    /* owned                                    */
   char        detail[8];
@@ -1010,6 +1035,9 @@ typedef struct asngn_turn_state {
   bool           tool_ok_seen; /* at least one call succeeded this turn */
   bool           wrote_workspace; /* a non-read_only call succeeded     */
   bool           artifact_written; /* fs.write/edit content landed       */
+  char           action_id[37];
+  char           verification_snapshot[65];
+  char           verification_action_id[37];
   bool           verification_attempted; /* build/test/run after mutation */
   bool           verification_ok;  /* applicable verification succeeded  */
   bool           authorization_blocked; /* denied action became a notice   */
@@ -1029,6 +1057,8 @@ typedef struct asngn_turn_state {
   asngn_security_profile security_profile;
 } asngn_turn_state;
 
+/* Revalidate immediately before consuming a proof; false includes scan failure. */
+bool asngn_verification_current(asngn_turn_state *t);
 void      asngn_turn_state_free(asngn_turn_state *t);
 /* Run one full turn on the agent worker; fills t->answer / t->led. */
 asngn_err asngn_loop_run(asngn_ctx *c, asngn_turn_state *t);
@@ -1095,6 +1125,7 @@ struct asngn_ctx {
   asngn_clock   clock;
   os_rwlock     lock;
 
+  FILE         *store_lock;
   char         *root;          /* resolved engine root, owned        */
   char         *sessions_dir, *cache_dir, *tele_dir;
   asngn_workspace_info workspace;
@@ -1161,6 +1192,7 @@ struct asngn_ctx {
   size_t        sessions_n, sessions_cap;
 
   /* budgets / stats */
+  bool          usage_recovery_required;
   int64_t       daily_spent;
   asngn_time    daily_day;         /* unix day of daily_spent        */
   asngn_stats   stats;

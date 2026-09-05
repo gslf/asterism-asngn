@@ -11,11 +11,13 @@ set(ASNGN_TEST_PROGRAMS
   test_config
   test_log
   test_redact
+  test_verification
   test_steps
   test_grammar
   test_route
   test_detail
   test_session
+  test_operations
   test_ledger
   test_context_golden
   test_cache
@@ -108,3 +110,14 @@ foreach(t test_engine_turns test_engine_guards)
     add_dependencies(${t} asngn_fake_tool)
   endif()
 endforeach()
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME test_quality_oracle
+    COMMAND ${Python3_EXECUTABLE} -B -m unittest discover
+      -s ${CMAKE_CURRENT_SOURCE_DIR}/quality -p test_oracle.py)
+endif()
+
+if(TARGET test_engine_turns)
+  target_sources(test_engine_turns PRIVATE ../mcp/tasks.c ../src/json.c)
+endif()

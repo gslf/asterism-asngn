@@ -22,6 +22,7 @@
 #include <string.h>
 
 #include "engine_fx.h"
+#include "../../mcp/tasks.h"
 
 typedef struct {
   int saw_secret;
@@ -77,6 +78,33 @@ static void probe_log(int level, const char *msg, void *ud) {
 }
 
 /* ── a. direct chat ───────────────────────────────────────────────────── */
+
+TEST(asynchronous_events_resume_from_cursor) {
+  eng_fx f;
+  mcp_job *job = NULL;
+  jx_value *response = NULL;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(&f.nano, "CLASS SIMPLE | DETAIL TERSE | MODE DIRECT\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "Hello asynchronously!\n"));
+  ASSERT_OK(mcp_job_submit(f.s, "hi", &job));
+  ASSERT_TRUE(asngn_uuid_valid(mcp_job_id(job)));
+  long long cursor = 0;
+  bool done = false;
+  for (int i = 0; i < 500 && !done; i++) {
+    ASSERT_OK(mcp_job_poll(job, (unsigned long long)cursor, &response));
+    done = jx_bool_value(jx_object_get(response, "done")) != 0;
+    cursor = jx_int_value(jx_object_get(response, "next_cursor"));
+    if (done) ASSERT_EQ_STR(jx_string_value(jx_object_get(response, "answer")), "Hello asynchronously!\n");
+    jx_free(response); response = NULL;
+  }
+  ASSERT_TRUE(done && cursor > 0);
+  ASSERT_OK(mcp_job_poll(job, (unsigned long long)cursor, &response));
+  ASSERT_EQ_INT(jx_array_len(jx_object_get(response, "events")), 0);
+  jx_free(response);
+  ASSERT_ERR(mcp_job_poll(job, (unsigned long long)cursor + 1, &response), ASNGN_ERR_INVALID);
+  mcp_job_free(job);
+  eng_drop(&f);
+}
 
 TEST(direct_chat) {
   eng_fx f;
@@ -1010,6 +1038,7 @@ TEST(asper_source_context_and_reopen) {
 /* ── runner ───────────────────────────────────────────────────────────── */
 
 TEST_LIST = {
+  TEST_ENTRY(asynchronous_events_resume_from_cursor),
   TEST_ENTRY(direct_chat),
   TEST_ENTRY(explicit_deadline_is_opt_in),
   TEST_ENTRY(plan_tool_turn),

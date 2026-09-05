@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "components": {
+    "asngn": {
+      "repository": "gslf/asterism-asngn",
+      "revision": "checkout",
+      "headers": {
+        "include/asngn.h": "ddb6cb620c14c6440cf8eb4f9631fcd3f090790acc872493102c4bc69d08e539"
+      }
+    },
+    "asper": {
+      "repository": "gslf/asterism-asper",
+      "revision": "812028da8db6d061d2d0250a21f76ec75cc453e4",
+      "headers": {
+        "include/asper.h": "4654de2770c0e2cd4be90cb22144b6d218dbc702f15bc4370670ed1938d7e8af"
+      }
+    },
+    "asmodel": {
+      "repository": "gslf/asterism-asmodel",
+      "revision": "a95efad1a0b4333803009e7b4c15b7d758fcacf2",
+      "headers": {
+        "include/asmodel.h": "c9e9f468c57ae07e62586f960f8b27c7f98fd2fea9ac186e7d6749c1654039f6"
+      }
+    },
+    "astools": {
+      "repository": "gslf/asterism-astools",
+      "revision": "db0656712fb5c91d96cd2d875fba16059dcf0d49",
+      "headers": {
+        "include/astools.h": "b5ad033088074d644ba9b67d4d18a0f8ea36f4d532c99f4bb7ea43fef2ed6a17"
+      }
+    }
+  },
+  "xcdn_revision": "3f00d766ceef07f3bb301abb59068e76bac653d3"
+}

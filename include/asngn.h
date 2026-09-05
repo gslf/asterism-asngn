@@ -117,6 +117,10 @@ typedef struct {
 
 asngn_err asngn_workspace_get(asngn_ctx *c, asngn_workspace_info *out);
 
+/* Read-only startup preflight. Does not contact providers or create state.
+ * The caller releases the diagnostic report with asngn_free, even on error. */
+asngn_err asngn_diagnose(const asngn_open_params *params, char **out_report);
+
 asngn_err   asngn_open(const asngn_open_params *p, asngn_ctx **out);
 /* Flush, close siblings, join workers, release everything. NULL: no-op. */
 void        asngn_close(asngn_ctx *c);

@@ -1,24 +1,30 @@
-# Blocking coding quality suite
+# Protected coding smoke evaluation
 
-This suite runs the real model on disposable Git repositories. Every scenario
-starts with a failing build/test, asks the agent to diagnose and repair the
-repository with tools, and accepts the run only when the resulting patch is
-non-empty, cleanly applicable and all declared checks pass.
+This is a two-task smoke suite, not a repository coding benchmark or a leaderboard.
+Contract tests use deterministic local fixtures; the runner below requires real
+configured models and tools. Linux bubblewrap and the task toolchains are required.
 
 ```sh
-python3 tests/quality/run_quality.py \
-  --asngn ./build/asngn --engine-root ./demo \
-  --report ./build/quality-report.json
+python3 run_quality.py --asngn /absolute/build/asngn \
+  --engine-root /absolute/evaluation-inputs --profile model-quant-backend-hardware \
+  --split holdout --repeats 3 --report /absolute/results/report.json
 ```
 
-The blocking metrics are task success, post-change build/tests, patch
-applicability, valid tool use, useless attempts/guard trips, regressions,
-latency and peak resident memory. QpT is diagnostic only and never contributes
-to pass/fail. A task without an external result check has no quality score; it
-is never assigned an automatic `0.5`.
+Each trial gets a fresh engine directory. Only `config.xcdn` is copied and an
+optional `models/` directory is linked for weights; use absolute paths for other
+configuration inputs. Memory, sessions, response caches and calibration are not
+imported. This runner never writes routing calibration. Reports are inputs to a
+separate, explicit offline promotion decision; holdout data must not be promoted.
 
-Every task must succeed. Each patch must pass `git apply --check` against its
-baseline, use at least one valid tool call, stay below twelve tool calls and
-three guard trips, and pass the complete scenario-specific verification suite.
-The scheduled real-model workflow runs this harness as a blocking step and
-uploads its JSON report and patches as evidence.
+The verifier reconstructs a fresh fixture, audits the patch, adds hidden checks
+and executes outside the agent workspace. Original tests/build files are read-only.
+Additional tests remain in the patch artifact but cannot influence acceptance.
+Only implementation changes and bounded test-source additions are accepted by
+these fixtures. General repository benchmarks need task-specific patch policies.
+
+Reports retain executable checks, patches, per-trial outcomes, timeout, p50/p95,
+Wilson intervals and sampled Linux process-tree RSS. Shared pages may be counted
+more than once; GPU memory is unavailable. The two tasks are correlated across
+repetitions, so the interval is not evidence of population-wide performance.
+False-success claims remain unavailable until the agent exposes a typed,
+independently verifiable task-success state. Exit zero is only a turn outcome.

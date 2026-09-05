@@ -175,7 +175,7 @@ static asngn_err root_join(asngn_ctx *c, char **slot) {
 /* No-argument frontends converge on one conventional engine root.  That
  * location bootstraps config.xcdn discovery; engine.root inside the file
  * remains authoritative unless an API/CLI override is supplied. */
-static char *default_engine_root(void) {
+char *asngn_default_engine_root(void) {
   const char *home = getenv("USERPROFILE");
   if (home == NULL || home[0] == '\0') home = getenv("HOME");
   if (home == NULL || home[0] == '\0') return asngn_strdup(".");
@@ -205,7 +205,7 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   asngn_config_defaults(&c->cfg);
   bootstrap_root = p->engine_root;
   if (bootstrap_root == NULL || bootstrap_root[0] == '\0') {
-    default_root = default_engine_root();
+    default_root = asngn_default_engine_root();
     if (default_root == NULL) { e = ASNGN_ERR_NOMEM; goto fail; }
     bootstrap_root = default_root;
     free(c->cfg.root);
@@ -243,6 +243,12 @@ asngn_err asngn_open_with(const asngn_open_params *p,
     e = asngn_seterr(c, ASNGN_ERR_IO, "engine root %s: cannot resolve",
                      root_in);
     goto fail;
+  }
+  {
+    char *lock_path = os_path_join(c->root, ".writer.lock");
+    c->store_lock = lock_path ? os_store_lock(lock_path) : NULL;
+    free(lock_path);
+    if (!c->store_lock) { e = ASNGN_ERR_BUSY; goto fail; }
   }
   e = asngn_workspace_init(c, p);
   if (e != ASNGN_OK) goto fail;
@@ -294,6 +300,9 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   e = asngn_models_init(c);
   if (e != ASNGN_OK) goto fail;
   e = asngn_shared_models_init(c);
+  if (e != ASNGN_OK) goto fail;
+
+  e = asngn_operations_load(c);
   if (e != ASNGN_OK) goto fail;
 
   /* siblings (degrade on failure) */
@@ -366,6 +375,7 @@ void asngn_close(asngn_ctx *c) {
   asngn_tele_shutdown(c);
   asngn_log_close(c);
   asngn_config_free(&c->cfg);
+  if (c->store_lock) fclose(c->store_lock);
   free(c->root);
   free(c->sessions_dir);
   free(c->cache_dir);
@@ -1283,6 +1293,7 @@ asngn_err asngn_runtime_create(asngn_ctx *owner, asngn_ctx **out) {
     c->models[i].iface.destroy=NULL;
   }
   e=asngn_models_init(c);
+  if (e==ASNGN_OK) e=asngn_shared_models_init(c);
   if (e!=ASNGN_OK) { asngn_runtime_free(c);return e; }
   *out=c;return ASNGN_OK;
 }

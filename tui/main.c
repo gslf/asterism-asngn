@@ -1700,6 +1700,7 @@ static void usage(FILE *out) {
           "[--confirm prompt|deny|allow]\n"
           "             [--once \"<message>\"] [--version] [--help]\n"
           "\n"
+          "  --doctor           inspect configuration and model files without inference\n"
           "  --once <message>   run one turn headless and print the "
           "answer (\"-\" reads stdin)\n"
           "  --root <dir>       override engine root (default: ~/asngn)\n"
@@ -1732,6 +1733,7 @@ int main(int argc, char **argv) {
   asngn_detail detail = ASNGN_DETAIL_AUTO;
   int confirm_override = -1;
   int frame_dump = 0;
+  int doctor = 0;
   int allow_degraded = 0;
   int i;
 
@@ -1769,6 +1771,8 @@ int main(int argc, char **argv) {
       once = v;
     } else if (strcmp(argv[i], "--allow-degraded") == 0) {
       allow_degraded = 1;
+    } else if (strcmp(argv[i], "--doctor") == 0) {
+      doctor = 1;
     } else if (strcmp(argv[i], "--frame-dump") == 0) {
       frame_dump = 1; /* hidden: golden-frame hook */
     } else if (strcmp(argv[i], "--version") == 0) {
@@ -1784,6 +1788,16 @@ int main(int argc, char **argv) {
     }
   }
 
+  if (doctor) {
+    asngn_open_params params;
+    char *report = NULL;
+    memset(&params, 0, sizeof params);
+    params.engine_root = root; params.config_path = config;
+    asngn_err e = asngn_diagnose(&params, &report);
+    if (report) fputs(report, stdout);
+    asngn_free(report);
+    return e == ASNGN_OK ? 0 : 1;
+  }
   if (frame_dump) return run_frame_dump();
   if (once != NULL)
     return run_once(root, config, workspace, allow_degraded,

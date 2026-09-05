@@ -1,19 +1,5 @@
-/*
- * models.c — model pool and role runtime.
- *
- * The pool copies cfg.pool into per-slot state at init; models load
- * lazily on first use and at most cfg.max_resident non-injected
- * instances stay resident (LRU-unloaded, never mid-call). Injected
- * slots (test fakes wired by asngn_open_with) are permanently loaded
- * and never destroyed before shutdown.
- *
- * Locking: c->models_mu guards slot load/unload state, role
- * resolution results and the in-use markers; each slot's own mutex is
- * held while a backend call runs on that instance. models_mu is never
- * held across a backend call.
- *
- * MIT License — per aspera ad astra.
- */
+/* Engine role policy and embedding identity. asmodel exclusively owns backend
+ * residency, request serialization and eviction across all session lanes. */
 
 #include "asngn_internal.h"
 
@@ -24,10 +10,7 @@
 /* Per-context residency counters and embedding identity. Guarded by models_mu. */
 
 typedef struct {
-  asngn_ctx *ctx;                 /* NULL = free entry                  */
-  int        in_use[ASNGN_MAX_POOL]; /* guarded by ctx->models_mu       */
   uint8_t    embed_hash[32];      /* sha256 of embedder weights (or 0)  */
-  int        heuristic_warned;    /* one-time fallback warning          */
 } models_aux;
 
 static models_aux *aux_find(asngn_ctx *c) { return c ? c->model_aux : NULL; }
@@ -227,43 +210,9 @@ int asngn_models_slot_for_role(asngn_ctx *c, asngn_role role) {
   return c->role_slot[role];
 }
 
-static asngn_err ensure_loaded_locked(asngn_ctx *c, int slot);
-
 void asngn_models_warm(asngn_ctx *c) {
-  /* Turn order: the router classifies first, the generator answers,
-   * the embedder probes the cache — warming in the same order means a
-   * turn racing the warm-up waits on the model it needs next, never on
-   * one it does not. Failures stay silent here; first use reports. */
-  static const asngn_role ORDER[] = {
-    ASNGN_ROLE_ROUTER,     ASNGN_ROLE_GENERATOR, ASNGN_ROLE_EMBEDDER,
-    ASNGN_ROLE_PLANNER,    ASNGN_ROLE_COMPRESSOR, ASNGN_ROLE_ADAPTER,
-    ASNGN_ROLE_JUDGE,
-  };
-  int warmed[ASNGN_ROLE_COUNT];
-  int warmed_n = 0;
-  size_t i;
-  int j;
-  if (c == NULL) return;
-  for (i = 0; i < sizeof ORDER / sizeof ORDER[0]; i++) {
-    int slot = asngn_models_slot_for_role(c, ORDER[i]);
-    bool seen = false;
-    if (slot < 0) continue;
-    if (!c->models[slot].cfg.warm) continue;
-    for (j = 0; j < warmed_n; j++)
-      if (warmed[j] == slot) seen = true;
-    if (seen) continue;
-    /* never warm past the residency cap: the LRU would evict what was
-     * just loaded — churn instead of a warm-up */
-    if (c->cfg.max_resident > 0 && warmed_n >= c->cfg.max_resident)
-      break;
-    if (c->bg_cancel) return; /* shutting down mid-warm */
-    os_mutex_lock(&c->models_mu);
-    if (ensure_loaded_locked(c, slot) == ASNGN_OK)
-      warmed[warmed_n++] = slot;
-    os_mutex_unlock(&c->models_mu);
-  }
-  /* the load phases set the live "now" marker; nothing follows them */
-  asngn_tele_emit(c, "phase", NULL, NULL, NULL, 0, "{what: \"idle\"}");
+  if (c && c->shared_models && !c->bg_cancel)
+    (void)asmodel_manager_warm(c->shared_models);
 }
 
 int asngn_models_slot_for_id(asngn_ctx *c, const char *id) {
@@ -274,447 +223,79 @@ int asngn_models_slot_for_id(asngn_ctx *c, const char *id) {
   return -1;
 }
 
-/* ---- lazy load and residency -------------------------------------------- */
-
-/* Unload loaded non-injected slots (LRU by last_used_ms) until at most
- * cfg.max_resident remain. Never unloads `keep`, an in-use slot, or an
- * injected slot; without aux in-use tracking unloading is skipped
- * entirely (never destroy an instance a call might be running on).
- * c->models_mu held. */
-static void enforce_resident_locked(asngn_ctx *c, int keep) {
-  models_aux *aux = aux_find(c);
-  int max = c->cfg.max_resident;
-
-  if (aux == NULL) return;
-  for (;;) {
-    int loaded_n = 0, victim = -1;
-    size_t ram_mb = 0, vram_mb = 0;
-    int64_t oldest = 0;
-    size_t i;
-    for (i = 0; i < c->models_n; i++) {
-      asngn_model_slot *s = &c->models[i];
-      if (!s->loaded || s->injected) continue;
-      loaded_n++;
-      ram_mb += s->cfg.ram_mb;
-      vram_mb += s->cfg.vram_mb;
-      if ((int)i == keep || aux->in_use[i]) continue;
-      if (victim < 0 || s->last_used_ms < oldest) {
-        victim = (int)i;
-        oldest = s->last_used_ms;
-      }
-    }
-    if ((max <= 0 || loaded_n <= max) &&
-        (c->cfg.max_ram_mb <= 0 || ram_mb <= (size_t)c->cfg.max_ram_mb) &&
-        (c->cfg.max_vram_mb <= 0 ||
-         vram_mb <= (size_t)c->cfg.max_vram_mb)) return;
-    if (victim < 0) return;
-    {
-      asngn_model_slot *v = &c->models[victim];
-      if (v->iface.destroy != NULL) v->iface.destroy(v->iface.ud);
-      memset(&v->iface, 0, sizeof v->iface);
-      v->loaded = false;
-      asngn_log(c, ASNGN_LOG_INFO, "model",
-                "unloaded '%s' (LRU resource budget)", v->cfg.id);
-    }
-  }
+/* Request policy belongs to the engine; model lifetime belongs to asmodel. */
+typedef struct { asngn_token_fn fn; void *ud; } generation_stream;
+static void generation_token(const char *text, size_t len, void *ud) {
+  generation_stream *s = ud;
+  (void)len;
+  if (s->fn) s->fn(text, s->ud);
 }
-
-/* Evict idle residents before a cold load so hard budgets are not exceeded
- * even transiently. c->models_mu held. */
-static asngn_err prepare_resident_locked(asngn_ctx *c, int incoming) {
-  models_aux *aux = aux_find(c);
-  asngn_model_slot *want = &c->models[incoming];
-  if (aux == NULL) return ASNGN_OK;
-  for (;;) {
-    size_t ram_mb = want->cfg.ram_mb, vram_mb = want->cfg.vram_mb;
-    int resident = 1, victim = -1;
-    int64_t oldest = 0;
-    size_t i;
-    for (i = 0; i < c->models_n; ++i) {
-      asngn_model_slot *s = &c->models[i];
-      if ((int)i == incoming || !s->loaded || s->injected) continue;
-      resident++;
-      ram_mb += s->cfg.ram_mb;
-      vram_mb += s->cfg.vram_mb;
-      if (!aux->in_use[i] &&
-          (victim < 0 || s->last_used_ms < oldest)) {
-        victim = (int)i;
-        oldest = s->last_used_ms;
-      }
-    }
-    if ((c->cfg.max_resident <= 0 || resident <= c->cfg.max_resident) &&
-        (c->cfg.max_ram_mb <= 0 ||
-         ram_mb <= (size_t)c->cfg.max_ram_mb) &&
-        (c->cfg.max_vram_mb <= 0 ||
-         vram_mb <= (size_t)c->cfg.max_vram_mb))
-      return ASNGN_OK;
-    if (victim < 0)
-      return asngn_seterr(c, ASNGN_ERR_MODEL,
-                          "model '%s' exceeds resident/RAM/VRAM limits",
-                          want->cfg.id);
-    {
-      asngn_model_slot *v = &c->models[victim];
-      if (v->iface.destroy) v->iface.destroy(v->iface.ud);
-      memset(&v->iface, 0, sizeof v->iface);
-      v->loaded = false;
-      asngn_log(c, ASNGN_LOG_INFO, "model",
-                "unloaded '%s' (LRU resource budget)", v->cfg.id);
-    }
-  }
-}
-
-/* c->models_mu held. On success the slot is loaded (or injected). */
-static asngn_err ensure_loaded_locked(asngn_ctx *c, int slot) {
-  asngn_model_slot *s = &c->models[slot];
-  asngn_err e;
-
-  if (s->loaded || s->injected) return ASNGN_OK;
-  e = prepare_resident_locked(c, slot);
-  if (e != ASNGN_OK) return e;
-  {
-    /* phase marker: loads take seconds to tens of seconds on cold
-     * cache; without it the trace is silent exactly when the user
-     * wonders what the engine is doing */
-    char data[96];
-    snprintf(data, sizeof data, "{what: \"load\", model: \"%s\"}",
-             s->cfg.id);
-    asngn_tele_emit(c, "phase", NULL, NULL, NULL, 0, data);
-  }
-  e = s->cfg.backend == ASMODEL_BACKEND_OPENAI
-          ? asngn_model_openai_create(c, &s->cfg, &s->iface)
-          : asngn_model_llama_create(c, &s->cfg, &s->iface);
-  if (e != ASNGN_OK) return e;
-  s->loaded = true;
-  s->last_used_ms = asngn_clock_mono_ms(&c->clock);
-  enforce_resident_locked(c, slot);
-  return ASNGN_OK;
-}
-
-/* Count users, including waiters on the provider mutex, before LRU eviction. */
-static void slot_set_in_use(asngn_ctx *c, int slot, int on) {
-  models_aux *aux = aux_find(c);
-  if (aux != NULL) {
-    if (on) aux->in_use[slot]++;
-    else if (aux->in_use[slot]>0) aux->in_use[slot]--;
-  }
-}
-
-/* ---- generation --------------------------------------------------------- */
-
 asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
-                                const char *system_prompt,
-                                const char *user_prompt, const char *gbnf,
-                                int max_tokens_override,
-                                int64_t deadline_mono,
-                                asngn_token_fn token_cb, void *token_ud,
-                                volatile int *cancel,
-                                char **out_text, int *out_tokens_in,
-                                int *out_tokens_out) {
-  asngn_model_slot *s;
-  const asngn_sampling *sp;
-  asngn_gen_params p;
-  char *text = NULL;
-  int ti = 0, to = 0;
-  int64_t t0, t1, ms;
+    const char *sys, const char *user, const char *grammar, int max_tokens,
+    int64_t deadline, asngn_token_fn fn, void *ud, volatile int *cancel,
+    char **out, int *in, int *gen) {
+  asmodel_generate_params p = {0};
+  asmodel_generation_info info = {0};
+  generation_stream stream = {fn, ud};
   asngn_err e;
-  asmodel_generation_info gi;
-  bool have_gi = false;
-
-  if (out_text != NULL) *out_text = NULL;
-  if (out_tokens_in != NULL) *out_tokens_in = 0;
-  if (out_tokens_out != NULL) *out_tokens_out = 0;
-  if (c == NULL) return ASNGN_ERR_INVALID;
-  if (slot < 0 || (size_t)slot >= c->models_n)
-    return asngn_seterr(c, ASNGN_ERR_MODEL, "role unavailable");
-  s = &c->models[slot];
-
-  sp = task_sampling(&c->cfg, task);
-  p.temp = sp->temp;
-  p.top_p = sp->top_p;
-  p.max_tokens = max_tokens_override > 0 ? max_tokens_override
-                                         : sp->max_tokens;
-  p.repeat_penalty = sp->repeat_penalty;
-  p.reasoning = (task == ASNGN_TASK_DECIDE ||
-                 task == ASNGN_TASK_CLASSIFY ||
-                 task == ASNGN_TASK_JUDGE)
-                    ? ASMODEL_REASONING_REQUIRED_OFF
-                    : ASMODEL_REASONING_DEFAULT;
-  p.reasoning_budget = 0;
-  p.require_constraint = gbnf != NULL;
-  p.deadline_ms = 0;
-
-  if (deadline_mono > 0 &&
-      asngn_clock_mono_ms(&c->clock) >= deadline_mono)
-    return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
-                        "model '%s' %s deadline expired before inference",
-                        s->cfg.id, asngn_task_name(task));
-
-  /* Final gate for every call, including classifier, judge, compression
-   * and cache adaptation calls that do not use the zoned assembler. */
-  e = asngn_context_validate_text(
-      c, slot, system_prompt, user_prompt,
-      p.max_tokens > 0 ? p.max_tokens : c->cfg.rich_tokens);
-  if (e != ASNGN_OK) return e;
-
-  os_mutex_lock(&c->models_mu);
-  e = ensure_loaded_locked(c, slot);
-  if (e == ASNGN_OK && s->iface.generate == NULL)
-    e = asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s' cannot generate",
-                     s->cfg.id);
-  if (e != ASNGN_OK) {
-    os_mutex_unlock(&c->models_mu);
-    return e;
+  if (out) *out = NULL;
+  if (in) *in = 0;
+  if (gen) *gen = 0;
+  if (!c || slot < 0 || (size_t)slot >= c->models_n) return ASNGN_ERR_MODEL;
+  const asngn_sampling *sp = task_sampling(&c->cfg, task);
+  p.temperature=sp->temp; p.top_p=sp->top_p; p.repeat_penalty=sp->repeat_penalty;
+  p.max_tokens=max_tokens > 0 ? max_tokens : sp->max_tokens;
+  p.reasoning=(task==ASNGN_TASK_DECIDE || task==ASNGN_TASK_CLASSIFY || task==ASNGN_TASK_JUDGE)
+      ? ASMODEL_REASONING_REQUIRED_OFF : ASMODEL_REASONING_DEFAULT;
+  p.require_constraint=grammar != NULL; p.result_info=&info;
+  e=asngn_context_validate_text(c,slot,sys,user,p.max_tokens);
+  if (e!=ASNGN_OK) return e;
+  if (deadline > 0) {
+    p.deadline_ms=deadline-asngn_clock_mono_ms(&c->clock);
+    if (p.deadline_ms<=0) return asngn_seterr(c,ASNGN_ERR_TIMEOUT,"deadline expired before inference");
   }
-  slot_set_in_use(c, slot, 1);
-  os_mutex_unlock(&c->models_mu);
-
-  {
-    /* phase marker: the completion event below lands only when the
-     * call is done; this one tells the TUI what runs right now */
-    char data[128];
-    snprintf(data, sizeof data,
-             "{what: \"generate\", task: \"%s\", model: \"%s\"}",
-             asngn_task_name(task), s->cfg.id);
-    asngn_tele_emit(c, "phase", NULL, NULL, NULL, 0, data);
-  }
-
-  t0 = asngn_clock_mono_ms(&c->clock);
-  if (deadline_mono > 0) {
-    p.deadline_ms = deadline_mono - t0;
-    if (p.deadline_ms <= 0) {
-      os_mutex_lock(&c->models_mu);
-      slot_set_in_use(c, slot, 0);
-      os_mutex_unlock(&c->models_mu);
-      return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
-                          "model '%s' %s deadline expired before inference",
-                          s->cfg.id, asngn_task_name(task));
-    }
-  }
-  os_mutex_lock(&s->mu);
-  if (deadline_mono>0) p.deadline_ms=deadline_mono-asngn_clock_mono_ms(&c->clock);
-  if (cancel && *cancel) e=ASNGN_ERR_CANCELLED;
-  else if (deadline_mono>0 && p.deadline_ms<=0) e=ASNGN_ERR_TIMEOUT;
-  else e = s->iface.generate(s->iface.ud, system_prompt, user_prompt, gbnf, &p,
-                        token_cb, token_ud, cancel, &text, &ti, &to);
-  memset(&gi, 0, sizeof gi);
-  if (s->iface.last_generation_info != NULL &&
-      s->iface.last_generation_info(s->iface.ud, &gi) == 0)
-    have_gi = true;
-  os_mutex_unlock(&s->mu);
-  t1 = asngn_clock_mono_ms(&c->clock);
-
-  os_mutex_lock(&c->models_mu);
-  slot_set_in_use(c, slot, 0);
-  s->last_used_ms = t1;
-  os_mutex_unlock(&c->models_mu);
-
-  if (e != ASNGN_OK) {
-    char backend_error[512] = {0};
-    if (s->iface.last_error != NULL) {
-      const char *detail = s->iface.last_error(s->iface.ud);
-      if (detail != NULL && detail[0] != '\0')
-        snprintf(backend_error, sizeof backend_error, "%s", detail);
-    }
-    if (e == ASNGN_ERR_LIMIT) {
-      if (out_tokens_in != NULL) *out_tokens_in = ti;
-      if (out_tokens_out != NULL) *out_tokens_out = to;
-      if (out_text != NULL) *out_text = text;
-      else free(text);
-      if (backend_error[0] != '\0')
-        return asngn_seterr(c, ASNGN_ERR_LIMIT,
-                            "model '%s' %s reached output limit: %s",
-                            s->cfg.id, asngn_task_name(task), backend_error);
-      return asngn_seterr(c, ASNGN_ERR_LIMIT,
-                          "model '%s' %s reached output limit",
-                          s->cfg.id, asngn_task_name(task));
-    }
-    free(text);
-    if (e == ASNGN_ERR_CANCELLED) return e;
-    if (e == ASNGN_ERR_TIMEOUT) {
-      if (backend_error[0] != '\0')
-        return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
-                            "model '%s' %s deadline expired: %s",
-                            s->cfg.id, asngn_task_name(task), backend_error);
-      return asngn_seterr(c, ASNGN_ERR_TIMEOUT,
-                          "model '%s' %s deadline expired",
-                          s->cfg.id, asngn_task_name(task));
-    }
-    if (backend_error[0] != '\0')
-      return asngn_seterr(c,
-                          e == ASNGN_ERR_LIMIT ? ASNGN_ERR_LIMIT
-                          : e == ASNGN_ERR_UNSUPPORTED
-                              ? ASNGN_ERR_UNSUPPORTED
-                              : ASNGN_ERR_MODEL,
-                          "model '%s' %s failed: %s",
-                          s->cfg.id, asngn_task_name(task), backend_error);
-    return asngn_seterr(c,
-                        e == ASNGN_ERR_LIMIT ? ASNGN_ERR_LIMIT
-                        : e == ASNGN_ERR_UNSUPPORTED
-                            ? ASNGN_ERR_UNSUPPORTED
-                            : ASNGN_ERR_MODEL,
-                        "model '%s' %s failed (%s)",
-                        s->cfg.id, asngn_task_name(task), asngn_err_name(e));
-  }
-
-  ms = t1 - t0;
-  {
-    char data[256];
-    double tps = ms > 0 ? (double)to / ((double)ms / 1000.0) : 0.0;
-    if (have_gi) {
-      snprintf(data, sizeof data,
-               "{model: \"%s\", task: \"%s\", tokens_in: %d, "
-               "tokens_out: %d, reasoning_tokens: %d, cached_tokens: %d, "
-               "ms: %lld, tps: %.1f}",
-               s->cfg.id, asngn_task_name(task), ti, to,
-               gi.reasoning_tokens, gi.cached_input_tokens,
-               (long long)ms, tps);
-    } else {
-      snprintf(data, sizeof data,
-               "{model: \"%s\", task: \"%s\", tokens_in: %d, "
-               "tokens_out: %d, ms: %lld, tps: %.1f}",
-               s->cfg.id, asngn_task_name(task), ti, to, (long long)ms, tps);
-    }
-    asngn_tele_emit(c, "model_call", NULL, NULL, NULL, 0, data);
-  }
-
-  if (out_tokens_in != NULL) *out_tokens_in = ti;
-  if (out_tokens_out != NULL) *out_tokens_out = to;
-  if (out_text != NULL) *out_text = text;
-  else free(text);
+  char *text = NULL;
+  int ti=0, to=0;
+  int64_t started=asngn_clock_mono_ms(&c->clock);
+  e=asngn_from_model_error(asmodel_generate(c->shared_models,c->models[slot].cfg.id,
+      sys,user,grammar,&p,fn ? generation_token : NULL,&stream,cancel,&text,&ti,&to));
+  if (in) *in=ti;
+  if (gen) *gen=to;
+  if (out) *out=text; else free(text);
+  char data[256];
+  snprintf(data,sizeof data,"{model: \"%s\", task: \"%s\", tokens_in: %d, tokens_out: %d, ms: %lld, usage_known: %s}",
+      c->models[slot].cfg.id,asngn_task_name(task),ti,to,
+      (long long)(asngn_clock_mono_ms(&c->clock)-started),info.usage_known ? "true" : "false");
+  asngn_tele_emit(c,"model_call",NULL,NULL,NULL,0,data);
+  if (e!=ASNGN_OK) return asngn_seterr(c,e,"%s: %s",
+      e==ASNGN_ERR_TIMEOUT ? "deadline expired" : asngn_err_name(e), info.error);
   return ASNGN_OK;
-}
-
-/* ---- token counting ----------------------------------------------------- */
-
-/* degraded fallback: byte/4 heuristic, WARN once per context. */
-static int count_heuristic(asngn_ctx *c, const char *text) {
-  models_aux *aux;
-  int warn = 0;
-
-  os_mutex_lock(&c->models_mu);
-  aux = aux_find(c);
-  if (aux != NULL && !aux->heuristic_warned) {
-    aux->heuristic_warned = 1;
-    warn = 1;
-  }
-  os_mutex_unlock(&c->models_mu);
-  if (warn)
-    asngn_log(c, ASNGN_LOG_WARN, "model",
-              "no tokenizer available; falling back to the byte/4 "
-              "heuristic ");
-  return asngn_token_heuristic(text);
 }
 
 int asngn_models_count_tokens(asngn_ctx *c, int slot, const char *text) {
-  asngn_model_slot *s;
-  asngn_err e;
-  int n;
-
-  if (c == NULL) return asngn_token_heuristic(text);
-  if (slot < 0 || (size_t)slot >= c->models_n)
-    return count_heuristic(c, text);
-  s = &c->models[slot];
-
-  /* Exact accounting: counting is worth the load — a not-yet-loaded
-   * slot is loaded here rather than estimated around. */
-  os_mutex_lock(&c->models_mu);
-  e = ensure_loaded_locked(c, slot);
-  if (e != ASNGN_OK || s->iface.count_tokens == NULL) {
-    os_mutex_unlock(&c->models_mu);
-    return count_heuristic(c, text);
-  }
-  slot_set_in_use(c, slot, 1);
-  os_mutex_unlock(&c->models_mu);
-
-  os_mutex_lock(&s->mu);
-  n = s->iface.count_tokens(s->iface.ud, text);
-  os_mutex_unlock(&s->mu);
-
-  os_mutex_lock(&c->models_mu);
-  slot_set_in_use(c, slot, 0);
-  s->last_used_ms = asngn_clock_mono_ms(&c->clock);
-  os_mutex_unlock(&c->models_mu);
-
-  if (n < 0) return count_heuristic(c, text);
-  return n;
+  int n = c && c->shared_models && slot >= 0 && (size_t)slot < c->models_n ?
+      asmodel_count_tokens(c->shared_models,c->models[slot].cfg.id,text ? text : "") : -1;
+  return n >= 0 ? n : asngn_token_heuristic(text);
 }
-
-int asngn_models_count_prompt(asngn_ctx *c, int slot,
-                              const char *system_prompt,
-                              const char *user_prompt) {
-  asngn_model_slot *s;
-  asngn_err e;
-  int n;
-  if (c == NULL || slot < 0 || (size_t)slot >= c->models_n)
-    return asngn_token_heuristic(system_prompt) +
-           asngn_token_heuristic(user_prompt) + 16;
-  s = &c->models[slot];
-  os_mutex_lock(&c->models_mu);
-  e = ensure_loaded_locked(c, slot);
-  if (e != ASNGN_OK) {
-    os_mutex_unlock(&c->models_mu);
-    return asngn_token_heuristic(system_prompt) +
-           asngn_token_heuristic(user_prompt) + 16;
+int asngn_models_count_prompt(asngn_ctx *c, int slot, const char *sys, const char *user) {
+  if (c && c->shared_models && slot >= 0 && (size_t)slot < c->models_n) {
+    int n=asmodel_count_prompt_tokens(c->shared_models,c->models[slot].cfg.id,sys,user);
+    if (n>=0) return n;
   }
-  slot_set_in_use(c, slot, 1);
-  os_mutex_unlock(&c->models_mu);
-  os_mutex_lock(&s->mu);
-  if (s->iface.count_prompt_tokens != NULL)
-    n = s->iface.count_prompt_tokens(s->iface.ud, system_prompt, user_prompt);
-  else
-    n = (s->iface.count_tokens != NULL
-             ? s->iface.count_tokens(s->iface.ud, system_prompt) +
-                   s->iface.count_tokens(s->iface.ud, user_prompt)
-             : asngn_token_heuristic(system_prompt) +
-                   asngn_token_heuristic(user_prompt)) + 16;
-  os_mutex_unlock(&s->mu);
-  os_mutex_lock(&c->models_mu);
-  slot_set_in_use(c, slot, 0);
-  os_mutex_unlock(&c->models_mu);
-  return n;
+  asmodel_provider unavailable = {0};
+  return asmodel_provider_measure_prompt(&unavailable,sys,user).admission_tokens;
 }
 
 /* ---- embedding ---------------------------------------------------------- */
 
+asngn_err asngn_models_embed_kind(asngn_ctx *c, const char *text, int is_query, float *out) {
+  if (!c || !out) return ASNGN_ERR_INVALID;
+  int slot=c->role_slot[ASNGN_ROLE_EMBEDDER];
+  if (slot<0 || (size_t)slot>=c->models_n) return ASNGN_ERR_MODEL;
+  return asngn_from_model_error(asmodel_embed(c->shared_models,c->models[slot].cfg.id,text,is_query,out));
+}
 asngn_err asngn_models_embed(asngn_ctx *c, const char *text, float *out) {
-  asngn_model_slot *s;
-  asngn_err e;
-  int slot;
-
-  if (c == NULL || out == NULL) return ASNGN_ERR_INVALID;
-  slot = c->role_slot[ASNGN_ROLE_EMBEDDER];
-  if (slot < 0 || (size_t)slot >= c->models_n)
-    return asngn_seterr(c, ASNGN_ERR_MODEL, "embedder role unavailable");
-  s = &c->models[slot];
-
-  os_mutex_lock(&c->models_mu);
-  e = ensure_loaded_locked(c, slot);
-  if (e == ASNGN_OK && s->iface.embed == NULL)
-    e = asngn_seterr(c, ASNGN_ERR_MODEL, "model '%s' cannot embed",
-                     s->cfg.id);
-  if (e != ASNGN_OK) {
-    os_mutex_unlock(&c->models_mu);
-    return e;
-  }
-  slot_set_in_use(c, slot, 1);
-  os_mutex_unlock(&c->models_mu);
-
-  os_mutex_lock(&s->mu);
-  e = s->iface.embed(s->iface.ud, text, out);
-  os_mutex_unlock(&s->mu);
-
-  os_mutex_lock(&c->models_mu);
-  slot_set_in_use(c, slot, 0);
-  s->last_used_ms = asngn_clock_mono_ms(&c->clock);
-  os_mutex_unlock(&c->models_mu);
-
-  if (e != ASNGN_OK)
-    return asngn_seterr(c,
-                        e == ASNGN_ERR_NOMEM ? ASNGN_ERR_NOMEM
-                                             : ASNGN_ERR_MODEL,
-                        "model '%s' embed failed (%s)", s->cfg.id,
-                        asngn_err_name(e));
-  return ASNGN_OK;
+  return asngn_models_embed_kind(c,text,1,out);
 }
 
 int asngn_models_embed_dim(asngn_ctx *c) {

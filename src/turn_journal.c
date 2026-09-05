@@ -22,7 +22,7 @@ static asngn_err append(asngn_session *s, xcdn_value_t *v) {
   e = asngn_xnode_write(node, false, &b);
   xcdn_node_free(node);
   if (e == ASNGN_OK)
-    e = asngn_stream_append(s->ctx, &s->journal_st, b.data, b.len);
+    e = asngn_wal_append(s->ctx, &s->journal_st, b.data, b.len);
   asngn_buf_free(&b);
   return e;
 }
@@ -43,7 +43,11 @@ asngn_err asngn_turn_journal(asngn_turn_state *t, const char *state,
   asngn_err e;
   if (!v)
     return ASNGN_ERR_NOMEM;
-  if (!asngn_xobj_put(v, "at",
+  if (!asngn_xobj_put(v, "schema", xcdn_value_int(1)) ||
+      !asngn_xobj_put(v, "action_id", xcdn_value_string(t->action_id)) ||
+      !asngn_xobj_put(v, "verification_snapshot", xcdn_value_string(t->verification_snapshot)) ||
+      !asngn_xobj_put(v, "verification_ok", xcdn_value_bool(t->verification_ok)) ||
+      !asngn_xobj_put(v, "at",
                       xcdn_value_int(asngn_clock_now(&t->s->ctx->clock))) ||
       !asngn_xobj_put(v, "input", xcdn_value_string(action ? action : "")) ||
       !asngn_xobj_put(v, "workspace",
@@ -136,6 +140,7 @@ done:
 asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer) {
   asngn_session *s = t->s;
   xcdn_value_t *v = frame(t->span_root, "committed");
+  (void)asngn_verification_current(t);
   xcdn_node_t *node;
   asngn_buf b;
   asngn_err e;
@@ -152,7 +157,7 @@ asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer) {
     asngn_buf_init(&cp);
     e = asngn_buf_printf(
         &cp,
-        "goal: %s\nstatus: complete\nphase: response\nturn_id: %s\n"
+        "goal: %s\nturn_state: committed\ntask_state: unconfirmed\nphase: response\nturn_id: %s\n"
         "artifact_written: %s\nverification_attempted: %s\nverification_ok: %s",
         t->user_msg ? t->user_msg : "", t->span_root,
         t->artifact_written ? "true" : "false",
@@ -176,7 +181,7 @@ asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer) {
     /* Once append is attempted, fsync errors have an uncertain outcome.
      * Require reopen/recovery instead of allowing another live turn. */
     s->recovery_required = true;
-    e = asngn_stream_append(s->ctx, &s->journal_st, b.data, b.len);
+    e = asngn_wal_append(s->ctx, &s->journal_st, b.data, b.len);
     if (e == ASNGN_OK) {
       t->tx_committed = true;
       e = boundary(s->ctx, "committed");
@@ -198,12 +203,12 @@ oom:
 asngn_err asngn_turn_recover(asngn_session *s) {
   struct xcdn_document *doc = NULL;
   asngn_err e =
-      asngn_stream_load(s->ctx, s->journal_st.path, "turn journal", &doc);
+      asngn_wal_load(s->ctx, s->journal_st.path, &doc);
   if (e != ASNGN_OK)
     return e;
   if (!doc)
     return ASNGN_OK;
-  char pending[37] = {0};
+  char pending[37] = {0}, pending_action[37] = {0};
   size_t actions = 0;
   const xcdn_value_t *last_commit = NULL;
   s->interrupted_turns = 0;
@@ -222,24 +227,37 @@ asngn_err asngn_turn_recover(asngn_session *s) {
         s->uncertain_actions += actions;
       }
       memcpy(pending, id, 37);
-      actions = 0;
+      actions = 0; pending_action[0] = 0;
     } else if (strcmp(id, pending)) {
       e = ASNGN_ERR_PARSE;
       break;
     }
     if (!strcmp(state, "action")) {
+      const char *action_id = asngn_xstr(asngn_xfield(v, "action_id"));
+      if (pending_action[0] || !action_id || !asngn_uuid_valid(action_id)) {
+        e = ASNGN_ERR_PARSE; break;
+      }
+      memcpy(pending_action, action_id, 37);
       actions++;
       int64_t epoch = 0;
       if (asngn_xint(asngn_xfield(v, "world_epoch"), &epoch) && epoch > 0 &&
           (uint64_t)epoch > s->world_epoch)
         s->world_epoch = (uint64_t)epoch;
     }
+    if (!strcmp(state, "observed")) {
+      const char *action_id = asngn_xstr(asngn_xfield(v, "action_id"));
+      if (!action_id || !pending_action[0] || strcmp(action_id, pending_action)) {
+        e = ASNGN_ERR_PARSE; break;
+      }
+      actions--; pending_action[0] = 0;
+    }
     if (!strcmp(state, "committed")) {
       e = project(s, v);
       pending[0] = 0;
       actions = 0;
       last_commit = v;
-    } else if (strcmp(state, "started") && strcmp(state, "action"))
+    } else if (strcmp(state, "started") && strcmp(state, "action") &&
+               strcmp(state, "observed"))
       e = ASNGN_ERR_PARSE;
     if (e != ASNGN_OK)
       break;

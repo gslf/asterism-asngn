@@ -33,6 +33,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
@@ -105,13 +106,38 @@ void os_rwlock_wrunlock(os_rwlock *l) { pthread_rwlock_unlock(&l->l); }
 
 /* ---- filesystem --------------------------------------------------------- */
 
+FILE *os_store_lock(const char *path) {
+    int fd = open(path, O_CREAT | O_RDWR | O_NOFOLLOW | O_CLOEXEC, 0600);
+    FILE *f;
+    if (fd < 0) return NULL;
+    if (flock(fd, LOCK_EX | LOCK_NB) != 0) { close(fd); return NULL; }
+    f = fdopen(fd, "r+b");
+    if (!f) close(fd);
+    return f;
+}
+
+asngn_err os_sync_parent(const char *path) {
+    char *copy = strdup(path), *slash;
+    int fd, rc;
+    if (!copy) return ASNGN_ERR_NOMEM;
+    slash = strrchr(copy, '/');
+    if (slash == copy) slash[1] = 0;
+    else if (slash) *slash = 0;
+    fd = open(slash ? copy : ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+    free(copy);
+    if (fd < 0) return ASNGN_ERR_IO;
+    rc = fsync(fd);
+    close(fd);
+    return rc == 0 ? ASNGN_OK : ASNGN_ERR_IO;
+}
+
 asngn_err os_file_replace(const char *src, const char *dst)
 {
     if (src == NULL || dst == NULL)
         return ASNGN_ERR_INVALID;
     if (rename(src, dst) != 0)
         return (errno == ENOENT) ? ASNGN_ERR_NOT_FOUND : ASNGN_ERR_IO;
-    return ASNGN_OK;
+    return os_sync_parent(dst);
 }
 
 asngn_err os_rename(const char *src, const char *dst)
@@ -266,8 +292,8 @@ static asngn_err os_list_kind(const char *path, int want_dirs,
             os_free_names(names, n);
             return ASNGN_ERR_NOMEM;
         }
-        keep = stat(full, &st) == 0 &&
-               (want_dirs ? S_ISDIR(st.st_mode) : S_ISREG(st.st_mode));
+        keep = lstat(full, &st) == 0 &&
+               (want_dirs ? S_ISDIR(st.st_mode) : (S_ISREG(st.st_mode) || S_ISLNK(st.st_mode)));
         free(full);
         if (!keep)
             continue;

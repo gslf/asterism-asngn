@@ -244,65 +244,9 @@ static bool coding_task(asngn_route_task task) {
          task == ASNGN_RTASK_BUILD;
 }
 
-static bool coding_verification_unresolved(const asngn_turn_state *t) {
+static bool coding_verification_unresolved(asngn_turn_state *t) {
   return coding_task(t->prof.task) && t->artifact_written &&
-         (!t->verification_attempted || !t->verification_ok);
-}
-
-static bool loop_ci_contains(const char *hay, const char *needle) {
-  size_t nl;
-  if (hay == NULL || needle == NULL) return false;
-  nl = strlen(needle);
-  for (; *hay != '\0'; hay++) {
-    size_t i;
-    for (i = 0; i < nl; i++) {
-      unsigned char a = (unsigned char)hay[i];
-      unsigned char b = (unsigned char)needle[i];
-      if (a == '\0') return false;
-      if (a >= 'A' && a <= 'Z') a = (unsigned char)(a - 'A' + 'a');
-      if (b >= 'A' && b <= 'Z') b = (unsigned char)(b - 'A' + 'a');
-      if (a != b) break;
-    }
-    if (i == nl) return true;
-  }
-  return false;
-}
-
-static bool verification_command(const char *ref, const char *cmd,
-                                 const char *args) {
-  static const char *const cues[] = {
-      "test", "build", "check", "compile", "diagnostic", "lint",
-      "ctest", "pytest", "unittest", "cmake", "ninja", "make",
-      "cargo", "dotnet", "msbuild", "gcc", "g++", "clang", "npm",
-      "pnpm", "yarn", NULL};
-  size_t i;
-
-  if (cmd == NULL) return false;
-  if (tool_ref_is(ref, "project"))
-    return strcmp(cmd, "build") == 0 || strcmp(cmd, "test") == 0 ||
-           strcmp(cmd, "lint") == 0 || strcmp(cmd, "diagnostics") == 0;
-  for (i = 0; cues[i] != NULL; i++) {
-    if (loop_ci_contains(cmd, cues[i]) || loop_ci_contains(args, cues[i]))
-      return true;
-  }
-  return false;
-}
-
-/* proc.run and project workflows return a normal RESULT even when the child
- * exits non-zero.  Distinguish "the tool replied" from "verification
- * passed" by reading the canonical top-level exit_code when present. */
-static bool verification_result_ok(const char *result_xcdn) {
-  const char *p;
-  char *end;
-  long code;
-  if (result_xcdn == NULL) return true;
-  p = strstr(result_xcdn, "exit_code");
-  if (p == NULL) return true;
-  p = strchr(p, ':');
-  if (p == NULL) return false;
-  p++;
-  code = strtol(p, &end, 10);
-  return end != p && code == 0;
+         (!t->verification_attempted || !asngn_verification_current(t));
 }
 
 /* An identical command is only identical while the inputs it can observe are
@@ -1316,20 +1260,38 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     { asngn_buf intent; asngn_buf_init(&intent);
       e=asngn_buf_printf(&intent,"%s.%s %s",ref,cmd,exec_args ? exec_args : "{}");
       t->action_mutates=!note.read_only;
+      asngn_uuid_v4(t->action_id);
       if (e==ASNGN_OK) e=asngn_turn_journal(t,"action",intent.data);
       asngn_buf_free(&intent);
       if (e!=ASNGN_OK) goto out;
     }
+    /* A failed mutation may still have changed files. Revoke before dispatch. */
+    if (!note.read_only &&
+        !asngn_verification_command(ref, cmd, expanded_args)) {
+      t->verification_attempted = false;
+      t->verification_ok = false;
+    }
+    char proof_base[65] = "";
+    if (asngn_verification_command(ref, cmd, expanded_args) &&
+        asngn_workspace_refresh(c) == ASNGN_OK)
+      memcpy(proof_base, c->workspace.fingerprint, sizeof proof_base);
     ae = astools_invoke(c->astools, ref, cmd, exec_args, deadline_ms, &r);
     t->tool_calls++;
     t->tools_used = true;
     if (ae == ASTOOLS_OK && r.ok) t->tool_ok_seen = true;
     if (t->artifact_written &&
-        verification_command(ref, cmd, expanded_args)) {
+        asngn_verification_command(ref, cmd, expanded_args)) {
       t->verification_attempted = true;
       t->verification_ok = ae == ASTOOLS_OK && r.ok &&
-                           verification_result_ok(r.result_xcdn);
+                           asngn_verification_result_ok(r.result_xcdn) &&
+                           proof_base[0] && asngn_workspace_refresh(c) == ASNGN_OK &&
+                           !strcmp(proof_base, c->workspace.fingerprint);
+      memcpy(t->verification_snapshot, proof_base, sizeof proof_base);
+      memcpy(t->verification_action_id, t->action_id, sizeof t->action_id);
     }
+    e = asngn_turn_journal(t, "observed", r.result_xcdn ? r.result_xcdn :
+                            (r.error_code ? r.error_code : "unknown outcome"));
+    if (e != ASNGN_OK) { astools_result_free(&r); goto out; }
     {
       char lbl[132];
       char **nl;
@@ -1375,7 +1337,12 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     if (ae == ASTOOLS_OK && r.ok && !note.read_only) {
       uint8_t workspace_hash[32];
       t->wrote_workspace = true;
-      if (artifact_command(ref, cmd)) t->artifact_written = true;
+      if (artifact_command(ref, cmd) &&
+          !asngn_verification_command(ref, cmd, expanded_args)) {
+        t->artifact_written = true;
+        t->verification_attempted = false;
+        t->verification_ok = false;
+      }
       s->world_epoch++;
       asngn_toolcache_clear(c);
       /* The action WAL reserved this epoch before dispatch. Recovery
@@ -2054,7 +2021,7 @@ static asngn_err answer_system_build(asngn_ctx *c, asngn_turn_state *t,
                     : "";
   if (t->verification_attempted)
     verification_status =
-        t->verification_ok
+        asngn_verification_current(t)
             ? " Engine state confirms that an applicable verification "
               "command succeeded."
             : " Engine state records an attempted verification that did not "

@@ -89,13 +89,23 @@ TEST(concurrent_sessions_backpressure_and_queue_deadline) {
     os_cond_timedwait(&b.cv, &b.mu, 20);
   os_mutex_unlock(&b.mu);
   ASSERT_OK(asngn_submit(s[1], "hello", NULL, NULL, NULL, &t[1]));
-  os_mutex_lock(&b.mu);
+  /* Both sessions occupy lanes, but one backend instance serializes decoding.
+   * The second lane must borrow the same manager, never reload the weights. */
   until = os_monotonic_ms() + 3000;
-  while (b.entered < 2 && os_monotonic_ms() < until)
-    os_cond_timedwait(&b.cv, &b.mu, 20);
+  size_t active = 0;
+  do {
+    os_mutex_lock(&c->q_mu);
+    active = (c->lanes[0]->active_task != NULL) + (c->lanes[1]->active_task != NULL);
+    os_mutex_unlock(&c->q_mu);
+    if (active < 2) os_sleep_ms(1);
+  } while (active < 2 && os_monotonic_ms() < until);
+  ASSERT_EQ_INT(active, 2);
+  ASSERT_TRUE(c->lanes[0]->shared_models == c->shared_models);
+  ASSERT_TRUE(c->lanes[1]->shared_models == c->shared_models);
+  os_mutex_lock(&b.mu);
   int entered = b.entered;
   os_mutex_unlock(&b.mu);
-  ASSERT_EQ_INT(entered, 2); /* fails under a global worker or model mutex */
+  ASSERT_EQ_INT(entered, 1);
   ASSERT_TRUE(strcmp(c->lanes[0]->workspace.canonical_root,
                      c->lanes[1]->workspace.canonical_root) != 0);
   ASSERT_TRUE(strcmp(c->workspace.canonical_root,

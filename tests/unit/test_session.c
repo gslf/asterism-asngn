@@ -498,6 +498,7 @@ TEST(turn_journal_crash_recovery) {
       if (asngn_session_stage_turn(session,&u)!=ASNGN_OK) _exit(4);
       session->turns=1;
       t.action_mutates=true;
+      asngn_uuid_v4(t.action_id);
       if (asngn_turn_journal(&t,"action","edit.apply {patch: pending}")!=ASNGN_OK) _exit(5);
       a.n=2;a.at=f.clk.now;a.text="verified answer";strcpy(a.role,"assistant");memcpy(a.turn_id,t.span_root,37);
       (void)asngn_turn_commit(&t,&a);_exit(6);

@@ -348,6 +348,7 @@ typedef struct {
   int reasoning_budget;
   bool require_constraint;
   const char *output_schema;
+  asmodel_generation_info *result_info;
   int64_t deadline_ms;   /* maximum duration for this inference; 0 = none */
 } asngn_gen_params;
 
@@ -373,8 +374,6 @@ typedef struct asngn_model_iface {
   asngn_err (*embed)(void *ud, const char *const *texts, size_t count, int is_query,
                        const asmodel_embed_params *params, float *out); /* count * dim floats,
                          L2-normalized; only on embedding models */
-  const char *(*last_error)(void *ud); /* optional backend diagnostic */
-  int (*last_generation_info)(void *ud, asmodel_generation_info *out);
   void (*destroy)(void *ud);
 } asngn_model_iface;
 

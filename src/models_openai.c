@@ -31,17 +31,12 @@ static asngn_err remote_generate(void *ud, const char *sys, const char *user,
   p.reasoning_budget = params->reasoning_budget;
   p.output_schema = params->output_schema;
   p.require_constraint = params->require_constraint ? 1 : 0;
-  p.deadline_ms = params->deadline_ms;
+  p.deadline_ms = params->deadline_ms; p.result_info = params->result_info;
   bridge.fn = token_fn; bridge.ud = token_ud;
   rc = u->provider.generate(u->provider.userdata, sys, user, grammar, &p,
                             token_fn ? remote_token : NULL, &bridge, cancel,
                             out, out_in, out_gen);
-  if (cancel && *cancel) return ASNGN_ERR_CANCELLED;
-  if (rc == ASMODEL_OK) return ASNGN_OK;
-  if (rc == ASMODEL_ERR_LIMIT) return ASNGN_ERR_LIMIT;
-  if (rc == ASMODEL_ERR_UNSUPPORTED) return ASNGN_ERR_UNSUPPORTED;
-  if (rc == ASMODEL_ERR_TIMEOUT) return ASNGN_ERR_TIMEOUT;
-  return ASNGN_ERR_MODEL;
+  return asngn_from_model_error((asmodel_err)rc);
 }
 
 static asngn_err remote_embed(void *ud, const char *const *texts, size_t count,
@@ -60,19 +55,6 @@ static int remote_count(void *ud, const char *text) {
 static int remote_count_prompt(void *ud, const char *sys, const char *user) {
   openai_ud *u = (openai_ud *)ud;
   return asmodel_provider_measure_prompt(&u->provider, sys, user).admission_tokens;
-}
-
-static const char *remote_last_error(void *ud) {
-  openai_ud *u = (openai_ud *)ud;
-  return u->provider.last_error
-             ? u->provider.last_error(u->provider.userdata)
-             : NULL;
-}
-
-static int remote_last_generation_info(void *ud,
-                                       asmodel_generation_info *out) {
-  openai_ud *u = (openai_ud *)ud;
-  return asmodel_provider_last_generation_info(&u->provider, out);
 }
 
 static void remote_destroy(void *ud) {
@@ -109,8 +91,6 @@ asngn_err asngn_model_openai_create(asngn_ctx *c,
   out->embed = e->embedding ? remote_embed : NULL;
   out->count_tokens = remote_count;
   out->count_prompt_tokens = remote_count_prompt;
-  out->last_error = remote_last_error;
-  out->last_generation_info = remote_last_generation_info;
   out->destroy = remote_destroy;
   asngn_log(c, ASNGN_LOG_INFO, "model",
             "configured OpenAI-compatible '%s' -> %s (%s)", e->id,

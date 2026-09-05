@@ -43,7 +43,7 @@ trials require actual resources. No real-model result has been produced here.
   the current embedded wrapper serializes requests to one backend instance.
   This is shared residency, not native multi-sequence decoding. The former
   duplicate engine LRU/load machinery was removed.
-- Output contracts now travel explicitly through asmodel ABI 5. The remote
+- Output contracts now travel explicitly through asmodel ABI 6. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
   GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns
   its curation/review/recall schema and exact output wrapper. Astools exports typed
@@ -118,6 +118,10 @@ trials require actual resources. No real-model result has been produced here.
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
   all five executables with ASan/UBSan/LeakSanitizer.
+- Generation mock tests retain decoded prefixes after timeout/cancellation,
+  distinguish unknown usage, and prove that a later call cannot overwrite an
+  earlier receipt. Native adapters compile with the same per-request contract;
+  real-weight behavior remains unmeasured. Recall tests check remaining durations.
 - Embedding regressions cover reordered remote batches, queue expiry, cancellation,
   partial results, invalid vectors, immutable pipeline fields and identity changes.
   A shared-host test proves that Asper and Asngn use the host prefixes exactly once;

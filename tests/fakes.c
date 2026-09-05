@@ -102,7 +102,7 @@ int fake_model_push_partial_limit(fake_model *fm, const char *partial) {
   return ok;
 }
 
-static asngn_err fake_model_generate(void *ud, const char *system_prompt,
+static asngn_err fake_model_generate_impl(void *ud, const char *system_prompt,
                                      const char *user_prompt,
                                      const char *gbnf,
                                      const asngn_gen_params *p,
@@ -192,14 +192,22 @@ static asngn_err fake_model_embed(void *ud, const char *const *texts, size_t cou
   return ASNGN_OK;
 }
 
-static int fake_generation_info(void *ud, asmodel_generation_info *out) {
-  fake_model *fm = ud;
-  if (!fm->json_output) return -1;
-  memset(out, 0, sizeof *out);
-  out->json_output = fm->had_schema;
-  out->finish_reason = ASMODEL_FINISH_STOP;
-  out->usage_known = 1;
-  return 0;
+static asngn_err fake_model_generate(void *ud, const char *sys, const char *user,
+    const char *gbnf, const asngn_gen_params *p, asngn_token_fn fn, void *fn_ud,
+    volatile int *cancel, char **out, int *in, int *gen) {
+  int ti = 0, to = 0;
+  asngn_err e = fake_model_generate_impl(ud,sys,user,gbnf,p,fn,fn_ud,cancel,out,&ti,&to);
+  if (in) *in = ti;
+  if (gen) *gen = to;
+  if (p->result_info) {
+    asmodel_generation_info *info = p->result_info;
+    memset(info,0,sizeof *info); info->input_tokens = ti; info->output_tokens = to;
+    info->usage_known = e == ASNGN_OK || e == ASNGN_ERR_LIMIT;
+    info->json_output = ((fake_model *)ud)->json_output && p->output_schema;
+    info->finish_reason = e == ASNGN_OK ? ASMODEL_FINISH_STOP : e == ASNGN_ERR_LIMIT ?
+        ASMODEL_FINISH_LENGTH : e == ASNGN_ERR_CANCELLED ? ASMODEL_FINISH_CANCELLED : ASMODEL_FINISH_ERROR;
+  }
+  return e;
 }
 
 asngn_model_iface fake_model_iface(fake_model *fm) {
@@ -207,7 +215,6 @@ asngn_model_iface fake_model_iface(fake_model *fm) {
   memset(&it, 0, sizeof it);
   it.ud = fm;
   it.generate = fake_model_generate;
-  it.last_generation_info = fake_generation_info;
   it.count_tokens = fake_model_count_tokens;
   it.count_prompt_tokens = fake_model_count_prompt_tokens;
   it.embed = fake_model_embed;

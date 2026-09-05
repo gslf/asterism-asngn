@@ -295,11 +295,11 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   asngn_buf outbuf;
   asngn_err e;
   int32_t i, n_past;
-  int produced, limit;
+  int produced = 0, limit;
   int64_t deadline_at = p->deadline_ms > 0
                             ? os_monotonic_ms() + p->deadline_ms
                             : 0;
-  bool hit_eog = false;
+  bool hit_eog = false, constrained = false;
 
   *out_text = NULL;
   *out_tokens_in = 0;
@@ -317,7 +317,7 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
    * reasoning-off contract because the grammar makes reasoning tokens
    * illegal.  Do not pretend that a model-specific prompt suffix can provide
    * the same guarantee for unconstrained output. */
-  if (p->reasoning == ASMODEL_REASONING_REQUIRED_OFF && gbnf == NULL) {
+  if ((p->require_constraint || p->reasoning == ASMODEL_REASONING_REQUIRED_OFF) && gbnf == NULL) {
     e = ASNGN_ERR_UNSUPPORTED;
     goto out;
   }
@@ -378,6 +378,7 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
       goto out;
     }
     llama_sampler_chain_add(chain, grammar);
+    constrained = true;
   }
   if (p->repeat_penalty > 1.0) {
     /* after the grammar mask so -inf survives the scaling: recent legal
@@ -496,11 +497,19 @@ out:
   if (chain != NULL) llama_sampler_free(chain);
   free(tok);
   free(prompt);
+  if (!*out_text && outbuf.len) *out_text = asngn_buf_detach(&outbuf);
+  *out_tokens_out = produced;
   asngn_buf_free(&outbuf);
-  /* LIMIT is resumable: retain every decoded byte for the coordinator. */
-  if (e != ASNGN_OK && e != ASNGN_ERR_LIMIT && *out_text != NULL) {
-    free(*out_text);
-    *out_text = NULL;
+  if (p->result_info) {
+    asmodel_generation_info *info = p->result_info;
+    memset(info,0,sizeof *info);
+    info->input_tokens = *out_tokens_in; info->output_tokens = produced;
+    info->cached_input_tokens = prompt_start;
+    info->usage_known = !n_tok || e == ASNGN_OK || e == ASNGN_ERR_LIMIT;
+    info->finish_reason = e == ASNGN_OK ? ASMODEL_FINISH_STOP : e == ASNGN_ERR_LIMIT ?
+        ASMODEL_FINISH_LENGTH : e == ASNGN_ERR_CANCELLED ? ASMODEL_FINISH_CANCELLED : ASMODEL_FINISH_ERROR;
+    if (constrained) info->applied |= ASMODEL_APPLIED_CONSTRAINT;
+    if (e != ASNGN_OK) snprintf(info->error,sizeof info->error,"%s",asngn_err_name(e));
   }
   if (e != ASNGN_OK) {
     free(u->cached_prompt);

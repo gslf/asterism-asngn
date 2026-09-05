@@ -10,7 +10,6 @@ typedef struct {
   const char *id;
   bool borrowed;
   bool estimated_tokens;
-  asmodel_generation_info info;
 } backend;
 typedef struct { asmodel_token_fn fn; void *ud; } token_bridge;
 
@@ -54,12 +53,14 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
   int ti = 0, to = 0;
   int64_t started = asngn_clock_mono_ms(&b->ctx->clock);
   asngn_err e;
-  memset(&b->info, 0, sizeof b->info);
+  asmodel_generation_info local = {0};
+  asmodel_generation_info *info = p->result_info ? p->result_info : &local;
+  memset(info,0,sizeof *info); info->usage_known = 1;
   memset(&params, 0, sizeof params);
   params.temp = p->temperature; params.top_p = p->top_p;
   params.repeat_penalty = p->repeat_penalty; params.max_tokens = p->max_tokens;
   params.reasoning = p->reasoning; params.reasoning_budget = p->reasoning_budget;
-  params.output_schema = p->output_schema;
+  params.output_schema = p->output_schema; params.result_info = info;
   params.require_constraint = p->require_constraint != 0;
   params.deadline_ms = p->deadline_ms;
   int prompt = b->iface.count_prompt_tokens ?
@@ -72,20 +73,16 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
   if (cancel && *cancel) e = ASNGN_ERR_CANCELLED;
   else if (p->deadline_ms > 0 && params.deadline_ms <= 0) e = ASNGN_ERR_TIMEOUT;
   else {
-    invoked = true;
+    invoked = true; info->usage_known = 0;
     e = b->iface.generate(b->iface.ud, sys, user, grammar, &params,
                           fn ? token : NULL, &bridge, cancel, out, &ti, &to);
   }
-  bool have_info = invoked && b->iface.last_generation_info &&
-      b->iface.last_generation_info(b->iface.ud, &b->info) == 0;
-  if (!have_info) {
-    b->info.input_tokens = ti; b->info.output_tokens = to;
-    b->info.usage_known = !invoked || e == ASNGN_OK || e == ASNGN_ERR_LIMIT;
-    b->info.finish_reason = e == ASNGN_OK ? ASMODEL_FINISH_STOP :
+  if (!invoked) info->usage_known = 1;
+  if (info->finish_reason == ASMODEL_FINISH_UNKNOWN)
+    info->finish_reason = e == ASNGN_OK ? ASMODEL_FINISH_STOP :
         e == ASNGN_ERR_LIMIT ? ASMODEL_FINISH_LENGTH :
         e == ASNGN_ERR_CANCELLED ? ASMODEL_FINISH_CANCELLED : ASMODEL_FINISH_ERROR;
-  }
-  asngn_err saved = asngn_operation_end(b->ctx, &op, ti, to, b->info.usage_known != 0, e);
+  asngn_err saved = asngn_operation_end(b->ctx, &op, ti, to, info->usage_known != 0, e);
   if (in) *in = ti;
   if (gen) *gen = to;
   return model_error(saved == ASNGN_OK ? e : saved);
@@ -129,11 +126,6 @@ static int count_prompt(void *ud, const char *sys, const char *user) {
   backend *b = ud;
   return b->iface.count_prompt_tokens ? b->iface.count_prompt_tokens(b->iface.ud, sys, user) : -1;
 }
-static const char *last_error(void *ud) {
-  backend *b = ud;
-  return b->iface.last_error ? b->iface.last_error(b->iface.ud) : asngn_last_error(b->ctx);
-}
-static int info(void *ud, asmodel_generation_info *out) { *out = ((backend *)ud)->info; return 0; }
 static void destroy(void *ud) {
   backend *b = ud;
   if (!b->borrowed && b->iface.destroy) b->iface.destroy(b->iface.ud);
@@ -165,7 +157,7 @@ static int loader(void *ud, const asmodel_spec *spec, asmodel_provider *out,
   out->token_quality = spec->backend == ASMODEL_BACKEND_EMBEDDED ? ASMODEL_TOKENS_EXACT : ASMODEL_TOKENS_ESTIMATED;
   out->tokenizer_id = spec->backend == ASMODEL_BACKEND_EMBEDDED ? b->id : NULL;
   out->chat_template_id = spec->backend == ASMODEL_BACKEND_EMBEDDED ? "embedded-model-template" : NULL;
-  out->last_error = last_error; out->last_generation_info = info; out->destroy = destroy;
+  out->destroy = destroy;
   return ASMODEL_OK;
 }
 asngn_err asngn_shared_models_init(asngn_ctx *c) {

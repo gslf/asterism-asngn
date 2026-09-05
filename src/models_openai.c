@@ -29,6 +29,7 @@ static asngn_err remote_generate(void *ud, const char *sys, const char *user,
   p.max_tokens = params->max_tokens;
   p.reasoning = params->reasoning;
   p.reasoning_budget = params->reasoning_budget;
+  p.output_schema = params->output_schema;
   p.require_constraint = params->require_constraint ? 1 : 0;
   p.deadline_ms = params->deadline_ms;
   bridge.fn = token_fn; bridge.ud = token_ud;

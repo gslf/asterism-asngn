@@ -346,6 +346,7 @@ typedef struct {
   asmodel_reasoning_mode reasoning;
   int reasoning_budget;
   bool require_constraint;
+  const char *output_schema;
   int64_t deadline_ms;   /* maximum duration for this inference; 0 = none */
 } asngn_gen_params;
 
@@ -408,7 +409,7 @@ asngn_err asngn_from_model_error(asmodel_err e);
 asngn_err asngn_models_embed_kind(asngn_ctx *c, const char *text, int is_query, float *out);
 asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
                                 const char *system_prompt,
-                                const char *user_prompt, const char *gbnf,
+                                const char *user_prompt, const char *gbnf, const char *schema,
                                 int max_tokens_override,
                                 int64_t deadline_mono,
                                 asngn_token_fn token_cb, void *token_ud,
@@ -873,6 +874,11 @@ asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out);
 asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
                               bool with_think, size_t blobs_n,
                               const char *astools_gbnf, char **out);
+asngn_err asngn_protocol_steps(asngn_ctx *c, bool call, bool recall, bool think,
+    size_t blobs, bool draft, char **out);
+const char *asngn_protocol_scalar_schema(asngn_task_kind kind);
+asngn_err asngn_protocol_decode(asngn_task_kind kind, const char *schema, char **text);
+
 asngn_err asngn_grammar_classify(char **out);
 asngn_err asngn_grammar_judge(char **out);
 

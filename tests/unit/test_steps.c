@@ -1,6 +1,6 @@
 /*
  * test_steps.c — asngn_step_parse over every action-object form,
- * good and malformed, including the byte caps on UTF-8 boundaries.
+ * valid and malformed, including lossless strings and strict byte limits.
  *
  * MIT License — per aspera ad astra.
  */
@@ -160,9 +160,8 @@ TEST(call_versioned_ref_and_brace_in_string) {
   bare_ctx_free(c);
 }
 
-TEST(think_capped_on_utf8_boundary) {
-  /* Payload "a" + 1024×"è" = 2049 bytes; the 2048-byte cap falls on the
-   * continuation byte of the final "è", so the parser backs off to 2047. */
+TEST(oversized_utf8_is_rejected) {
+  /* Reject a 2049-byte payload instead of changing the proposed action. */
   asngn_ctx *c = bare_ctx();
   asngn_step st;
   char line[ASNGN_STEP_TEXT_MAX + 128];
@@ -177,19 +176,13 @@ TEST(think_capped_on_utf8_boundary) {
   line[off++] = '"';
   line[off++] = '}';
   line[off] = '\0';
-  ASSERT_OK(asngn_step_parse(c, line, &st));
-  ASSERT_EQ_INT(st.kind, ASNGN_STEP_THINK);
-  ASSERT_TRUE(st.text != NULL);
-  ASSERT_EQ_INT((long long)strlen(st.text), ASNGN_STEP_TEXT_MAX - 1);
-  ASSERT_TRUE(asngn_utf8_valid(st.text, strlen(st.text)));
-  ASSERT_TRUE(st.text[ASNGN_STEP_TEXT_MAX - 3] == '\xC3' &&
-              st.text[ASNGN_STEP_TEXT_MAX - 2] == '\xA8');
+  ASSERT_ERR(asngn_step_parse(c, line, &st), ASNGN_ERR_PROTOCOL);
   asngn_step_free(&st);
   bare_ctx_free(c);
 }
 
-TEST(why_capped_on_meta_limit) {
-  /* More than ASNGN_STEP_META_MAX bytes in why: capped at the limit. */
+TEST(oversized_metadata_is_rejected) {
+  /* Metadata is either intact or rejected. */
   asngn_ctx *c = bare_ctx();
   asngn_step st;
   char line[ASNGN_STEP_META_MAX + 128];
@@ -200,10 +193,7 @@ TEST(why_capped_on_meta_limit) {
   for (i = 0; i < ASNGN_STEP_META_MAX + 32; i++) line[off++] = 'x';
   memcpy(line + off, "\", input: \"q\"}", 14);
   line[off + 14] = '\0';
-  ASSERT_OK(asngn_step_parse(c, line, &st));
-  ASSERT_EQ_INT(st.kind, ASNGN_STEP_CLARIFY);
-  ASSERT_EQ_INT((long long)strlen(st.why), ASNGN_STEP_META_MAX);
-  ASSERT_EQ_STR(st.text, "q");
+  ASSERT_ERR(asngn_step_parse(c, line, &st), ASNGN_ERR_PROTOCOL);
   asngn_step_free(&st);
   bare_ctx_free(c);
 }
@@ -294,9 +284,9 @@ TEST(malformed_objects_are_protocol_errors) {
   ASSERT_ERR(asngn_step_parse(
                  c, "{action: \"think\", input: \"a\", mood: \"b\"}", &st),
              ASNGN_ERR_PROTOCOL);
-  ASSERT_ERR(asngn_step_parse(
-                 c, "{action: \"think\", input: \"a\\\"b\"}", &st),
-             ASNGN_ERR_PROTOCOL); /* backslash is forbidden in payloads */
+  ASSERT_OK(asngn_step_parse(c, "{action: \"think\", input: \"a\\\"b\"}", &st));
+  ASSERT_EQ_STR(st.text, "a\"b");
+  asngn_step_free(&st);
   ASSERT_ERR(asngn_step_parse(
                  c, "{action: \"answer\"} extra", &st),
              ASNGN_ERR_PROTOCOL);
@@ -307,7 +297,30 @@ TEST(malformed_objects_are_protocol_errors) {
   bare_ctx_free(c);
 }
 
+TEST(provider_json_is_decoded_without_changing_arguments) {
+  asngn_ctx *c = bare_ctx();
+  asngn_step st;
+  char *text = asngn_strdup("{\"action\":\"call\",\"why\":\"read \\\"quoted\\\" path\","
+      "\"tool\":\"fs.read\",\"arguments\":{\"path\":\"src/è.c\"},"
+      "\"success\":\"observed\",\"fallback\":\"search\"}");
+  const char *schema = "{\"oneOf\":[{\"properties\":{\"action\":{\"const\":\"call\"},"
+      "\"tool\":{\"const\":\"fs.read\"},\"arguments\":{\"type\":\"object\"}}}]}";
+  ASSERT_OK(asngn_protocol_decode(ASNGN_TASK_DECIDE, schema, &text));
+  ASSERT_OK(asngn_step_parse(c, text, &st));
+  ASSERT_EQ_STR(st.why, "read \"quoted\" path");
+  ASSERT_EQ_STR(st.call_args, "{\"path\":\"src/è.c\"}");
+  asngn_step_free(&st); free(text);
+  text = asngn_strdup("{\"action\":\"answer\",\"action\":\"think\"}");
+  ASSERT_ERR(asngn_protocol_decode(ASNGN_TASK_DECIDE, schema, &text), ASNGN_ERR_PROTOCOL);
+  free(text);
+  text = asngn_strdup("{\"score\":0,\"critique\":\"uncertain\"}");
+  ASSERT_OK(asngn_protocol_decode(ASNGN_TASK_JUDGE, NULL, &text));
+  ASSERT_EQ_STR(text,"SCORE 0 | uncertain\n"); free(text);
+  bare_ctx_free(c);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(provider_json_is_decoded_without_changing_arguments),
   TEST_ENTRY(answer_plain),
   TEST_ENTRY(answer_trimmed),
   TEST_ENTRY(open_handle),
@@ -317,8 +330,8 @@ TEST_LIST = {
   TEST_ENTRY(clarify_question),
   TEST_ENTRY(call_simple),
   TEST_ENTRY(call_versioned_ref_and_brace_in_string),
-  TEST_ENTRY(think_capped_on_utf8_boundary),
-  TEST_ENTRY(why_capped_on_meta_limit),
+  TEST_ENTRY(oversized_utf8_is_rejected),
+  TEST_ENTRY(oversized_metadata_is_rejected),
   TEST_ENTRY(clarify_allows_protocol_words_as_content),
   TEST_ENTRY(malformed_objects_are_protocol_errors),
 };

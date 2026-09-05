@@ -679,6 +679,7 @@ static int p_object(jparse *p, jx_value **out) {
     skip_ws(p);
     if (p->pos >= p->len || p->s[p->pos] != '"') goto fail;
     if (p_string_raw(p, &key, &klen)) goto fail;
+    if (strlen(key) != klen || jx_object_get(obj, key)) { free(key); goto fail; }
     skip_ws(p);
     if (p->pos >= p->len || p->s[p->pos] != ':') {
       free(key);

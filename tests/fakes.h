@@ -46,6 +46,9 @@ typedef struct {
   char *last_system;  /* copy of the most recent system prompt  */
   char *last_user;    /* copy of the most recent user prompt    */
   char *last_grammar; /* copy of the most recent GBNF (or NULL) */
+  int json_output;    /* test provider returns caller-owned JSON values */
+  int had_schema;
+  char *last_schema;
   int calls;          /* generate() invocations                 */
   int max_tokens_seen[32]; /* generation cap for each call       */
   asmodel_reasoning_mode reasoning_seen[32];

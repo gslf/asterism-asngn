@@ -128,7 +128,7 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
                            label, clipped, c->cfg.digest_tokens) ==
           ASNGN_OK) {
         if (asngn_models_generate(c, slot, ASNGN_TASK_COMPRESS,
-                                  DIGEST_INSTRUCTION, up.data, NULL,
+                                  DIGEST_INSTRUCTION, up.data, NULL, NULL,
                                   c->cfg.digest_tokens, model_deadline,
                                   NULL, NULL,
                                   t != NULL ? &t->cancel : NULL, &gen,

@@ -122,12 +122,12 @@ asngn_err asngn_judge_run(asngn_ctx *c, asngn_session *s,
     return ASNGN_ERR_TIMEOUT;
   }
   e = asngn_models_generate(c, slot, ASNGN_TASK_JUDGE, judge_system, ub.data,
-                            gbnf, 0, t->deadline_mono, NULL, NULL, &t->cancel,
+                            gbnf, NULL, 0, t->deadline_mono, NULL, NULL, &t->cancel,
                             &txt, &tin,
                             &tout);
   free(gbnf);
   asngn_buf_free(&ub);
-  if (e != ASNGN_OK) return e;
+  if (e != ASNGN_OK) { free(txt); return e; }
   if (aux_tokens && tout > 0) *aux_tokens += (size_t)tout;
 
   if (!parse_score_line(txt, &score, &crit, &crit_len)) {

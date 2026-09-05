@@ -58,6 +58,7 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
   params.temp = p->temperature; params.top_p = p->top_p;
   params.repeat_penalty = p->repeat_penalty; params.max_tokens = p->max_tokens;
   params.reasoning = p->reasoning; params.reasoning_budget = p->reasoning_budget;
+  params.output_schema = p->output_schema;
   params.require_constraint = p->require_constraint != 0;
   params.deadline_ms = p->deadline_ms;
   int prompt = b->iface.count_prompt_tokens ?
@@ -74,9 +75,9 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
     e = b->iface.generate(b->iface.ud, sys, user, grammar, &params,
                           fn ? token : NULL, &bridge, cancel, out, &ti, &to);
   }
-  if (invoked && b->iface.last_generation_info)
-    (void)b->iface.last_generation_info(b->iface.ud, &b->info);
-  else {
+  bool have_info = invoked && b->iface.last_generation_info &&
+      b->iface.last_generation_info(b->iface.ud, &b->info) == 0;
+  if (!have_info) {
     b->info.input_tokens = ti; b->info.output_tokens = to;
     b->info.usage_known = !invoked || e == ASNGN_OK || e == ASNGN_ERR_LIMIT;
     b->info.finish_reason = e == ASNGN_OK ? ASMODEL_FINISH_STOP :

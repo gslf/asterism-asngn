@@ -157,7 +157,7 @@ static void watch_token_cb(const char *piece, void *ud) {
 static asngn_err watched_generate(asngn_ctx *c, asngn_turn_state *t,
                                   int slot, asngn_task_kind task,
                                   const char *sys, const char *usr,
-                                  const char *gbnf, int max_tokens,
+                                  const char *gbnf, const char *schema, int max_tokens,
                                   asngn_token_fn cb, void *cb_ud,
                                   char **out_text, int *out_in,
                                   int *out_out) {
@@ -179,7 +179,7 @@ static asngn_err watched_generate(asngn_ctx *c, asngn_turn_state *t,
   c->call_turn = t;
   c->call_active = 1;
   os_mutex_unlock(&c->q_mu);
-  e = asngn_models_generate(c, slot, task, sys, usr, gbnf, max_tokens,
+  e = asngn_models_generate(c, slot, task, sys, usr, gbnf, schema, max_tokens,
                             t->deadline_mono,
                             watch_token_cb, &w, &c->call_cancel, out_text,
                             out_in, out_out);
@@ -476,7 +476,7 @@ static asngn_err draft_file_content(asngn_ctx *c, asngn_turn_state *t,
       e = asngn_context_validate(c, t->gen_slot, &prompt, draft_cap);
       if (e == ASNGN_OK)
         e = watched_generate(c, t, t->gen_slot, ASNGN_TASK_DRAFT,
-                             prompt.system_text, prompt.user_text, NULL,
+                             prompt.system_text, prompt.user_text, NULL, NULL,
                              draft_cap, NULL, NULL, &chunk, &tin, &tout);
     }
     asngn_prompt_free(&prompt);
@@ -1620,7 +1620,7 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
   if (plan_slot < 0) plan_slot = t->gen_slot;
 
   while (!t->cancel) {
-    char *instr = NULL, *gbnf = NULL, *line = NULL;
+    char *instr = NULL, *gbnf = NULL, *line = NULL, *schema = NULL;
     asngn_prompt prompt;
     asngn_step st;
     int slot = decide_on_generator ? t->gen_slot : plan_slot;
@@ -1684,10 +1684,16 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       free(gbnf);
       return e;
     }
+    e = asngn_protocol_steps(c, call_now, c->asper_ok, think_now, s->blobs_n,
+                              generation_needs_artifact(c, t), &schema);
+    if (e != ASNGN_OK) {
+      asngn_prompt_free(&prompt); free(instr); free(gbnf); return e;
+    }
     e = watched_generate(c, t, slot, ASNGN_TASK_DECIDE,
-                         prompt.system_text, prompt.user_text, gbnf,
+                         prompt.system_text, prompt.user_text, gbnf, schema,
                          decision_cap,
                          NULL, NULL, &line, &tin, &tout);
+    free(schema);
     asngn_prompt_free(&prompt);
     t->led.gt_decision += (size_t)(tout > 0 ? tout : 0);
     if (e != ASNGN_OK) {
@@ -2153,7 +2159,7 @@ static asngn_err answer_once(asngn_ctx *c, asngn_turn_state *t,
   }
 
   e = watched_generate(c, t, t->gen_slot, ASNGN_TASK_ANSWER,
-                       prompt.system_text, prompt.user_text, NULL, cap,
+                       prompt.system_text, prompt.user_text, NULL, NULL, cap,
                        stream ? output_stream_cb : NULL,
                        stream ? t : NULL, out, &tin, &tout);
   asngn_prompt_free(&prompt);
@@ -2489,7 +2495,7 @@ asngn_err asngn_loop_run(asngn_ctx *c, asngn_turn_state *t) {
               "You adapt a previous answer to a new, similar question. "
               "Keep it correct; change only what the new question "
               "requires.",
-              up.data, NULL, asngn_detail_cap(c, t->detail), NULL, NULL,
+              up.data, NULL, NULL, asngn_detail_cap(c, t->detail), NULL, NULL,
               &adapted, &tin, &tout);
           /* the adapter's spend is aux overhead whatever the outcome
            * (the cost of safety is measured, not hidden) */

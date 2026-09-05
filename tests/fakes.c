@@ -60,6 +60,7 @@ void fake_model_dispose(fake_model *fm) {
   free(fm->replies);
   free(fm->last_system);
   free(fm->last_user);
+  free(fm->last_schema); fm->last_schema = NULL;
   free(fm->last_grammar);
   memset(fm, 0, sizeof *fm);
 }
@@ -119,6 +120,9 @@ static asngn_err fake_model_generate(void *ud, const char *system_prompt,
   fm->last_user = asngn_strdup(user_prompt);
   free(fm->last_grammar);
   fm->last_grammar = asngn_strdup(gbnf);
+  free(fm->last_schema);
+  fm->last_schema = asngn_strdup(p->output_schema);
+  fm->had_schema = p->output_schema != NULL;
   fm->calls++;
   if (fm->calls <= (int)(sizeof fm->max_tokens_seen /
                          sizeof fm->max_tokens_seen[0])) {
@@ -170,11 +174,22 @@ static asngn_err fake_model_embed(void *ud, const char *text, int is_query, floa
   return ASNGN_OK;
 }
 
+static int fake_generation_info(void *ud, asmodel_generation_info *out) {
+  fake_model *fm = ud;
+  if (!fm->json_output) return -1;
+  memset(out, 0, sizeof *out);
+  out->json_output = fm->had_schema;
+  out->finish_reason = ASMODEL_FINISH_STOP;
+  out->usage_known = 1;
+  return 0;
+}
+
 asngn_model_iface fake_model_iface(fake_model *fm) {
   asngn_model_iface it;
   memset(&it, 0, sizeof it);
   it.ud = fm;
   it.generate = fake_model_generate;
+  it.last_generation_info = fake_generation_info;
   it.count_tokens = fake_model_count_tokens;
   it.count_prompt_tokens = fake_model_count_prompt_tokens;
   it.embed = fake_model_embed;

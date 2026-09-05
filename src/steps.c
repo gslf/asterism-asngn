@@ -12,7 +12,7 @@
  * The per-turn grammar already constrains what the model can emit; the
  * plan gate re-validates every line anyway. This parser is strict on
  * structure — required keys per action, no unknown or duplicate keys,
- * no string escapes — and flexible on whitespace. The CALL input gets
+ * bounded strings — and flexible on whitespace. The CALL input gets
  * a light split only (ref / command / args object); the authoritative
  * CALL parse is astools_call_parse on the synthesized call line in the
  * control loop.
@@ -21,6 +21,7 @@
  */
 
 #include "asngn_internal.h"
+#include "json.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -61,45 +62,31 @@ static bool span_eq(const char *p, size_t n, const char *lit) {
   return strlen(lit) == n && memcmp(p, lit, n) == 0;
 }
 
-/* Quoted value without escapes: '"' payload '"'. A backslash or an
- * embedded newline is a protocol violation (the grammar's tchar
- * excludes both). The payload is duplicated with a byte cap on a UTF-8
- * boundary — the grammar bounds it already; the cap is defense in
- * depth against non-grammar sources. */
+/* Metadata uses JSON string escaping in both provider representations.
+ * Reject oversized or binary strings instead of silently changing intent. */
 static asngn_err parse_quoted(asngn_ctx *c, const char **p, const char *end,
                               const char *what, size_t cap, char **out) {
-  const char *q, *r;
-  size_t n;
-
-  if (*p >= end || **p != '"')
-    return asngn_seterr(c, ASNGN_ERR_PROTOCOL,
-                        "step: %s needs a quoted value", what);
-  q = *p + 1;
-  for (r = q; r < end && *r != '"'; r++) {
-    if (*r == '\\' || *r == '\n' || *r == '\r')
-      return asngn_seterr(c, ASNGN_ERR_PROTOCOL,
-                          "step: %s value contains a forbidden character",
-                          what);
+  const char *start = *p, *q = start;
+  jx_value *v = NULL;
+  bool escaped = false;
+  if (q >= end || *q++ != '"') goto invalid;
+  while (q < end) {
+    char ch = *q++;
+    if (escaped) { escaped = false; continue; }
+    if (ch == '\\') { escaped = true; continue; }
+    if (ch == '"') {
+      if (jx_parse(start, (size_t)(q-start), &v)) goto invalid;
+      const char *text = jx_string_value(v);
+      size_t n = jx_string_length(v);
+      if (!text || !n || n > cap || strlen(text) != n) goto invalid;
+      *out = asngn_strdup(text); *p = q;
+      jx_free(v);
+      return *out ? ASNGN_OK : ASNGN_ERR_NOMEM;
+    }
   }
-  if (r >= end)
-    return asngn_seterr(c, ASNGN_ERR_PROTOCOL,
-                        "step: %s value is missing its closing quote", what);
-  n = (size_t)(r - q);
-  if (n == 0)
-    return asngn_seterr(c, ASNGN_ERR_PROTOCOL, "step: %s value is empty",
-                        what);
-  if (n > cap) {
-    n = cap;
-    while (n > 0 && ((unsigned char)q[n] & 0xC0) == 0x80)
-      n--; /* back off to a UTF-8 boundary */
-    if (n == 0)
-      return asngn_seterr(c, ASNGN_ERR_PROTOCOL, "step: %s value is empty",
-                          what);
-  }
-  *out = asngn_strndup(q, n);
-  if (!*out) return ASNGN_ERR_NOMEM;
-  *p = r + 1;
-  return ASNGN_OK;
+invalid:
+  jx_free(v);
+  return asngn_seterr(c, ASNGN_ERR_PROTOCOL, "step: invalid or oversized %s string", what);
 }
 
 /* Raw call value "<ref>.<cmd> {<args>}": the ref token runs to the

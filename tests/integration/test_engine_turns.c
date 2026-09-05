@@ -1037,7 +1037,27 @@ TEST(asper_source_context_and_reopen) {
 
 /* ── runner ───────────────────────────────────────────────────────────── */
 
+TEST(json_contract_crosses_shared_runtime_and_tool_dispatch) {
+  eng_fx f;
+  asngn_turn_result r;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  f.nano.json_output = f.light.json_output = f.stdm.json_output = 1;
+  ASSERT_TRUE(fake_model_push(&f.nano,
+      "{\"class\":\"MODERATE\",\"detail\":\"TERSE\",\"mode\":\"PLAN\",\"task\":\"LOOKUP\"}"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+      "{\"action\":\"call\",\"why\":\"observe\",\"tool\":\"fake.run\","
+      "\"arguments\":{\"msg\":\"hello\"},\"success\":\"seen\",\"fallback\":\"explain\"}"));
+  ASSERT_TRUE(fake_model_push(&f.light,"{\"action\":\"answer\"}"));
+  ASSERT_TRUE(fake_model_push(&f.stdm,"Observed the tool result."));
+  memset(&r,0,sizeof r);
+  ASSERT_OK(eng_turn(&f, "Use the tool to observe hello.", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer,"Observed the tool result.");
+  ASSERT_TRUE(f.light.last_schema != NULL && strstr(f.light.last_schema,"fake.run") != NULL);
+  asngn_turn_result_free(&r); eng_drop(&f);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(json_contract_crosses_shared_runtime_and_tool_dispatch),
   TEST_ENTRY(asynchronous_events_resume_from_cursor),
   TEST_ENTRY(direct_chat),
   TEST_ENTRY(explicit_deadline_is_opt_in),

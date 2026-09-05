@@ -843,7 +843,7 @@ static asngn_err route_model_pass(asngn_ctx *c, asngn_session *s,
       return ASNGN_ERR_TIMEOUT;
     }
     e = asngn_models_generate(c, slot, ASNGN_TASK_CLASSIFY, ROUTE_SYS,
-                              up.data, gbnf, 0, t->deadline_mono, NULL, NULL,
+                              up.data, gbnf, NULL, 0, t->deadline_mono, NULL, NULL,
                               &t->cancel, &text, &tin, &tout);
   }
   free(gbnf);

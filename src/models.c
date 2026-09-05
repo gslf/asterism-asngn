@@ -183,7 +183,7 @@ static void generation_token(const char *text, size_t len, void *ud) {
   if (s->fn) s->fn(text, s->ud);
 }
 asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
-    const char *sys, const char *user, const char *grammar, int max_tokens,
+    const char *sys, const char *user, const char *grammar, const char *schema, int max_tokens,
     int64_t deadline, asngn_token_fn fn, void *ud, volatile int *cancel,
     char **out, int *in, int *gen) {
   asmodel_generate_params p = {0};
@@ -199,7 +199,8 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   p.max_tokens=max_tokens > 0 ? max_tokens : sp->max_tokens;
   p.reasoning=(task==ASNGN_TASK_DECIDE || task==ASNGN_TASK_CLASSIFY || task==ASNGN_TASK_JUDGE)
       ? ASMODEL_REASONING_REQUIRED_OFF : ASMODEL_REASONING_DEFAULT;
-  p.require_constraint=grammar != NULL; p.result_info=&info;
+  p.output_schema = schema ? schema : asngn_protocol_scalar_schema(task);
+  p.require_constraint=grammar != NULL || p.output_schema != NULL; p.result_info=&info;
   e=asngn_context_validate_text(c,slot,sys,user,p.max_tokens);
   if (e!=ASNGN_OK) return e;
   if (deadline > 0) {
@@ -211,6 +212,11 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   int64_t started=asngn_clock_mono_ms(&c->clock);
   e=asngn_from_model_error(asmodel_generate(c->shared_models,c->models[slot].cfg.id,
       sys,user,grammar,&p,fn ? generation_token : NULL,&stream,cancel,&text,&ti,&to));
+  if (e == ASNGN_OK && info.json_output) {
+    e = asngn_protocol_decode(task, p.output_schema, &text);
+    if (e != ASNGN_OK) snprintf(info.error, sizeof info.error,
+        "model output violates the %s JSON contract", asngn_task_name(task));
+  }
   if (in) *in=ti;
   if (gen) *gen=to;
   if (out) *out=text; else free(text);

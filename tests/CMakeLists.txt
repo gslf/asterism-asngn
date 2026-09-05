@@ -82,11 +82,6 @@ add_test(NAME test_model_manifest
     "-DMANIFEST=${CMAKE_CURRENT_SOURCE_DIR}/../scripts/models.manifest.tsv"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/model_manifest_smoke.cmake")
 
-# test_json compiles the MCP-only codec directly (it is not in libasngn).
-if(TARGET test_json)
-  target_sources(test_json PRIVATE ../src/json.c)
-endif()
-
 # ── asngn_fake_tool: scripted protocol tool (xcdn only, like astools') ───────
 # Spawned by the engine integration tests through the real astools registry;
 # mirrors astools' tests/tools/tool_fake pattern.
@@ -119,5 +114,5 @@ if(Python3_Interpreter_FOUND)
 endif()
 
 if(TARGET test_engine_turns)
-  target_sources(test_engine_turns PRIVATE ../mcp/tasks.c ../src/json.c)
+  target_sources(test_engine_turns PRIVATE ../mcp/tasks.c)
 endif()

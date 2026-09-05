@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
+#include "json.h"
 
 static size_t count_substr(const char *hay, const char *needle) {
   size_t n = 0, nl = strlen(needle);
@@ -172,7 +173,28 @@ TEST(steps_call_dropped_without_export) {
   free(g);
 }
 
+TEST(json_schema_respects_available_actions_and_handles) {
+  char *schema = NULL;
+  jx_value *root = NULL;
+  ASSERT_OK(asngn_protocol_steps(NULL, false, false, false, 2, false, &schema));
+  ASSERT_EQ_INT(jx_parse(schema, strlen(schema), &root), 0);
+  const jx_value *variants = jx_object_get(root, "oneOf");
+  ASSERT_EQ_INT(jx_array_len(variants), 3);
+  const jx_value *open = jx_array_at(variants, 0);
+  const jx_value *properties = jx_object_get(open, "properties");
+  const jx_value *handles = jx_object_get(jx_object_get(properties, "input"), "enum");
+  ASSERT_EQ_INT(jx_array_len(handles), 2);
+  ASSERT_EQ_STR(jx_string_value(jx_array_at(handles, 1)), "B2");
+  ASSERT_TRUE(strstr(schema, "call") == NULL && strstr(schema, "think") == NULL);
+  char *unavailable = asngn_strdup("{\"action\":\"call\",\"why\":\"w\",\"tool\":\"fs.read\","
+      "\"arguments\":{},\"success\":\"s\",\"fallback\":\"f\"}");
+  ASSERT_ERR(asngn_protocol_decode(ASNGN_TASK_DECIDE, schema, &unavailable), ASNGN_ERR_PROTOCOL);
+  free(unavailable);
+  jx_free(root); free(schema);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(json_schema_respects_available_actions_and_handles),
   TEST_ENTRY(classify_grammar_exact),
   TEST_ENTRY(judge_grammar_exact),
   TEST_ENTRY(steps_minimal_grammar),

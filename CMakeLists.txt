@@ -172,6 +172,9 @@ set(ASNGN_SOURCES
   src/route.c
   src/detail.c
   src/grammar.c
+  src/protocol_schema.c
+  src/protocol_value.c
+  src/json.c
   src/steps.c
   src/verification.c
   src/loop.c
@@ -284,7 +287,7 @@ endif()
 
 # ── asngn-mcp ───────────────────────────────────────────────────────────────
 if(ASNGN_BUILD_MCP)
-  add_executable(asngn-mcp mcp/main.c mcp/tasks.c src/json.c)
+  add_executable(asngn-mcp mcp/main.c mcp/tasks.c)
   target_include_directories(asngn-mcp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

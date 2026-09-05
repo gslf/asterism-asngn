@@ -1,13 +1,13 @@
 /*
  * json.h — strict RFC 8259 JSON codec for asngn-mcp.
  *
- * DOM-style value tree. In-house by design: JSON exists only in the MCP
- * layer; the rest of asngn speaks xCDN. Depends only on libc.
+ * DOM-style value tree for MCP and model output contracts. Depends only on libc.
  *
  * Guarantees:
  *   - Strict parsing: UTF-8 only (validated), \uXXXX escapes with surrogate
  *     pairs decoded to UTF-8, depth cap 64, no comments, no trailing
  *     garbage, no NaN/Inf, no unescaped control characters in strings.
+ *   - Duplicate object keys and embedded NULs in keys are rejected.
  *   - Numbers carry a double plus an int64 view when the literal is
  *     integral and in range (jx_is_int).
  *   - No global state; every function is thread-compatible over disjoint

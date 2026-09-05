@@ -11,7 +11,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 |---|---|---|---|
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
-| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, I/O fault tests | Incremental snapshots, durable approval recovery, compaction/migration, cross-process workspace coordination |
+| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests | Incremental snapshots, durable approval recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Role/block message IR, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
@@ -77,6 +77,10 @@ trials require actual resources. No real-model result has been produced here.
   changed files and before/after versions. Rechecks precede replacement; rollback
   preserves intervening external edits. This is optimistic conflict detection,
   not atomic compare-and-swap against arbitrary editors.
+- Asper record store format 2 rejects legacy/unframed data, complete corruption and
+  impossible replay transitions. Checked snapshots and compaction markers bind
+  backups by hash. Recovery validates all backups before restoring any target;
+  uncertain sync blocks retrieval, mutations and compaction until reopen.
 - Asper stores AEV2 frames with separate metadata/payload checksums and bounded
   event/log sizes. Cursor pages use a rebuildable offset index and one temporary
   frame; literal search can still scan the remaining tail. Full-list callers
@@ -109,7 +113,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 32/32 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 32/32 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 32/32 passed.
-- Standalone Asper: 23/23; astools: 24/24; asmodel: 5/5.
+- Standalone Asper: 24/24; astools: 24/24; asmodel: 5/5.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -133,6 +137,10 @@ trials require actual resources. No real-model result has been produced here.
   the initial synthetic test did not cover.
 - Clean local clones of all four repositories built and passed all four suites,
   including the integrated TUI. Pins are local commits; publication is not claimed.
+- Record-storage tests interrupt a real process at five compaction boundaries,
+  verify non-duplicated replay, and ensure a damaged later backup leaves earlier
+  targets untouched. Snapshot truncation, legacy versions and uncertain sync fail
+  closed. POSIX parent directories are synced; this is not a power-loss certification.
 - Exact memory tests cover deleted/corrupt offset indices, late cursor pages,
   payload corruption and altered lengths that must not trigger truncation,
   in both memory event frames and the action/consumption WAL.
@@ -158,8 +166,7 @@ behavior have not been validated by these Linux no-llama runs.
 
 ## Next implementation order
 
-1. Complete checked record persistence and compaction, then extend output contracts
-   to role/block messages. Native loader interruption remains backend-dependent.
+1. Extend output contracts to role/block messages and native tools. Native loader interruption remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
 3. Add discovery, resumable approvals, controlled processes and editor protocols.

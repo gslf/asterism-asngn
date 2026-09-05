@@ -68,6 +68,7 @@ enum {
   TFG_AMBER,       /* soft amber (214,158,46) / 179 — warnings          */
   TFG_RED,         /* errors, over-budget — 203-ish                     */
   TFG_BRIGHT,      /* bright white — session name                       */
+  TFG_REASONING,   /* cool blue — operational rationale                 */
   TFG_COUNT
 };
 enum { TBG_DEFAULT = 0, TBG_SHADE, TBG_COUNT };
@@ -282,7 +283,13 @@ int ed_layout(const tui_editor *e, int width, ed_row *rows, int max_rows,
 
 /* ── chat pane (chat.c) ───────────────────────────────────────────────── */
 
-typedef enum { CHAT_USER = 0, CHAT_ASSISTANT, CHAT_SYSTEM } chat_role;
+typedef enum {
+  CHAT_USER = 0,
+  CHAT_ASSISTANT,
+  CHAT_REASONING,
+  CHAT_NOTICE,
+  CHAT_SYSTEM
+} chat_role;
 
 typedef struct {
   chat_role role;
@@ -397,7 +404,13 @@ void modal_draw_sessions(struct tui_app *a, tui_frame *f);
 /* Engine callbacks (token / event / log) run on engine threads: they
  * only append here and write one byte to the self-pipe. The main loop
  * drains under the same mutex; asngn_* is never called from callbacks. */
-typedef enum { TMSG_TOKEN = 0, TMSG_EVENT, TMSG_LOG } tui_msg_kind;
+typedef enum {
+  TMSG_TOKEN = 0,
+  TMSG_REASONING,
+  TMSG_NOTICE,
+  TMSG_EVENT,
+  TMSG_LOG
+} tui_msg_kind;
 
 typedef struct tui_msg {
   struct tui_msg *next;
@@ -445,6 +458,8 @@ typedef struct tui_app {
   tui_perms    perms;
   tui_sess     sess;
   asngn_detail detail; /* submit detail for future turns */
+  asngn_usage_mode usage_mode;
+  asngn_security_profile security_profile;
 
   /* cached engine introspection */
   asngn_stats         stats;

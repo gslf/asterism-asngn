@@ -150,6 +150,7 @@ set(ASNGN_SOURCES
   src/stream.c
   src/config.c
   src/session.c
+  src/turn_journal.c
   src/workspace.c
   src/ledger.c
   src/tokens.c
@@ -158,6 +159,7 @@ set(ASNGN_SOURCES
   src/models_openai.c
   src/models_shared.c
   src/context.c
+  src/retrieval.c
   src/digest.c
   src/embedcache.c
   src/cache.c

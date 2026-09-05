@@ -260,7 +260,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   /* Asper owns every persistent/historical memory zone. */
   if (c->asper_ok && s != NULL && t != NULL) {
     e = asngn_siblings_context(c, s->slug, base,
-                               t->user_msg ? t->user_msg : "",
+                               t->retrieval_query ? t->retrieval_query : t->user_msg ? t->user_msg : "",
                                (size_t)c->cfg.memory_history_tokens,
                                (size_t)c->cfg.memory_checkpoint_tokens,
                                count_slot,

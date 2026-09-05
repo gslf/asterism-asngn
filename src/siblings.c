@@ -736,7 +736,8 @@ asngn_err asngn_siblings_context(asngn_ctx *c, const char *scope,
   req.checkpoint_tokens = checkpoint_tokens;
   req.count_tokens = sib_count_tokens;
   req.count_userdata = &counter;
-  ae = asper_context_materialize(c->asper, &req, &pack);
+  ae = c->owner ? asper_context_materialize_project(c->asper,&req,c->lane_project,&pack)
+                : asper_context_materialize(c->asper, &req, &pack);
   if (ae != ASPER_OK) return sib_asper_err(c, ae, "context_materialize");
   *out_system = asngn_strdup(pack.system_prompt ? pack.system_prompt : "");
   *out_context = asngn_strdup(pack.context_text ? pack.context_text : "");
@@ -776,7 +777,8 @@ asngn_err asngn_siblings_recall(asngn_ctx *c, const char *question,
     goto out_fixed;
   }
 
-  ae = asper_recall(c->asper, question, &answer, &cited, &cited_n);
+  ae = c->owner ? asper_recall_project(c->asper,question,c->lane_project,&answer,&cited,&cited_n)
+                : asper_recall(c->asper, question, &answer, &cited, &cited_n);
   if (ae == ASPER_ERR_NOT_FOUND) {
     *out_block = asngn_strdup("memory: nothing relevant");
     goto out_fixed;
@@ -846,6 +848,11 @@ asngn_err asngn_siblings_project_sync(asngn_ctx *c, const char *want) {
   bool same;
   if (c == NULL) return ASNGN_ERR_INVALID;
   if (!c->asper_ok) return ASNGN_ERR_UNSUPPORTED;
+  if (c->owner) {
+    char *copy=want ? asngn_strdup(want) : NULL;
+    if (want && !copy) return ASNGN_ERR_NOMEM;
+    free(c->lane_project);c->lane_project=copy;return ASNGN_OK;
+  }
   if (asper_project_active(c->asper, &cur) != ASPER_OK) cur = NULL;
   same = (want == NULL && cur == NULL) ||
          (want != NULL && cur != NULL && strcmp(want, cur) == 0);

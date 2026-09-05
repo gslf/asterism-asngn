@@ -66,7 +66,7 @@ static xcdn_value_t *led_str(const char *s) {
   return xcdn_value_string(s != NULL ? s : "");
 }
 
-static xcdn_node_t *led_build_node(const asngn_ledger_entry *e) {
+xcdn_node_t *asngn_ledger_node(const asngn_ledger_entry *e) {
   xcdn_value_t *obj = xcdn_value_object();
   xcdn_value_t *route = xcdn_value_object();
   xcdn_value_t *pt = xcdn_value_object();
@@ -78,6 +78,7 @@ static xcdn_node_t *led_build_node(const asngn_ledger_entry *e) {
   bool ok = obj != NULL && route != NULL && pt != NULL && gt != NULL &&
             sv != NULL && q != NULL;
 
+  if (ok) ok = asngn_xobj_put(obj, "turn_id", led_str(e->turn_id));
   asngn_time_format_rfc3339(e->at, at);
   ok = ok && asngn_xobj_put(obj, "turn", xcdn_value_int((int64_t)e->turn));
   ok = ok && asngn_xobj_put(obj, "at", xcdn_value_datetime(at));
@@ -154,7 +155,7 @@ static void led_field(char *dst, size_t dstsz, const char *src) {
   snprintf(dst, dstsz, "%s", src != NULL ? src : "");
 }
 
-static bool led_from_node(const xcdn_node_t *node, asngn_ledger_entry *out) {
+bool asngn_ledger_parse(const xcdn_node_t *node, asngn_ledger_entry *out) {
   const xcdn_value_t *obj, *sub, *v;
   int64_t n;
   double d;
@@ -164,6 +165,8 @@ static bool led_from_node(const xcdn_node_t *node, asngn_ledger_entry *out) {
       node->value->type != XCDN_VAL_OBJECT)
     return false;
   obj = node->value;
+  led_field(out->turn_id, sizeof out->turn_id,
+            asngn_xstr(asngn_xfield(obj,"turn_id")));
   if (!asngn_xint(asngn_xfield(obj, "turn"), &n) || n < 1) return false;
   out->turn = (size_t)n;
   if (!asngn_xtime(asngn_xfield(obj, "at"), &out->at)) return false;
@@ -258,6 +261,7 @@ static void led_account(asngn_session *s, const asngn_ledger_entry *e,
   asngn_time day = e->at / 86400;
   s->spent_tokens += (int64_t)total;
   if (!live) return;
+  os_rwlock_wrlock(&c->lock);
   if (c->daily_day != day) {
     /* first spend seen for this unix day resets the counter */
     if (day > c->daily_day) {
@@ -266,6 +270,7 @@ static void led_account(asngn_session *s, const asngn_ledger_entry *e,
     }
   }
   if (e->at / 86400 == c->daily_day) c->daily_spent += (int64_t)total;
+  os_rwlock_wrunlock(&c->lock);
 }
 
 /* ── public (internal) API ────────────────────────────────────────────── */
@@ -276,10 +281,12 @@ asngn_err asngn_ledger_append(asngn_session *s, const asngn_ledger_entry *e) {
   xcdn_node_t *node;
   asngn_err err;
 
+  for (size_t i=0; e->turn_id[0] && i<s->led_n; i++)
+    if (!strcmp(e->turn_id,s->led[i].turn_id)) return ASNGN_OK;
   err = led_reserve(s);
   if (err != ASNGN_OK) return err;
   asngn_buf_init(&line);
-  node = led_build_node(e);
+  node = asngn_ledger_node(e);
   if (node == NULL) {
     asngn_buf_free(&line);
     return ASNGN_ERR_NOMEM;
@@ -374,7 +381,7 @@ asngn_err asngn_ledger_replay(asngn_session *s) {
     xcdn_node_t *node = doc->values[i];
     if (xcdn_node_has_tag(node, "ledger_entry")) {
       asngn_ledger_entry le;
-      if (!led_from_node(node, &le)) {
+      if (!asngn_ledger_parse(node, &le)) {
         asngn_log(c, ASNGN_LOG_WARN, "session",
                   "%s: ledger value %zu invalid; skipped", s->slug, i);
         continue;

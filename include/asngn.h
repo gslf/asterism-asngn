@@ -69,6 +69,23 @@ typedef enum {
   ASNGN_DETAIL_RICH
 } asngn_detail;
 
+/* Session behavior and action policy are independent. Both persist. */
+typedef enum {
+  ASNGN_USAGE_CHAT = 0,
+  ASNGN_USAGE_CODING,
+  ASNGN_USAGE_AUTOMATE
+} asngn_usage_mode;
+
+typedef enum {
+  ASNGN_SECURITY_CHAT = 0,
+  ASNGN_SECURITY_CODING_READONLY,
+  ASNGN_SECURITY_CODING_SANDBOXED,
+  ASNGN_SECURITY_AUTOMATION_CI
+} asngn_security_profile;
+
+const char *asngn_usage_mode_name(asngn_usage_mode mode);
+const char *asngn_security_profile_name(asngn_security_profile profile);
+
 /* Log levels for asngn_set_logger callbacks. */
 enum {
   ASNGN_LOG_ERROR = 0,
@@ -140,6 +157,12 @@ asngn_err asngn_session_list (asngn_ctx *c, char ***out_slugs,
                               size_t *out_n);
 /* Slug of an open session; session-owned, valid until close. */
 const char *asngn_session_slug(const asngn_session *s);
+asngn_err asngn_session_set_mode(asngn_session *s, asngn_usage_mode mode);
+asngn_err asngn_session_set_security_profile(
+    asngn_session *s, asngn_security_profile profile);
+asngn_err asngn_session_get_mode(const asngn_session *s,
+                                 asngn_usage_mode *out_mode,
+                                 asngn_security_profile *out_profile);
 asngn_err asngn_session_workspace(asngn_session *s,
                                   asngn_workspace_info *out);
 asngn_err asngn_session_pin    (asngn_session *s, size_t turn, int on);
@@ -170,8 +193,35 @@ void asngn_set_event_sink(asngn_ctx *c, asngn_event_fn fn, void *ud);
 
 /* ---- turns ------------------------------------------------------------- */
 
-/* Streaming answer tokens; called from the agent worker thread. */
+/* Accepted answer output; called from the agent worker thread. */
 typedef void (*asngn_token_fn)(const char *utf8, void *ud);
+
+typedef enum {
+  ASNGN_STREAM_OUTPUT = 0,
+  ASNGN_STREAM_REASONING,
+  ASNGN_STREAM_NOTICE
+} asngn_stream_kind;
+
+typedef struct {
+  asngn_stream_kind kind;
+  const char       *text; /* callback-scoped UTF-8 */
+} asngn_stream_event;
+
+/* Transaction UUID is allocated at admission; borrowed until task_free. */
+const char *asngn_task_id(const asngn_task *task);
+
+/* Interrupted intents remain in the WAL. Actions may have changed external
+ * state and are never replayed automatically. Counts reflect the last open. */
+asngn_err asngn_session_recovery_info(asngn_session *s,
+    size_t *interrupted_turns, size_t *uncertain_actions);
+
+/* Editor/host context used for hybrid retrieval; copied, session-local.
+ * Set before submit. NULL clears a field; BUSY while a turn is accepted. */
+asngn_err asngn_session_retrieval_context(asngn_session *s,
+    const char *active_file, const char *objective);
+
+/* REASONING is a short, redacted rationale from a validated action. */
+typedef void (*asngn_stream_fn)(const asngn_stream_event *event, void *ud);
 
 typedef struct {
   asngn_detail detail;      /* override; AUTO = controller decides         */
@@ -199,6 +249,11 @@ asngn_err asngn_submit(asngn_session *s, const char *text_utf8,
                        const asngn_submit_opts *opts,
                        asngn_token_fn token_fn, void *ud,
                        asngn_task **out);
+/* Rich variant: accepted output, redacted rationale, and policy notices. */
+asngn_err asngn_submit_stream(asngn_session *s, const char *text_utf8,
+                              const asngn_submit_opts *opts,
+                              asngn_stream_fn stream_fn, void *ud,
+                              asngn_task **out);
 /* ASNGN_ERR_BUSY: not done within timeout_ms. On completion fills *out
  * exactly once; later calls return the stored outcome. */
 asngn_err asngn_task_wait  (asngn_task *t, uint32_t timeout_ms,
@@ -222,6 +277,8 @@ asngn_err asngn_feedback(asngn_session *s, size_t turn, int signal);
 /* Continue the last capped answer. */
 asngn_err asngn_more    (asngn_session *s, asngn_token_fn fn, void *ud,
                          asngn_task **out);
+asngn_err asngn_more_stream(asngn_session *s, asngn_stream_fn fn, void *ud,
+                            asngn_task **out);
 
 /* ---- caches ------------------------------------------------------------ */
 
@@ -285,6 +342,8 @@ asngn_err asngn_session_redact(asngn_session *s, int on);
 /* Re-run the last turn one tier up, bypassing the cache. */
 asngn_err asngn_retry(asngn_session *s, asngn_token_fn fn, void *ud,
                       asngn_task **out);
+asngn_err asngn_retry_stream(asngn_session *s, asngn_stream_fn fn, void *ud,
+                             asngn_task **out);
 
 /* Session report: writes report.xcdn + report.txt next to the
  * session and returns the plain-text rendering (asngn_free). */

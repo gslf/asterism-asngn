@@ -473,6 +473,7 @@ void asngn_cache_shutdown(asngn_ctx *c) {
 
 asngn_err asngn_cache_probe(asngn_ctx *c, asngn_session *s, const char *query,
                             double adapt_bias, asngn_cache_probe_result *out) {
+  if (c->owner) c=c->owner;
   int dim;
   float *vec;
   asngn_time now;
@@ -596,6 +597,7 @@ void asngn_cache_probe_free(asngn_cache_probe_result *p) {
 
 asngn_err asngn_cache_plan_hint(asngn_ctx *c, asngn_session *s,
                                 const float *query_vec, char **out_line) {
+  if (c->owner) c=c->owner;
   int dim;
   size_t i;
   asngn_time now;
@@ -654,6 +656,7 @@ asngn_err asngn_cache_insert(asngn_ctx *c, asngn_session *s, const char *query,
                              const char *detail, const char *tier,
                              size_t gen_tokens, bool tools_used, char **tools,
                              size_t tools_n) {
+  if (c->owner) c=c->owner;
   asngn_cache_entry ent;
   asngn_buf line;
   xcdn_node_t *node;
@@ -767,6 +770,7 @@ asngn_err asngn_cache_insert(asngn_ctx *c, asngn_session *s, const char *query,
 /* ── maintenance ──────────────────────────────────────────────────────── */
 
 asngn_err asngn_cache_clear_scope(asngn_ctx *c, const char *scope) {
+  if (c->owner) c=c->owner;
   bool drop_session, drop_global;
   size_t i, dropped = 0;
   asngn_err e;

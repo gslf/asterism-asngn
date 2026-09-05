@@ -116,6 +116,8 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->tool_ttl_s = 5 * 60;                 /* PT5M */
   cfg->tool_max_entries = 512;
 
+  cfg->scheduler_workers = 4;
+  cfg->queue_capacity = 64;
   cfg->max_steps = 16;
   cfg->max_tool_calls = 8;
   cfg->think_limit = 2;
@@ -248,6 +250,8 @@ typedef struct {
 #define OFF(f) offsetof(asngn_config, f)
 
 static const cfg_key CFG_KEYS[] = {
+  { "engine", "workers", K_INT, OFF(scheduler_workers), 0, NULL },
+  { "engine", "queue_capacity", K_INT, OFF(queue_capacity), 0, NULL },
   { "engine", "root",        K_STR, OFF(root), 0, NULL },
   { "engine", "base_prompt", K_STR, OFF(base_prompt), 0, NULL },
   { "engine", "profile",     K_ENUM, OFF(profile), 0, PROFILE_MAP },

@@ -1,7 +1,7 @@
 /*
- * worker.c — the agent worker and the background worker.
+ * worker.c — bounded session scheduler and isolated runtime workers.
  *
- * The agent worker drains a FIFO of submitted turns and runs each one
+ * The worker pool drains a bounded FIFO of submitted turns and runs each one
  * through asngn_loop_run; llama.cpp calls block on this thread with the
  * stall watchdog and the cancellation flag cascading into the backend.
  * The background worker owns cache sweeps, telemetry flushes, model warmup
@@ -73,6 +73,10 @@ static void task_finish(asngn_ctx *c, asngn_task *task, asngn_err verdict) {
    * follow-up submission. */
   if (s != NULL) {
     os_rwlock_wrlock(&s->lock);
+    if (t && t->tx_started && !t->tx_committed) {
+      while (s->log_n > t->log_before) free(s->log[--s->log_n].text);
+      s->turns=t->turns_before;
+    }
     s->busy = false;
     s->running = NULL;
     os_rwlock_wrunlock(&s->lock);
@@ -82,10 +86,13 @@ static void task_finish(asngn_ctx *c, asngn_task *task, asngn_err verdict) {
   os_mutex_unlock(&task->mu);
 }
 
+#ifdef ASNGN_NO_THREADS
 static void task_run(asngn_ctx *c, asngn_task *task) {
   asngn_err e = asngn_loop_run(c, task->turn);
   task_finish(c, task, e);
 }
+
+#endif
 
 /* ── background maintenance ───────────────────────────────────────────── */
 
@@ -152,7 +159,8 @@ static void stall_tick(asngn_ctx *c) {
 #ifndef ASNGN_NO_THREADS
 
 static void *agent_main(void *arg) {
-  asngn_ctx *c = arg;
+  asngn_ctx *runtime = arg;
+  asngn_ctx *c = runtime->owner ? runtime->owner : runtime;
   for (;;) {
     asngn_task *task;
     os_mutex_lock(&c->q_mu);
@@ -164,9 +172,30 @@ static void *agent_main(void *arg) {
     }
     task = c->q_head;
     c->q_head = task->next;
+    c->q_n--;
     if (c->q_head == NULL) c->q_tail = NULL;
+    runtime->active_task=task;
     os_mutex_unlock(&c->q_mu);
-    task_run(c, task);
+    asngn_err e;
+    if (task->turn->cancel) e=ASNGN_ERR_CANCELLED;
+    else if (task->turn->deadline_mono>0 &&
+        asngn_clock_mono_ms(&c->clock)>=task->turn->deadline_mono) e=ASNGN_ERR_TIMEOUT;
+    else e=asngn_loop_run(runtime,task->turn);
+    os_mutex_lock(&c->q_mu);runtime->active_task=NULL;os_mutex_unlock(&c->q_mu);
+    if (runtime->owner) {
+      if (e!=ASNGN_OK) asngn_seterr(c,e,"%s",asngn_last_error(runtime));
+      os_rwlock_wrlock(&c->lock);
+      c->stats.guard_trips+=runtime->stats.guard_trips;
+      c->stats.tool_calls+=runtime->stats.tool_calls;
+      c->stats.tool_cache_hits+=runtime->stats.tool_cache_hits;
+      c->stats.cache_hits+=runtime->stats.cache_hits;
+      c->stats.cache_misses+=runtime->stats.cache_misses;
+      c->stats.cache_adapts+=runtime->stats.cache_adapts;
+      c->stats.escalations+=runtime->stats.escalations;
+      memset(&runtime->stats,0,sizeof runtime->stats);
+      os_rwlock_wrunlock(&c->lock);
+    }
+    task_finish(c,task,e);
   }
   return NULL;
 }
@@ -181,7 +210,9 @@ static void *bg_main(void *arg) {
       break;
     }
     os_mutex_unlock(&c->q_mu);
-    stall_tick(c);
+    if (c->lanes_n>1) {
+      for (size_t i=0;i<c->lanes_n;i++) stall_tick(c->lanes[i]);
+    } else stall_tick(c);
     asngn_run_due_work(c);
   }
   return NULL;
@@ -189,25 +220,62 @@ static void *bg_main(void *arg) {
 
 #endif /* !ASNGN_NO_THREADS */
 
+/* Admission reserves every potentially resident model plus context/KV
+ * overhead for each isolated lane and for the coordinator's memory models.
+ * Unknown local resources use one lane. Remote servers own GPU admission. */
+size_t asngn_scheduler_capacity(const asngn_ctx *c) {
+  size_t n=(size_t)c->cfg.scheduler_workers, ram=512,vram=0;
+  bool local=false;
+  for (size_t i=0;i<c->models_n;i++) {
+    const asngn_pool_entry *p=&c->models[i].cfg;
+    if (p->backend!=ASMODEL_BACKEND_EMBEDDED) continue;
+    local=true;ram+=p->ram_mb;
+    if (p->gpu_layers!=0) vram+=p->vram_mb ? p->vram_mb : p->ram_mb+512;
+  }
+  if (n<1) n=1;
+  if (n>8) n=8;
+  if (local) {
+    if (c->cfg.max_ram_mb<=0 || (vram && c->cfg.max_vram_mb<=0)) return 1;
+    size_t slots=(size_t)c->cfg.max_ram_mb/ram;
+    if (slots<2) return 1;
+    if (n>slots-1) n=slots-1;
+    if (vram) {
+      slots=(size_t)c->cfg.max_vram_mb/vram;
+      if (slots<2) return 1;
+      if (n>slots-1) n=slots-1;
+    }
+  }
+  return n;
+}
 asngn_err asngn_workers_start(asngn_ctx *c) {
+  if (c->cfg.scheduler_workers<1 || c->cfg.scheduler_workers>8 ||
+      c->cfg.queue_capacity<1 || c->cfg.queue_capacity>65536)
+    return asngn_seterr(c,ASNGN_ERR_CONFIG,"engine workers must be 1..8; queue_capacity 1..65536");
 #ifdef ASNGN_NO_THREADS
   c->no_threads = true;
   return ASNGN_OK;
 #else
-  asngn_err e = os_thread_start(&c->agent_thread, agent_main, c);
-  if (e != ASNGN_OK)
-    return asngn_seterr(c, e, "cannot start the agent worker");
-  e = os_thread_start(&c->bg_thread, bg_main, c);
-  if (e != ASNGN_OK) {
-    os_mutex_lock(&c->q_mu);
-    c->stop = true;
-    os_cond_broadcast(&c->q_cv);
-    os_mutex_unlock(&c->q_mu);
-    os_thread_join(&c->agent_thread);
-    c->stop = false;
-    return asngn_seterr(c, e, "cannot start the background worker");
+  size_t count=asngn_scheduler_capacity(c), started=0;
+  asngn_err e=ASNGN_OK;
+  c->stop=false;
+  for (size_t i=0;i<count;i++) {
+    if (count==1) c->lanes[i]=c;
+    else { e=asngn_runtime_create(c,&c->lanes[i]);if (e!=ASNGN_OK) goto fail; }
+    c->lanes_n++;
   }
-  return ASNGN_OK;
+  for (size_t i=0;i<count;i++) {
+    e=os_thread_start(&c->lanes[i]->agent_thread,agent_main,c->lanes[i]);
+    if (e!=ASNGN_OK) goto fail;
+    started++;
+  }
+  e=os_thread_start(&c->bg_thread,bg_main,c);
+  if (e==ASNGN_OK) return e;
+fail:
+  os_mutex_lock(&c->q_mu);c->stop=true;os_cond_broadcast(&c->q_cv);os_mutex_unlock(&c->q_mu);
+  for (size_t i=0;i<started;i++) os_thread_join(&c->lanes[i]->agent_thread);
+  for (size_t i=0;i<c->lanes_n;i++) if (c->lanes[i]!=c) asngn_runtime_free(c->lanes[i]);
+  c->lanes_n=0;
+  return asngn_seterr(c,e,"cannot start isolated session workers");
 #endif
 }
 
@@ -224,10 +292,16 @@ void asngn_workers_stop(asngn_ctx *c) {
   /* cancel anything still queued */
   for (task = c->q_head; task != NULL; task = task->next)
     if (task->turn != NULL) task->turn->cancel = 1;
+  for (size_t i=0;i<c->lanes_n;i++) {
+    if (c->lanes[i]->active_task) c->lanes[i]->active_task->turn->cancel=1;
+    c->lanes[i]->call_cancel=1;
+  }
   os_cond_broadcast(&c->q_cv);
   os_mutex_unlock(&c->q_mu);
-  os_thread_join(&c->agent_thread);
+  for (size_t i=0;i<c->lanes_n;i++) os_thread_join(&c->lanes[i]->agent_thread);
   os_thread_join(&c->bg_thread);
+  for (size_t i=0;i<c->lanes_n;i++) if (c->lanes[i]!=c) asngn_runtime_free(c->lanes[i]);
+  c->lanes_n=0;
   /* finish queued tasks that never ran */
   while (c->q_head != NULL) {
     task = c->q_head;
@@ -241,19 +315,24 @@ void asngn_workers_stop(asngn_ctx *c) {
 
 asngn_err asngn_worker_submit(asngn_ctx *c, asngn_task *task) {
 #ifdef ASNGN_NO_THREADS
+  asngn_err e=asngn_turn_journal(task->turn,"started",task->turn->user_msg);
+  if (e!=ASNGN_OK) return e;
   task_run(c, task);
   asngn_run_due_work(c);
   return ASNGN_OK;
 #else
   os_mutex_lock(&c->q_mu);
-  if (c->stop) {
+  if (c->stop || c->q_n >= (size_t)c->cfg.queue_capacity) {
     os_mutex_unlock(&c->q_mu);
-    return asngn_seterr(c, ASNGN_ERR_BUSY, "engine is shutting down");
+    return asngn_seterr(c, ASNGN_ERR_BUSY, "engine queue full or shutting down; retry later");
   }
+  asngn_err e=asngn_turn_journal(task->turn,"started",task->turn->user_msg);
+  if (e!=ASNGN_OK) { os_mutex_unlock(&c->q_mu);return e; }
   task->next = NULL;
   if (c->q_tail != NULL) c->q_tail->next = task;
   else c->q_head = task;
   c->q_tail = task;
+  c->q_n++;
   os_cond_broadcast(&c->q_cv);
   os_mutex_unlock(&c->q_mu);
   return ASNGN_OK;

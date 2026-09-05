@@ -103,6 +103,7 @@ static void log_rotate_locked(asngn_ctx *c) {
 
 void asngn_log(asngn_ctx *c, int level, const char *subsys, const char *fmt,
                ...) {
+  if (c && c->owner) c=c->owner;
   char stamp[32];
   char msg_stack[512];
   char *msg = msg_stack;

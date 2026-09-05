@@ -9,7 +9,7 @@ and unknown `data` fields (forward compatibility).
 
 | kind          | data fields                                            |
 |---------------|--------------------------------------------------------|
-| `turn_start`  | `bytes` — size of the gated user message               |
+| `turn_start`  | `bytes`, `mode`, `security_profile`                     |
 | `classify`    | `class`, `detail`, `mode`, `task`, `tools`, `repo_files`, `escalated`, `unreliable`, `eval` (success rate or null), `source` ("heuristic" \| "model" \| "hybrid") |
 | `route`       | `class`, `detail`, `mode`, `task`, `tier`; or `escalated: true` when the judge ladder moves the generator up a tier; or `start: "up"/"down"` when the evidence-gated initial tier moves |
 | `cache_probe` | `outcome` ("hit" \| "adapt" \| "miss"), `cos`          |
@@ -21,6 +21,7 @@ and unknown `data` fields (forward compatibility).
 | `digest`      | `label` (tool.command or "recall"), `bytes` (full size)|
 | `judge`       | `score` (0–10), `tokens`                               |
 | `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated) — answer via `asngn_confirm` |
+| `authorization` | `granted`, `profile` — a profile denied an action; the turn may continue and report the required grant |
 | `guard`       | `guard` — one of `stall`, `identical_call`, `oscillation`, `step_budget`, `think_limit`, `recall_limit`, `futile_steps`, `tool_cap`, `working_trim`, `budget_pressure`, `outcome_gate`, `response_protocol` |
 | `answer`      | `tokens`, `capped`                                     |
 | `turn_end`    | `ok`, `cancelled`, `error` (stable `asngn_err` name, empty on success). Exactly one is emitted for every submitted turn, including phase failures. |

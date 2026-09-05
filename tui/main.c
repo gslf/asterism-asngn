@@ -83,9 +83,13 @@ static void chat_replay(tui_app *a) {
 
 /* ── engine callbacks: queue-only, engine threads ────────────────────── */
 
-static void cb_token(const char *utf8, void *ud) {
+static void cb_stream(const asngn_stream_event *event, void *ud) {
   tui_app *a = ud;
-  tui_queue_push(&a->q, TMSG_TOKEN, 0, utf8);
+  tui_msg_kind kind = TMSG_TOKEN;
+  if (event == NULL || event->text == NULL) return;
+  if (event->kind == ASNGN_STREAM_REASONING) kind = TMSG_REASONING;
+  else if (event->kind == ASNGN_STREAM_NOTICE) kind = TMSG_NOTICE;
+  tui_queue_push(&a->q, kind, 0, event->text);
 }
 
 static void cb_event(const char *event_xcdn, void *ud) {
@@ -142,8 +146,9 @@ static void render_header(tui_app *a, tui_frame *f) {
   x += d_put(f, x, 0, th->star, TFG_ACCENT, TBG_DEFAULT, 0);
   x += d_put(f, x, 0, " ", TFG_DIM, TBG_DEFAULT, 0);
   x += d_putn(f, x, 0, a->slug, 24, TFG_BRIGHT, TBG_DEFAULT, 0);
-  snprintf(buf, sizeof buf, " %s %s %s ", th->bullet,
-           a->tier_last[0] != '\0' ? a->tier_last : "-", th->bullet);
+  snprintf(buf, sizeof buf, " %s %s/%s %s ", th->bullet,
+           asngn_usage_mode_name(a->usage_mode),
+           asngn_security_profile_name(a->security_profile), th->bullet);
   x += d_put(f, x, 0, buf, TFG_DIM, TBG_DEFAULT, 0);
   header_budget(a, f, &x);
   snprintf(buf, sizeof buf, " %s tok %zu ", th->bullet,
@@ -329,27 +334,21 @@ void tui_render_frame(tui_app *a, tui_frame *f, int *cx, int *cy) {
 
 static void start_turn(tui_app *a, const char *text) {
   chat_entry *u = chat_push(&a->chat, CHAT_USER);
-  chat_entry *live;
   asngn_submit_opts opts;
   asngn_err e;
   if (u != NULL) chat_append(&a->chat, u, text, strlen(text));
-  live = chat_push(&a->chat, CHAT_ASSISTANT);
-  if (live == NULL) return;
-  a->live_idx = (int)(a->chat.n - 1);
+  a->live_idx = -1;
   a->live_tokens = 0;
   a->live_t0_ms = 0;
   a->turn_guard_stop = 0;
   memset(&opts, 0, sizeof opts);
   opts.detail = a->detail;
-  e = asngn_submit(a->ses, text, &opts, cb_token, a, &a->task);
+  e = asngn_submit_stream(a->ses, text, &opts, cb_stream, a, &a->task);
   if (e != ASNGN_OK) {
     a->task = NULL;
     a->live_idx = -1;
     if (e == ASNGN_ERR_BUSY && a->pending_n < TUI_PENDING_MAX) {
-      /* drop the echoed user + live assistant entries; the retry
-       * re-echoes them when the fold releases the session */
-      a->chat.n--;
-      free(a->chat.e[a->chat.n].text);
+      /* Drop the echoed user; the retry re-echoes it after the fold. */
       a->chat.n--;
       free(a->chat.e[a->chat.n].text);
       /* the background fold owns the session for a moment: requeue at
@@ -381,22 +380,17 @@ static void start_turn(tui_app *a, const char *text) {
 }
 
 static void start_continuation(tui_app *a, int retry) {
-  chat_entry *live;
   asngn_err e;
   if (a->task != NULL) return;
-  live = chat_push(&a->chat, CHAT_ASSISTANT);
-  if (live == NULL) return;
-  a->live_idx = (int)(a->chat.n - 1);
+  a->live_idx = -1;
   a->live_tokens = 0;
   a->live_t0_ms = 0;
   a->turn_guard_stop = 0;
-  e = retry ? asngn_retry(a->ses, cb_token, a, &a->task)
-            : asngn_more(a->ses, cb_token, a, &a->task);
+  e = retry ? asngn_retry_stream(a->ses, cb_stream, a, &a->task)
+            : asngn_more_stream(a->ses, cb_stream, a, &a->task);
   if (e != ASNGN_OK) {
     a->task = NULL;
     a->live_idx = -1;
-    a->chat.n--; /* drop the empty assistant entry */
-    free(a->chat.e[a->chat.n].text);
     chat_systemf(&a->chat, "%s failed: %s %s %s",
                  retry ? "/retry" : "/more", asngn_err_name(e),
                  a->theme.bullet, asngn_last_error(a->ctx));
@@ -422,10 +416,15 @@ static void check_task(tui_app *a) {
   a->now_what[0] = '\0';
 
   if (e == ASNGN_OK) {
-    chat_entry *live =
-        a->live_idx >= 0 ? &a->chat.e[a->live_idx] : NULL;
+    chat_entry *live;
+    if (a->live_idx < 0) {
+      live = chat_push(&a->chat, CHAT_ASSISTANT);
+      if (live != NULL) a->live_idx = (int)(a->chat.n - 1);
+    } else {
+      live = &a->chat.e[a->live_idx];
+    }
     if (live != NULL) {
-      if (live->len == 0 && r.answer != NULL) /* cache hit: no stream */
+      if (live->len == 0 && r.answer != NULL)
         chat_append(&a->chat, live, r.answer, strlen(r.answer));
       live->turn = r.turn;
       if (r.capped) {
@@ -489,6 +488,8 @@ static void switch_session(tui_app *a, const char *slug) {
   asngn_session_close(a->ses);
   a->ses = ns;
   snprintf(a->slug, sizeof a->slug, "%s", asngn_session_slug(ns));
+  (void)asngn_session_get_mode(ns, &a->usage_mode,
+                               &a->security_profile);
   a->last_turn = 0;
   chat_free(&a->chat);
   chat_init(&a->chat);
@@ -597,8 +598,69 @@ static void cmd_session(tui_app *a, const char *arg) {
                    asngn_last_error(a->ctx));
     return;
   }
-  /* "/session new" asks the engine for a fresh generated slug */
-  switch_session(a, strcmp(arg, "new") == 0 ? NULL : arg);
+  if (strncmp(arg, "new", 3) == 0 &&
+      (arg[3] == ' ' || arg[3] == '\0')) {
+    const char *name = arg + 3;
+    while (*name == ' ') name++;
+    switch_session(a, *name != '\0' ? name : NULL);
+    return;
+  }
+  switch_session(a, arg);
+}
+
+static void cmd_mode(tui_app *a, const char *arg) {
+  asngn_usage_mode mode;
+  if (arg == NULL) {
+    chat_systemf(&a->chat, "mode %s %s profile %s",
+                 asngn_usage_mode_name(a->usage_mode), a->theme.bullet,
+                 asngn_security_profile_name(a->security_profile));
+    return;
+  }
+  if (strcmp(arg, "chat") == 0) mode = ASNGN_USAGE_CHAT;
+  else if (strcmp(arg, "coding") == 0) mode = ASNGN_USAGE_CODING;
+  else if (strcmp(arg, "automate") == 0) mode = ASNGN_USAGE_AUTOMATE;
+  else {
+    chat_systemf(&a->chat, "usage: /mode chat|coding|automate");
+    return;
+  }
+  if (asngn_session_set_mode(a->ses, mode) != ASNGN_OK) {
+    chat_systemf(&a->chat, "mode failed: %s", asngn_last_error(a->ctx));
+    return;
+  }
+  (void)asngn_session_get_mode(a->ses, &a->usage_mode,
+                               &a->security_profile);
+  chat_systemf(&a->chat, "mode %s %s profile %s",
+               asngn_usage_mode_name(a->usage_mode), a->theme.bullet,
+               asngn_security_profile_name(a->security_profile));
+}
+
+static void cmd_profile(tui_app *a, const char *arg) {
+  asngn_security_profile profile;
+  if (arg == NULL) {
+    chat_systemf(&a->chat, "security profile %s",
+                 asngn_security_profile_name(a->security_profile));
+    return;
+  }
+  if (strcmp(arg, "chat") == 0) profile = ASNGN_SECURITY_CHAT;
+  else if (strcmp(arg, "coding-readonly") == 0)
+    profile = ASNGN_SECURITY_CODING_READONLY;
+  else if (strcmp(arg, "coding-sandboxed") == 0)
+    profile = ASNGN_SECURITY_CODING_SANDBOXED;
+  else if (strcmp(arg, "automation-ci") == 0)
+    profile = ASNGN_SECURITY_AUTOMATION_CI;
+  else {
+    chat_systemf(&a->chat,
+                 "usage: /profile chat|coding-readonly|coding-sandboxed|"
+                 "automation-ci");
+    return;
+  }
+  if (asngn_session_set_security_profile(a->ses, profile) != ASNGN_OK) {
+    chat_systemf(&a->chat, "profile failed: %s", asngn_last_error(a->ctx));
+    return;
+  }
+  a->security_profile = profile;
+  chat_systemf(&a->chat, "security profile %s",
+               asngn_security_profile_name(profile));
 }
 
 static void cmd_cache(tui_app *a, const char *arg) {
@@ -725,6 +787,10 @@ static void handle_slash(tui_app *a, char *line) {
     a->quit = 1;
   } else if (strcmp(cmd, "/session") == 0) {
     cmd_session(a, arg);
+  } else if (strcmp(cmd, "/mode") == 0) {
+    cmd_mode(a, arg);
+  } else if (strcmp(cmd, "/profile") == 0) {
+    cmd_profile(a, arg);
   } else if (strcmp(cmd, "/project") == 0) {
     if (arg == NULL) {
       chat_systemf(&a->chat, "usage: /project <slug> | none");
@@ -831,8 +897,8 @@ static void handle_slash(tui_app *a, char *line) {
 
 static const char *const SLASH_CMDS[] = {
     "/cache", "/compact", "/detail", "/export", "/help", "/memory",
-    "/more", "/perms", "/pin", "/project", "/quit", "/redact",
-    "/retry", "/session", "/stats", "/tools",
+    "/mode", "/more", "/perms", "/pin", "/profile", "/project",
+    "/quit", "/redact", "/retry", "/session", "/stats", "/tools",
 };
 
 static void complete_from(tui_app *a, const char *partial,
@@ -882,6 +948,14 @@ static void complete(tui_app *a) {
     if (strcmp(buf, "/detail") == 0) {
       static const char *const D[] = {"auto", "normal", "rich", "terse"};
       complete_from(a, arg, D, 4, 0);
+    } else if (strcmp(buf, "/mode") == 0) {
+      static const char *const M[] = {"automate", "chat", "coding"};
+      complete_from(a, arg, M, 3, 0);
+    } else if (strcmp(buf, "/profile") == 0) {
+      static const char *const P[] = {"automation-ci", "chat",
+                                      "coding-readonly",
+                                      "coding-sandboxed"};
+      complete_from(a, arg, P, 4, 0);
     } else if (strcmp(buf, "/cache") == 0) {
       static const char *const C[] = {"clear", "stats"};
       complete_from(a, arg, C, 2, 0);
@@ -1226,6 +1300,10 @@ static void drain_queue(tui_app *a) {
     tui_msg *next = m->next;
     switch (m->kind) {
     case TMSG_TOKEN:
+      if (a->live_idx < 0) {
+        chat_entry *entry = chat_push(&a->chat, CHAT_ASSISTANT);
+        if (entry != NULL) a->live_idx = (int)(a->chat.n - 1);
+      }
       if (a->live_idx >= 0)
         chat_append(&a->chat, &a->chat.e[a->live_idx], m->text,
                     strlen(m->text));
@@ -1233,6 +1311,20 @@ static void drain_queue(tui_app *a) {
       a->live_tokens++;
       a->dirty = 1;
       break;
+    case TMSG_REASONING: {
+      chat_entry *entry = chat_push(&a->chat, CHAT_REASONING);
+      if (entry != NULL)
+        chat_append(&a->chat, entry, m->text, strlen(m->text));
+      a->dirty = a->structural = 1;
+      break;
+    }
+    case TMSG_NOTICE: {
+      chat_entry *entry = chat_push(&a->chat, CHAT_NOTICE);
+      if (entry != NULL)
+        chat_append(&a->chat, entry, m->text, strlen(m->text));
+      a->dirty = a->structural = 1;
+      break;
+    }
     case TMSG_EVENT:
       tui_events_ingest(a, m->text);
       break;
@@ -1263,6 +1355,8 @@ static int run_frame_dump(void) {
   memset(&a, 0, sizeof a);
   a.live_idx = -1;
   a.detail = ASNGN_DETAIL_AUTO;
+  a.usage_mode = ASNGN_USAGE_CODING;
+  a.security_profile = ASNGN_SECURITY_CODING_SANDBOXED;
   a.sidebar_on = 1;
   a.pane = PANE_TRACE;
   tui_theme_init(&a.theme, 0); /* golden frames are stable: asterism */
@@ -1482,6 +1576,8 @@ static int run_interactive(const char *root, const char *config,
     return 1;
   }
   snprintf(a.slug, sizeof a.slug, "%s", asngn_session_slug(a.ses));
+  (void)asngn_session_get_mode(a.ses, &a.usage_mode,
+                               &a.security_profile);
 
   if (tui_term_open(&a.term, truecolor_hint) != 0) {
     asngn_session_close(a.ses);

@@ -28,6 +28,47 @@ typedef struct {
   int saw_args_hash;
 } log_probe;
 
+typedef struct {
+  char output[256];
+  char reasoning[256];
+  char notice[256];
+  size_t output_len, reasoning_len, notice_len;
+  int first_kind;
+} rich_sink;
+
+static void rich_sink_append(char *dst, size_t cap, size_t *len,
+                             const char *text) {
+  size_t n = strlen(text);
+  if (n > cap - *len - 1) n = cap - *len - 1;
+  memcpy(dst + *len, text, n);
+  *len += n;
+  dst[*len] = '\0';
+}
+
+static void rich_sink_cb(const asngn_stream_event *event, void *ud) {
+  rich_sink *sink = (rich_sink *)ud;
+  if (sink->first_kind < 0) sink->first_kind = (int)event->kind;
+  if (event->kind == ASNGN_STREAM_OUTPUT)
+    rich_sink_append(sink->output, sizeof sink->output, &sink->output_len,
+                     event->text);
+  else if (event->kind == ASNGN_STREAM_REASONING)
+    rich_sink_append(sink->reasoning, sizeof sink->reasoning,
+                     &sink->reasoning_len, event->text);
+  else if (event->kind == ASNGN_STREAM_NOTICE)
+    rich_sink_append(sink->notice, sizeof sink->notice, &sink->notice_len,
+                     event->text);
+}
+
+static asngn_err rich_turn(eng_fx *f, const char *message, rich_sink *sink,
+                           asngn_turn_result *out) {
+  asngn_task *task = NULL;
+  asngn_err e = asngn_submit_stream(f->s, message, NULL, rich_sink_cb, sink,
+                                    &task);
+  if (e == ASNGN_OK) e = asngn_task_wait(task, 60000, out);
+  asngn_task_free(task);
+  return e;
+}
+
 static void probe_log(int level, const char *msg, void *ud) {
   log_probe *p = (log_probe *)ud;
   (void)level;
@@ -149,6 +190,92 @@ TEST(plan_tool_turn) {
   /* astools dispatched exactly once */
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.tool_calls, 1);
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(chat_mode_forces_rag_only_direct_turn) {
+  eng_fx f;
+  asngn_turn_result r;
+  asngn_stats stats;
+
+  memset(&r, 0, sizeof r);
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_OK(asngn_session_set_mode(f.s, ASNGN_USAGE_CHAT));
+  ASSERT_TRUE(fake_model_push(
+      &f.nano, "CLASS MODERATE | DETAIL NORMAL | MODE PLAN | TASK EDIT\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "I can discuss the requested change.\n"));
+
+  ASSERT_OK(eng_turn(&f, "change the project", NULL, NULL, &r));
+  ASSERT_EQ_STR(r.answer, "I can discuss the requested change.\n");
+  ASSERT_EQ_STR(r.klass, "moderate");
+  ASSERT_EQ_STR(f.s->log[1].mode, "direct");
+  ASSERT_CONTAINS(f.stdm.last_system, "Session mode is chat");
+  ASSERT_OK(asngn_get_stats(f.c, &stats));
+  ASSERT_EQ_INT(stats.tool_calls, 0);
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(rich_stream_exposes_redacted_operational_reasoning) {
+  eng_fx f;
+  asngn_turn_result r;
+  rich_sink sink;
+
+  memset(&r, 0, sizeof r);
+  memset(&sink, 0, sizeof sink);
+  sink.first_kind = -1;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_TRUE(fake_model_push(
+      &f.nano, "CLASS MODERATE | DETAIL NORMAL | MODE PLAN | TASK LOOKUP\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.light, "{action: \"call\", why: \"inspect password=hunter2secret\", input: "
+                "fake.run {msg: \"hello\"}, success: \"result\", fallback: "
+                "\"report unavailable\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "The current state is available.\n"));
+
+  ASSERT_OK(rich_turn(&f, "inspect the current state", &sink, &r));
+  ASSERT_EQ_INT(sink.first_kind, ASNGN_STREAM_REASONING);
+  ASSERT_CONTAINS(sink.reasoning, "redacted");
+  ASSERT_NOT_CONTAINS(sink.reasoning, "hunter2secret");
+  ASSERT_EQ_STR(sink.output, r.answer);
+  ASSERT_EQ_STR(sink.notice, "");
+
+  asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(readonly_profile_notifies_without_aborting_turn) {
+  eng_fx f;
+  asngn_turn_result r;
+  rich_sink sink;
+  asngn_stats stats;
+
+  memset(&r, 0, sizeof r);
+  memset(&sink, 0, sizeof sink);
+  sink.first_kind = -1;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  ASSERT_OK(asngn_session_set_security_profile(
+      f.s, ASNGN_SECURITY_CODING_READONLY));
+  ASSERT_TRUE(fake_model_push(
+      &f.nano, "CLASS COMPLEX | DETAIL NORMAL | MODE PLAN | TASK EDIT\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm, "{action: \"call\", why: \"apply requested edit\", input: "
+               "fake.mut {msg: \"change\"}, success: \"updated\", fallback: "
+               "\"report permission\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.stdm, "{action: \"answer\"}\n"));
+  ASSERT_TRUE(fake_model_push(
+      &f.stdm, "The edit needs a writable security profile.\n"));
+
+  ASSERT_OK(rich_turn(&f, "edit the project", &sink, &r));
+  ASSERT_CONTAINS(sink.notice, "coding-readonly");
+  ASSERT_CONTAINS(r.answer, "writable security profile");
+  ASSERT_CONTAINS(f.stdm.last_system, "lacked authorization");
+  ASSERT_OK(asngn_get_stats(f.c, &stats));
+  ASSERT_EQ_INT(stats.tool_calls, 0);
 
   asngn_turn_result_free(&r);
   eng_drop(&f);
@@ -886,6 +1013,9 @@ TEST_LIST = {
   TEST_ENTRY(direct_chat),
   TEST_ENTRY(explicit_deadline_is_opt_in),
   TEST_ENTRY(plan_tool_turn),
+  TEST_ENTRY(chat_mode_forces_rag_only_direct_turn),
+  TEST_ENTRY(rich_stream_exposes_redacted_operational_reasoning),
+  TEST_ENTRY(readonly_profile_notifies_without_aborting_turn),
   TEST_ENTRY(reference_followup_stays_direct),
   TEST_ENTRY(model_classifier_cannot_downgrade_quality),
   TEST_ENTRY(generate_outcome_gate),

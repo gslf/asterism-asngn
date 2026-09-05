@@ -144,6 +144,7 @@ static asngn_err tele_append_token(asngn_buf *b, const char *s) {
 void asngn_tele_emit(asngn_ctx *c, const char *kind, const char *span,
                      const char *parent, const char *session, size_t turn,
                      const char *data_xcdn) {
+  if (c && c->owner) c=c->owner;
   asngn_buf b;
   char stamp[21];
   char *line;
@@ -323,6 +324,7 @@ static void tele_rotate_locked(asngn_ctx *c) {
 }
 
 void asngn_tele_flush(asngn_ctx *c) {
+  if (c && c->owner) c=c->owner;
   bool warn_rotate = false, warn_write = false;
   if (!c) return;
 

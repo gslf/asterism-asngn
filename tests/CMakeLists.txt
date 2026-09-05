@@ -3,6 +3,7 @@
 # fakes (fakes.c). Golden values are inline C string literals.
 
 set(ASNGN_TEST_PROGRAMS
+  test_scheduler
   test_util
   test_time
   test_sha_uuid

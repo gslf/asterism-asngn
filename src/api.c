@@ -110,6 +110,7 @@ void asngn_set_event_sink(asngn_ctx *c, asngn_event_fn fn, void *ud) {
 
 double asngn_pressure(asngn_ctx *c, asngn_session *s) {
   double p = 0.0;
+  if (c->owner) c=c->owner;
   if (c->cfg.session_tokens > 0 && s != NULL) {
     double ps = (double)s->spent_tokens / (double)c->cfg.session_tokens;
     if (ps > p) p = ps;
@@ -385,7 +386,8 @@ asngn_err asngn_session_workspace(asngn_session *s,
   asngn_err e;
   if (s == NULL || out == NULL) return ASNGN_ERR_INVALID;
   os_rwlock_wrlock(&s->lock);
-  if (s->ctx->session_workspaces) {
+  if (s->busy) { e=ASNGN_OK; }
+  else if (s->ctx->session_workspaces) {
     e = asngn_workspace_info_refresh(s->ctx, &s->workspace);
   } else {
     e = asngn_workspace_refresh(s->ctx);
@@ -479,6 +481,94 @@ static int session_slug_cmp(const void *a, const void *b) {
   const char *const *sa = a;
   const char *const *sb = b;
   return strcmp(*sa, *sb);
+}
+
+const char *asngn_usage_mode_name(asngn_usage_mode mode) {
+  switch (mode) {
+  case ASNGN_USAGE_CHAT: return "chat";
+  case ASNGN_USAGE_CODING: return "coding";
+  case ASNGN_USAGE_AUTOMATE: return "automate";
+  }
+  return "unknown";
+}
+
+const char *asngn_security_profile_name(asngn_security_profile profile) {
+  switch (profile) {
+  case ASNGN_SECURITY_CHAT: return "chat";
+  case ASNGN_SECURITY_CODING_READONLY: return "coding-readonly";
+  case ASNGN_SECURITY_CODING_SANDBOXED: return "coding-sandboxed";
+  case ASNGN_SECURITY_AUTOMATION_CI: return "automation-ci";
+  }
+  return "unknown";
+}
+
+static bool usage_mode_valid(asngn_usage_mode mode) {
+  return mode >= ASNGN_USAGE_CHAT && mode <= ASNGN_USAGE_AUTOMATE;
+}
+
+static bool security_profile_valid(asngn_security_profile profile) {
+  return profile >= ASNGN_SECURITY_CHAT &&
+         profile <= ASNGN_SECURITY_AUTOMATION_CI;
+}
+
+asngn_err asngn_session_set_mode(asngn_session *s, asngn_usage_mode mode) {
+  asngn_err e;
+  asngn_usage_mode old_mode;
+  asngn_security_profile old_profile;
+  if (s == NULL || !usage_mode_valid(mode)) return ASNGN_ERR_INVALID;
+  os_rwlock_wrlock(&s->lock);
+  if (s->busy) {
+    os_rwlock_wrunlock(&s->lock);
+    return asngn_seterr(s->ctx, ASNGN_ERR_BUSY,
+                        "session %s: a turn is running", s->slug);
+  }
+  old_mode = s->usage_mode;
+  old_profile = s->security_profile;
+  s->usage_mode = mode;
+  s->security_profile = mode == ASNGN_USAGE_CHAT
+                            ? ASNGN_SECURITY_CHAT
+                            : mode == ASNGN_USAGE_AUTOMATE
+                                  ? ASNGN_SECURITY_AUTOMATION_CI
+                                  : ASNGN_SECURITY_CODING_SANDBOXED;
+  e = asngn_session_save_manifest(s);
+  if (e != ASNGN_OK) {
+    s->usage_mode = old_mode;
+    s->security_profile = old_profile;
+  }
+  os_rwlock_wrunlock(&s->lock);
+  return e;
+}
+
+asngn_err asngn_session_set_security_profile(
+    asngn_session *s, asngn_security_profile profile) {
+  asngn_err e;
+  asngn_security_profile old_profile;
+  if (s == NULL || !security_profile_valid(profile)) return ASNGN_ERR_INVALID;
+  os_rwlock_wrlock(&s->lock);
+  if (s->busy) {
+    os_rwlock_wrunlock(&s->lock);
+    return asngn_seterr(s->ctx, ASNGN_ERR_BUSY,
+                        "session %s: a turn is running", s->slug);
+  }
+  old_profile = s->security_profile;
+  s->security_profile = profile;
+  e = asngn_session_save_manifest(s);
+  if (e != ASNGN_OK) s->security_profile = old_profile;
+  os_rwlock_wrunlock(&s->lock);
+  return e;
+}
+
+asngn_err asngn_session_get_mode(const asngn_session *s,
+                                 asngn_usage_mode *out_mode,
+                                 asngn_security_profile *out_profile) {
+  asngn_session *mutable_session = (asngn_session *)s;
+  if (s == NULL || (out_mode == NULL && out_profile == NULL))
+    return ASNGN_ERR_INVALID;
+  os_rwlock_rdlock(&mutable_session->lock);
+  if (out_mode != NULL) *out_mode = s->usage_mode;
+  if (out_profile != NULL) *out_profile = s->security_profile;
+  os_rwlock_rdunlock(&mutable_session->lock);
+  return ASNGN_OK;
 }
 
 asngn_err asngn_session_open(asngn_ctx *c, const char *slug,
@@ -850,6 +940,13 @@ asngn_err asngn_feedback(asngn_session *s, size_t turn, int signal) {
 asngn_err asngn_confirm(asngn_ctx *c, const char *confirm_id, int allow,
                         int session_wide) {
   if (c == NULL || confirm_id == NULL) return ASNGN_ERR_INVALID;
+  if (!c->owner && c->lanes_n>1) {
+    for (size_t i=0;i<c->lanes_n;i++) {
+      asngn_err e=asngn_confirm(c->lanes[i],confirm_id,allow,session_wide);
+      if (e==ASNGN_OK) return e;
+    }
+    return ASNGN_ERR_NOT_FOUND;
+  }
   os_mutex_lock(&c->confirm.mu);
   if (c->confirm.id[0] == '\0' ||
       strcmp(c->confirm.id, confirm_id) != 0) {
@@ -871,6 +968,7 @@ void asngn_turn_state_free(asngn_turn_state *t) {
   size_t i;
   if (t == NULL) return;
   free(t->user_msg);
+  free(t->retrieval_query);
   for (i = 0; i < t->work_n; i++) free(t->work[i].text);
   free(t->work);
   free(t->catalog);
@@ -891,7 +989,8 @@ static asngn_err submit_common(asngn_session *s, char *gated_msg,
                                const asngn_submit_opts *opts,
                                bool continuation, bool retry_up,
                                asngn_token_fn token_fn,
-                               void *ud, asngn_task **out) {
+                               void *ud, asngn_stream_fn stream_fn,
+                               void *stream_ud, asngn_task **out) {
   asngn_ctx *c = s->ctx;
   asngn_task *task;
   asngn_turn_state *t;
@@ -911,7 +1010,13 @@ static asngn_err submit_common(asngn_session *s, char *gated_msg,
   t->retry_up = retry_up;
   t->token_cb = token_fn;
   t->token_ud = ud;
+  t->stream_cb = stream_fn;
+  t->stream_ud = stream_ud;
+  asngn_uuid_v4(t->span_root);
   t->gen_slot = -1;
+  { int64_t duration=t->opts.deadline_ms ? t->opts.deadline_ms : c->cfg.turn_deadline_s*1000;
+    t->deadline_mono=duration>0 ? asngn_clock_mono_ms(&c->clock)+duration : 0;
+  }
   os_mutex_init(&task->mu);
   os_cond_init(&task->cv);
   task->ctx = c;
@@ -919,7 +1024,7 @@ static asngn_err submit_common(asngn_session *s, char *gated_msg,
   task->turn = t;
 
   session_lock_for_update(c, s);
-  if (s->busy) {
+  if (s->busy || s->recovery_required) {
     os_rwlock_wrunlock(&s->lock);
     os_cond_destroy(&task->cv);
     os_mutex_destroy(&task->mu);
@@ -931,6 +1036,11 @@ static asngn_err submit_common(asngn_session *s, char *gated_msg,
   }
   s->busy = true;
   s->running = task;
+  t->usage_mode = s->usage_mode;
+  t->security_profile = s->security_profile;
+  if (t->usage_mode == ASNGN_USAGE_CHAT ||
+      t->security_profile == ASNGN_SECURITY_CHAT)
+    t->opts.no_tools = 1;
   os_rwlock_wrunlock(&s->lock);
 
   {
@@ -975,11 +1085,39 @@ asngn_err asngn_submit(asngn_session *s, const char *text_utf8,
     return e;
   }
   msg[len] = '\0';
-  return submit_common(s, msg, opts, false, false, token_fn, ud, out);
+  return submit_common(s, msg, opts, false, false, token_fn, ud, NULL, NULL,
+                       out);
 }
 
-asngn_err asngn_more(asngn_session *s, asngn_token_fn fn, void *ud,
-                     asngn_task **out) {
+asngn_err asngn_submit_stream(asngn_session *s, const char *text_utf8,
+                              const asngn_submit_opts *opts,
+                              asngn_stream_fn stream_fn, void *ud,
+                              asngn_task **out) {
+  asngn_ctx *c;
+  char *msg;
+  size_t len;
+  asngn_err e;
+  if (s == NULL || text_utf8 == NULL || out == NULL)
+    return ASNGN_ERR_INVALID;
+  *out = NULL;
+  c = s->ctx;
+  len = strlen(text_utf8);
+  msg = malloc(len + 1);
+  if (msg == NULL) return ASNGN_ERR_NOMEM;
+  memcpy(msg, text_utf8, len + 1);
+  e = asngn_gate_input(c, msg, &len);
+  if (e != ASNGN_OK) {
+    free(msg);
+    return e;
+  }
+  msg[len] = '\0';
+  return submit_common(s, msg, opts, false, false, NULL, NULL, stream_fn, ud,
+                       out);
+}
+
+static asngn_err more_common(asngn_session *s, asngn_token_fn token_fn,
+                             asngn_stream_fn stream_fn, void *ud,
+                             asngn_task **out) {
   char *msg = NULL;
   bool have = false, capped = false;
   if (s == NULL || out == NULL) return ASNGN_ERR_INVALID;
@@ -996,11 +1134,23 @@ asngn_err asngn_more(asngn_session *s, asngn_token_fn fn, void *ud,
     return asngn_seterr(s->ctx, ASNGN_ERR_INVALID,
                         "the last answer was not capped");
   if (msg == NULL) return ASNGN_ERR_NOMEM;
-  return submit_common(s, msg, NULL, true, false, fn, ud, out);
+  return submit_common(s, msg, NULL, true, false, token_fn, ud, stream_fn, ud,
+                       out);
 }
 
-asngn_err asngn_retry(asngn_session *s, asngn_token_fn fn, void *ud,
-                      asngn_task **out) {
+asngn_err asngn_more(asngn_session *s, asngn_token_fn fn, void *ud,
+                     asngn_task **out) {
+  return more_common(s, fn, NULL, ud, out);
+}
+
+asngn_err asngn_more_stream(asngn_session *s, asngn_stream_fn fn, void *ud,
+                            asngn_task **out) {
+  return more_common(s, NULL, fn, ud, out);
+}
+
+static asngn_err retry_common(asngn_session *s, asngn_token_fn token_fn,
+                              asngn_stream_fn stream_fn, void *ud,
+                              asngn_task **out) {
   char *msg;
   asngn_submit_opts opts;
   if (s == NULL || out == NULL) return ASNGN_ERR_INVALID;
@@ -1017,7 +1167,18 @@ asngn_err asngn_retry(asngn_session *s, asngn_token_fn fn, void *ud,
   if (msg == NULL) return ASNGN_ERR_NOMEM;
   memset(&opts, 0, sizeof opts);
   opts.no_cache = 1;
-  return submit_common(s, msg, &opts, false, true, fn, ud, out);
+  return submit_common(s, msg, &opts, false, true, token_fn, ud, stream_fn, ud,
+                       out);
+}
+
+asngn_err asngn_retry(asngn_session *s, asngn_token_fn fn, void *ud,
+                      asngn_task **out) {
+  return retry_common(s, fn, NULL, ud, out);
+}
+
+asngn_err asngn_retry_stream(asngn_session *s, asngn_stream_fn fn, void *ud,
+                             asngn_task **out) {
+  return retry_common(s, NULL, fn, ud, out);
 }
 
 asngn_err asngn_task_wait(asngn_task *t, uint32_t timeout_ms,
@@ -1053,6 +1214,13 @@ asngn_err asngn_task_cancel(asngn_task *t) {
   os_mutex_lock(&t->ctx->q_mu);
   if (t->ctx->call_active && t->ctx->call_turn == t->turn)
     t->ctx->call_cancel = 1;
+  if (t->ctx->lanes_n>1) for (size_t i=0;i<t->ctx->lanes_n;i++) {
+    asngn_ctx *lane=t->ctx->lanes[i];
+    os_mutex_lock(&lane->q_mu);
+    if (lane->call_active && lane->call_turn==t->turn) lane->call_cancel=1;
+    os_mutex_unlock(&lane->q_mu);
+    os_mutex_lock(&lane->confirm.mu);os_cond_broadcast(&lane->confirm.cv);os_mutex_unlock(&lane->confirm.mu);
+  }
   os_mutex_unlock(&t->ctx->q_mu);
   /* wake a possible pending confirmation so the loop can observe it */
   os_mutex_lock(&t->ctx->confirm.mu);
@@ -1089,4 +1257,50 @@ asngn_err asngn_tick(asngn_ctx *c) {
 #else
   return ASNGN_OK;
 #endif
+}
+
+asngn_err asngn_session_retrieval_context(asngn_session *s,
+    const char *active_file, const char *objective) {
+  char *a=asngn_strdup(active_file ? active_file : "");
+  char *o=asngn_strdup(objective ? objective : "");
+  if (!s || !a || !o) { free(a);free(o);return ASNGN_ERR_INVALID; }
+  os_rwlock_wrlock(&s->lock);
+  if (s->busy) { os_rwlock_wrunlock(&s->lock);free(a);free(o);return ASNGN_ERR_BUSY; }
+  free(s->active_file);free(s->objective);s->active_file=a;s->objective=o;
+  os_rwlock_wrunlock(&s->lock);return ASNGN_OK;
+}
+
+asngn_err asngn_runtime_create(asngn_ctx *owner, asngn_ctx **out) {
+  asngn_ctx *c=calloc(1,sizeof *c);asngn_err e;
+  if (!c) return ASNGN_ERR_NOMEM;
+  ctx_locks_init(c);c->owner=owner;c->cfg=owner->cfg;c->clock=owner->clock;
+  c->root=owner->root;c->workspace=owner->workspace;
+  c->allow_degraded=owner->allow_degraded;
+  c->asper=owner->asper;c->asper_ok=owner->asper_ok;
+  c->cache_dir=owner->cache_dir;
+  for (size_t i=0;i<owner->models_n;i++) if (owner->models[i].injected) {
+    c->models[i].injected=true;c->models[i].iface=owner->models[i].iface;
+    c->models[i].iface.destroy=NULL;
+  }
+  e=asngn_models_init(c);
+  if (e!=ASNGN_OK) { asngn_runtime_free(c);return e; }
+  *out=c;return ASNGN_OK;
+}
+void asngn_runtime_free(asngn_ctx *c) {
+  if (!c) return;
+  c->asper=NULL;c->asper_ok=false; /* borrowed source store */
+  asngn_siblings_close(c);asngn_models_shutdown(c);
+  free(c->lane_project);ctx_locks_destroy(c);free(c);
+}
+
+const char *asngn_task_id(const asngn_task *task) {
+  return task && task->turn ? task->turn->span_root : NULL;
+}
+
+asngn_err asngn_session_recovery_info(asngn_session *s,
+    size_t *interrupted_turns,size_t *uncertain_actions) {
+  if (!s || !interrupted_turns || !uncertain_actions) return ASNGN_ERR_INVALID;
+  os_rwlock_rdlock(&s->lock);*interrupted_turns=s->interrupted_turns;
+  *uncertain_actions=s->uncertain_actions;os_rwlock_rdunlock(&s->lock);
+  return ASNGN_OK;
 }

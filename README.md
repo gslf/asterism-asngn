@@ -281,6 +281,13 @@ Asper's `memory/` root and is never exposed as the tool working directory.
 Set a concrete workspace path, or pass `--workspace`, only when a
 session is deliberately meant to operate on an external checkout.
 
+Sessions have a persistent mode and security profile. In the TUI, use
+`/session new <slug>`, `/mode chat|coding|automate`, and `/profile <name>`.
+Mode changes select a safe default profile; `/profile` can then choose one of
+`chat`, `coding-readonly`, `coding-sandboxed`, or `automation-ci`. Denied or
+missing authorization is reported in the workflow instead of being hidden;
+switching profile or granting the tool permission enables the action.
+
 ## Shared model runtime and API providers
 
 asngn and embedded Asper share one `asmodel` runtime. Asper's curator
@@ -443,6 +450,8 @@ Chat and input history use separate controls:
 - `Ctrl+U` / `Ctrl+K` / `Ctrl+W` delete to the start, end, or previous word;
   `Ctrl+Y` restores the last deleted text.
 - `F1` opens the complete in-app key reference.
+- Operational rationales appear live in blue; final assistant output keeps the
+  normal foreground color. Rationales are short and redacted.
 
 ## Troubleshooting
 
@@ -487,3 +496,5 @@ docs/             SPECS.md, telemetry.md
 ```
 
 MIT — see [LICENSE](LICENSE).
+
+Design and operational details for hybrid retrieval, evidence metadata, the turn WAL and concurrent session scheduling: [retrieval-memory-transactions](docs/retrieval-memory-transactions.md).

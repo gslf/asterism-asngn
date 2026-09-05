@@ -21,17 +21,7 @@
 #include <string.h>
 
 /* ---- per-context auxiliary state ---------------------------------------- */
-/* The public slot struct (asngn_internal.h) carries no in-use marker and
- * the os shim has no trylock, so "is a call running on this instance" is
- * tracked here: a models.c-scope table keyed by context, with the in_use
- * flags guarded by that context's models_mu. The table also caches the
- * embedder weights hash (computed once at init) and the one-time
- * heuristic-fallback warning latch. Registration happens in
- * asngn_models_init and release in asngn_models_shutdown; like
- * asngn_open/asngn_close themselves, concurrent open/close of *different*
- * contexts is not synchronized here. */
-
-#define MODELS_AUX_MAX 8
+/* Per-context residency counters and embedding identity. Guarded by models_mu. */
 
 typedef struct {
   asngn_ctx *ctx;                 /* NULL = free entry                  */
@@ -40,28 +30,12 @@ typedef struct {
   int        heuristic_warned;    /* one-time fallback warning          */
 } models_aux;
 
-static models_aux g_aux[MODELS_AUX_MAX];
-
-static models_aux *aux_find(asngn_ctx *c) {
-  int i;
-  for (i = 0; i < MODELS_AUX_MAX; i++)
-    if (g_aux[i].ctx == c) return &g_aux[i];
-  return NULL;
-}
-
+static models_aux *aux_find(asngn_ctx *c) { return c ? c->model_aux : NULL; }
 static models_aux *aux_claim(asngn_ctx *c) {
-  models_aux *a = aux_find(c);
-  if (a == NULL) a = aux_find(NULL);
-  if (a == NULL) return NULL;
-  memset(a, 0, sizeof *a);
-  a->ctx = c;
-  return a;
+  if (!c->model_aux) c->model_aux=calloc(1,sizeof(models_aux));
+  return c->model_aux;
 }
-
-static void aux_release(asngn_ctx *c) {
-  models_aux *a = aux_find(c);
-  if (a != NULL) memset(a, 0, sizeof *a);
-}
+static void aux_release(asngn_ctx *c) { free(c->model_aux);c->model_aux=NULL; }
 
 /* ---- names -------------------------------------------------------------- */
 
@@ -416,10 +390,13 @@ static asngn_err ensure_loaded_locked(asngn_ctx *c, int slot) {
   return ASNGN_OK;
 }
 
-/* Mark / clear the in-use flag for one slot (guards LRU unloading). */
+/* Count users, including waiters on the provider mutex, before LRU eviction. */
 static void slot_set_in_use(asngn_ctx *c, int slot, int on) {
   models_aux *aux = aux_find(c);
-  if (aux != NULL) aux->in_use[slot] = on;
+  if (aux != NULL) {
+    if (on) aux->in_use[slot]++;
+    else if (aux->in_use[slot]>0) aux->in_use[slot]--;
+  }
 }
 
 /* ---- generation --------------------------------------------------------- */
@@ -514,7 +491,10 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
     }
   }
   os_mutex_lock(&s->mu);
-  e = s->iface.generate(s->iface.ud, system_prompt, user_prompt, gbnf, &p,
+  if (deadline_mono>0) p.deadline_ms=deadline_mono-asngn_clock_mono_ms(&c->clock);
+  if (cancel && *cancel) e=ASNGN_ERR_CANCELLED;
+  else if (deadline_mono>0 && p.deadline_ms<=0) e=ASNGN_ERR_TIMEOUT;
+  else e = s->iface.generate(s->iface.ud, system_prompt, user_prompt, gbnf, &p,
                         token_cb, token_ud, cancel, &text, &ti, &to);
   memset(&gi, 0, sizeof gi);
   if (s->iface.last_generation_info != NULL &&

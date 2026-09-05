@@ -230,6 +230,17 @@ Tool output is treated as untrusted data, not as a new system instruction. The
 model may reason about it, but it cannot use text inside a file or command result
 to bypass host policy.
 
+Each session persists a usage mode and a separate security profile. `chat`
+forces direct conversation over transcript and retrieved memory without tools;
+`coding` enables repository work; `automate` favors end-to-end execution and
+verification. The explicit profiles are `chat`, `coding-readonly`,
+`coding-sandboxed`, and `automation-ci`. Read-only policy blocks mutations;
+CI permits non-destructive sandboxed actions without an interactive prompt;
+an explicit deny policy takes precedence, and destructive actions still follow
+confirmation policy. Missing authorization is returned as a visible,
+non-terminal notice so the user can grant it or select a different profile
+between turns.
+
 ## 13. Token economy
 
 The engine optimizes useful work per token rather than minimizing tokens at any
@@ -360,7 +371,8 @@ The implementation must preserve these rules:
 ## 19. Public surfaces
 
 `include/asngn.h` is the authoritative C99 host API. It covers engine and
-workspace lifecycle, sessions, asynchronous turns, streaming callbacks,
+workspace lifecycle, persistent modes and profiles, asynchronous turns, rich
+output/reasoning/notice streams,
 cancellation and confirmation, transcripts, feedback, projects, tools, recall,
 exports, telemetry, model information and statistics.
 

@@ -18,9 +18,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* prefix widths: "you  › " / "asngn ✦ " / "· " */
+/* prefix widths: "you  › " / "asngn ✦ " / "think · " / "· " */
 #define PFX_USER 7
 #define PFX_ASSIST 8
+#define PFX_REASONING 8
 #define PFX_SYSTEM 2
 
 void chat_init(tui_chat *c) { memset(c, 0, sizeof *c); }
@@ -179,6 +180,7 @@ static int entry_indent(const chat_entry *e) {
   switch (e->role) {
   case CHAT_USER: return PFX_USER;
   case CHAT_ASSISTANT: return PFX_ASSIST;
+  case CHAT_REASONING: return PFX_REASONING;
   default: return PFX_SYSTEM;
   }
 }
@@ -263,6 +265,15 @@ static void draw_prefix(tui_frame *f, const tui_theme *th, int x, int y,
     x += d_put(f, x, y, th->star, TFG_ACCENT, TBG_DEFAULT, 0);
     d_put(f, x, y, " ", TFG_DEFAULT, TBG_DEFAULT, 0);
     break;
+  case CHAT_REASONING:
+    x += d_put(f, x, y, "think ", TFG_REASONING, TBG_DEFAULT, TA_DIM);
+    x += d_put(f, x, y, th->bullet, TFG_REASONING, TBG_DEFAULT, 0);
+    d_put(f, x, y, " ", TFG_REASONING, TBG_DEFAULT, 0);
+    break;
+  case CHAT_NOTICE:
+    x += d_put(f, x, y, th->bullet, TFG_AMBER, TBG_DEFAULT, 0);
+    d_put(f, x, y, " ", TFG_AMBER, TBG_DEFAULT, 0);
+    break;
   default:
     x += d_put(f, x, y, th->bullet, TFG_DIM, TBG_DEFAULT, 0);
     d_put(f, x, y, " ", TFG_DIM, TBG_DEFAULT, 0);
@@ -299,6 +310,11 @@ static void draw_line(tui_frame *f, const tui_theme *th, int x, int y,
     }
     if (e->role == CHAT_SYSTEM) {
       fg = TFG_DIM;
+    } else if (e->role == CHAT_REASONING) {
+      fg = TFG_REASONING;
+      attr |= TA_DIM;
+    } else if (e->role == CHAT_NOTICE) {
+      fg = TFG_AMBER;
     }
     if (l->fence) {
       /* dim on slightly shaded; the 16-color theme maps the shade to

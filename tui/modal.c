@@ -289,7 +289,9 @@ static const char *const HELP_KEYS[] = {
 
 static const char *const HELP_CMDS[] = {
     "/help /quit /more /retry /pin [n] /compact",
-    "/session picker; /session <slug>|new|delete <slug>",
+    "/session picker; /session new [slug]|<slug>|delete <slug>",
+    "/mode chat|coding|automate",
+    "/profile chat|coding-readonly|coding-sandboxed|automation-ci",
     "/project <slug>|none",
     "/detail terse|normal|rich|auto",
     "/cache stats|clear, /redact on|off",

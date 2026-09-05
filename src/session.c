@@ -45,10 +45,14 @@ static asngn_err sess_node_line(xcdn_node_t *node, asngn_buf *out) {
 
 /* ── turn (de)serialization ───────────────────────────────────────────── */
 
-static xcdn_node_t *turn_build_node(const asngn_turn *t) {
+xcdn_node_t *asngn_turn_node(const asngn_turn *t) {
   xcdn_value_t *obj = xcdn_value_object();
   xcdn_node_t *node;
   bool ok = obj != NULL;
+  ok = ok && asngn_xobj_put(obj,"workspace",mk_str(t->workspace));
+  ok = ok && asngn_xobj_put(obj,"commit",mk_str(t->commit));
+  ok = ok && asngn_xobj_put(obj,"project",mk_str(t->project));
+  ok = ok && asngn_xobj_put(obj, "turn_id", mk_str(t->turn_id));
   ok = ok && asngn_xobj_put(obj, "n", xcdn_value_int((int64_t)t->n));
   ok = ok && asngn_xobj_put(obj, "role", mk_str(t->role));
   ok = ok && asngn_xobj_put(obj, "at", mk_time(t->at));
@@ -88,7 +92,7 @@ static void sess_copy_field(char *dst, size_t dstsz, const char *src) {
   snprintf(dst, dstsz, "%s", src);
 }
 
-static bool turn_from_node(const xcdn_node_t *node, asngn_turn *out) {
+bool asngn_turn_parse(const xcdn_node_t *node, asngn_turn *out) {
   const xcdn_value_t *obj, *v, *route;
   int64_t n;
   const char *s;
@@ -100,6 +104,11 @@ static bool turn_from_node(const xcdn_node_t *node, asngn_turn *out) {
   obj = node->value;
   if (!asngn_xint(asngn_xfield(obj, "n"), &n) || n < 1) return false;
   out->n = (size_t)n;
+  sess_copy_field(out->workspace,sizeof out->workspace,asngn_xstr(asngn_xfield(obj,"workspace")));
+  sess_copy_field(out->commit,sizeof out->commit,asngn_xstr(asngn_xfield(obj,"commit")));
+  sess_copy_field(out->project,sizeof out->project,asngn_xstr(asngn_xfield(obj,"project")));
+  sess_copy_field(out->turn_id, sizeof out->turn_id,
+                  asngn_xstr(asngn_xfield(obj,"turn_id")));
   s = asngn_xstr(asngn_xfield(obj, "role"));
   if (s == NULL ||
       (strcmp(s, "user") != 0 && strcmp(s, "assistant") != 0))
@@ -146,7 +155,7 @@ static asngn_err turn_from_object(asngn_ctx *c, const char *object_ref,
   free(data);
   if (!doc || doc->values_len != 1 ||
       !xcdn_node_has_tag(doc->values[0], "turn") ||
-      !turn_from_node(doc->values[0], out)) {
+      !asngn_turn_parse(doc->values[0], out)) {
     if (doc) xcdn_document_free(doc);
     return asngn_seterr(c, ASNGN_ERR_PARSE,
                         "session: invalid Asper turn object");
@@ -206,6 +215,11 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
   }
   ok = ok && asngn_xobj_put(obj, "redact_context",
                             xcdn_value_bool(s->redact_context));
+  ok = ok && asngn_xobj_put(obj, "mode",
+                            mk_str(asngn_usage_mode_name(s->usage_mode)));
+  ok = ok && asngn_xobj_put(
+                 obj, "security_profile",
+                 mk_str(asngn_security_profile_name(s->security_profile)));
   if (!ok) goto out;
   node = xcdn_node_new(obj);
   if (node == NULL) goto out;
@@ -262,6 +276,26 @@ static void sess_apply_manifest(asngn_session *s, const xcdn_node_t *node) {
   }
   v = asngn_xfield(obj, "redact_context");
   if (v != NULL && asngn_xbool(v, &b)) s->redact_context = b;
+  v = asngn_xfield(obj, "mode");
+  if (v != NULL && v->type == XCDN_VAL_STRING) {
+    if (strcmp(v->data.string, "chat") == 0)
+      s->usage_mode = ASNGN_USAGE_CHAT;
+    else if (strcmp(v->data.string, "coding") == 0)
+      s->usage_mode = ASNGN_USAGE_CODING;
+    else if (strcmp(v->data.string, "automate") == 0)
+      s->usage_mode = ASNGN_USAGE_AUTOMATE;
+  }
+  v = asngn_xfield(obj, "security_profile");
+  if (v != NULL && v->type == XCDN_VAL_STRING) {
+    if (strcmp(v->data.string, "chat") == 0)
+      s->security_profile = ASNGN_SECURITY_CHAT;
+    else if (strcmp(v->data.string, "coding-readonly") == 0)
+      s->security_profile = ASNGN_SECURITY_CODING_READONLY;
+    else if (strcmp(v->data.string, "coding-sandboxed") == 0)
+      s->security_profile = ASNGN_SECURITY_CODING_SANDBOXED;
+    else if (strcmp(v->data.string, "automation-ci") == 0)
+      s->security_profile = ASNGN_SECURITY_AUTOMATION_CI;
+  }
   /* pinned list is applied after the transcript loads (needs ordinals) */
 }
 
@@ -279,6 +313,16 @@ static asngn_err sess_log_reserve(asngn_session *s) {
   return ASNGN_OK;
 }
 
+asngn_err asngn_session_stage_turn(asngn_session *s, const asngn_turn *t) {
+  asngn_err e = sess_log_reserve(s);
+  if (e != ASNGN_OK) return e;
+  s->log[s->log_n] = *t;
+  s->log[s->log_n].text = asngn_strdup(t->text);
+  if (!s->log[s->log_n].text) return ASNGN_ERR_NOMEM;
+  s->log_n++;
+  return ASNGN_OK;
+}
+
 asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t) {
   asngn_ctx *c = s->ctx;
   asngn_buf line;
@@ -287,11 +331,20 @@ asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t) {
   char object_ref[72] = {0};
   char event_id[37] = {0};
 
+  size_t staged = s->log_n;
+  for (size_t i=0; t->turn_id[0] && i<s->log_n; i++) {
+    if (!strcmp(t->turn_id,s->log[i].turn_id) && !strcmp(t->role,s->log[i].role)) {
+      if (s->log[i].n!=t->n || strcmp(s->log[i].text,t->text))
+        return asngn_seterr(c,ASNGN_ERR_PARSE,"conflicting transaction projection %s",t->turn_id);
+      if (s->log[i].event_id[0]) return ASNGN_OK;
+      staged = i; break;
+    }
+  }
   e = sess_log_reserve(s);
   if (e != ASNGN_OK) return e;
   asngn_buf_init(&line);
   if (c->asper_ok) {
-    node = turn_build_node(t);
+    node = asngn_turn_node(t);
     e = sess_node_line(node, &line);
     if (e != ASNGN_OK) {
       asngn_buf_free(&line);
@@ -314,6 +367,10 @@ asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t) {
   asngn_buf_free(&line);
   if (e != ASNGN_OK) return e;
 
+  if (staged < s->log_n) {
+    if (event_id[0]) memcpy(s->log[staged].event_id,event_id,37);
+    return ASNGN_OK;
+  }
   s->log[s->log_n] = *t;
   s->log[s->log_n].text = asngn_strdup(t->text);
   if (s->log[s->log_n].text == NULL) return ASNGN_ERR_NOMEM;
@@ -416,6 +473,7 @@ void asngn_session_free(asngn_session *s) {
   size_t i;
   if (s == NULL) return;
   asngn_stream_close(&s->ledger_st);
+  asngn_stream_close(&s->journal_st);
   for (i = 0; i < s->log_n; i++) free(s->log[i].text);
   free(s->log);
   asngn_session_clear_blobs(s);
@@ -424,6 +482,7 @@ void asngn_session_free(asngn_session *s) {
   free(s->allow);
   free(s->led);
   free(s->project);
+  free(s->active_file);free(s->objective);asngn_code_index_free(s->code_index);
   free(s->last_user_msg);
   free(s->last_answer);
   free(s->dir);
@@ -451,6 +510,8 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   os_rwlock_init(&s->lock);
   s->created_at = asngn_clock_now(&c->clock);
   s->redact_context = c->cfg.redact_context;
+  s->usage_mode = ASNGN_USAGE_CODING;
+  s->security_profile = ASNGN_SECURITY_CODING_SANDBOXED;
   s->workspace = c->workspace;
   s->dir = os_path_join(c->sessions_dir, slug);
   if (s->dir == NULL) {
@@ -501,6 +562,8 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   }
   if (!session_workspace) s->workspace = c->workspace;
 
+  /* The manifest is a projection and may be ahead after an interrupted write. */
+  s->turns=0;
   /* Authoritative source is Asper. */
   if (c->asper_ok) {
     e = sess_load_asper(s);
@@ -520,6 +583,13 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
   /* ledger totals (spent tokens, QpT window, feedback) */
   e = asngn_ledger_replay(s);
   if (e != ASNGN_OK) goto fail;
+
+  { char *jp = sess_path(s, "turns.xcdn");
+    if (!jp) { e=ASNGN_ERR_NOMEM; goto fail; }
+    e=asngn_stream_open(c,&s->journal_st,jp,true); free(jp);
+    if (e==ASNGN_OK) e=asngn_turn_recover(s);
+    if (e!=ASNGN_OK) goto fail;
+  }
 
   /* fresh manifest for brand-new sessions */
   if (!os_file_exists(mpath)) {

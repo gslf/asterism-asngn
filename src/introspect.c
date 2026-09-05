@@ -215,19 +215,17 @@ asngn_err asngn_recall(asngn_ctx *c, const char *question, char **out) {
 }
 
 asngn_err asngn_session_project(asngn_session *s, const char *slug) {
-  asngn_ctx *c;
-  asngn_err e;
-  if (s == NULL) return ASNGN_ERR_INVALID;
-  c = s->ctx;
-  if (slug != NULL && !asngn_slug_valid(slug))
-    return asngn_seterr(c, ASNGN_ERR_INVALID, "invalid project slug");
-  e = asngn_siblings_project(c, slug);
-  if (e != ASNGN_OK && e != ASNGN_ERR_UNSUPPORTED) return e;
+  asngn_err e;char *copy;
+  if (!s || (slug && !asngn_slug_valid(slug))) return ASNGN_ERR_INVALID;
+  copy=slug ? asngn_strdup(slug) : NULL;
+  if (slug && !copy) return ASNGN_ERR_NOMEM;
   os_rwlock_wrlock(&s->lock);
-  free(s->project);
-  s->project = slug != NULL ? asngn_strdup(slug) : NULL;
-  os_rwlock_wrunlock(&s->lock);
-  return asngn_session_save_manifest(s);
+  if (s->busy) { os_rwlock_wrunlock(&s->lock);free(copy);return ASNGN_ERR_BUSY; }
+  e=asngn_siblings_project(s->ctx,slug);
+  if (e==ASNGN_OK || e==ASNGN_ERR_UNSUPPORTED) {
+    free(s->project);s->project=copy;copy=NULL;e=asngn_session_save_manifest(s);
+  }
+  os_rwlock_wrunlock(&s->lock);free(copy);return e;
 }
 
 asngn_err asngn_project_list(asngn_ctx *c, char ***out_slugs,

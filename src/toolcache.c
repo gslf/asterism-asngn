@@ -237,6 +237,7 @@ void asngn_toolcache_shutdown(asngn_ctx *c) {
  * takes the write lock because a hit stamps LRU and expiry drops. */
 bool asngn_toolcache_get(asngn_ctx *c, const uint8_t key[32],
                          char **out_result) {
+  if (c->owner) c=c->owner;
   size_t i;
   bool found = false;
 
@@ -264,6 +265,7 @@ bool asngn_toolcache_get(asngn_ctx *c, const uint8_t key[32],
 
 void asngn_toolcache_put(asngn_ctx *c, const uint8_t key[32],
                          const char *result_xcdn) {
+  if (c->owner) c=c->owner;
   size_t i;
   asngn_time now;
   int64_t mono;
@@ -320,6 +322,7 @@ void asngn_toolcache_put(asngn_ctx *c, const uint8_t key[32],
 
 /* World-epoch bump invalidation: drop everything, cheap and safe. */
 void asngn_toolcache_clear(asngn_ctx *c) {
+  if (c->owner) c=c->owner;
   size_t i;
   char *path;
 

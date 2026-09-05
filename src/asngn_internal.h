@@ -12,7 +12,8 @@
  *   - c->cache_mu  rwlock for the semantic + tool caches.
  *   - c->tele_mu   telemetry ring; never held while taking other locks.
  *   - c->log_mu, c->err_mu as in the siblings.
- *   Lock order: lock -> s->lock -> cache_mu -> models_mu. tele_mu/log_mu
+ *   Registry lock is released before taking session locks. Commit accounting
+ *   may take c->lock under s->lock; cache_mu precedes models_mu. tele_mu/log_mu
  *   are leaves.
  *
  * MIT License — per aspera ad astra.
@@ -250,6 +251,7 @@ typedef struct {
   char role_router[32], role_planner[32], role_generator[32],
        role_compressor[32], role_adapter[32], role_judge[32],
        role_embedder[32];
+  int scheduler_workers, queue_capacity;
   int  max_resident;
   int  max_ram_mb, max_vram_mb;
   asngn_sampling s_classify, s_decide, s_draft, s_answer, s_compress,
@@ -425,6 +427,8 @@ int asngn_token_heuristic(const char *text); /* UTF-8 bytes / 4, min 1 */
 
 typedef struct {
   size_t      n;          /* turn ordinal, 1-based                  */
+  char        workspace[1024], commit[65], project[65];
+  char        turn_id[37]; /* transaction UUID, shared by user and assistant */
   char        event_id[37]; /* authoritative Asper source event id */
   char        role[10];   /* "user" | "assistant"                   */
   char       *text;       /* owned                                  */
@@ -448,6 +452,8 @@ struct asngn_session {
   char        slug[65];
   char       *dir;          /* sessions/<slug> absolute, owned      */
   os_rwlock   lock;
+  char *active_file, *objective;
+  void *code_index;
   /* manifest */
   asngn_time  created_at;
   size_t      turns;        /* committed turn pairs counter          */
@@ -456,6 +462,8 @@ struct asngn_session {
   asngn_workspace_info workspace; /* immutable session binding       */
   bool        workspace_loaded;
   bool        redact_context;
+  asngn_usage_mode usage_mode;
+  asngn_security_profile security_profile;
   /* process-local view of Asper source events */
   asngn_turn *log;
   size_t      log_n, log_cap;
@@ -464,6 +472,9 @@ struct asngn_session {
   size_t      blobs_n, blobs_cap;
   /* appenders */
   asngn_stream ledger_st;
+  asngn_stream journal_st;
+  bool recovery_required;
+  size_t interrupted_turns, uncertain_actions;
   /* session allowlist: "tool.command" entries confirmed "always"    */
   char      **allow;
   size_t      allow_n;
@@ -514,6 +525,7 @@ void      asngn_workspace_hash(asngn_ctx *c, uint8_t out[32]);
 /* ── ledger (ledger.c) ────────────────────────────────────────────────── */
 
 typedef struct asngn_ledger_entry_s {
+  char       turn_id[37];
   size_t     turn;
   asngn_time at;
   char       klass[12], detail[8], mode[8], tier[16], cache[8];
@@ -955,6 +967,7 @@ typedef enum {
 
 typedef struct asngn_turn_state {
   asngn_session *s;
+  char          *retrieval_query;
   char          *user_msg;      /* owned, gated                      */
   asngn_submit_opts opts;
   bool           continuation;  /* /more: continue the last answer   */
@@ -962,6 +975,8 @@ typedef struct asngn_turn_state {
   volatile int   cancel;
   int64_t        deadline_mono; /* mono ms                           */
   char           span_root[37];
+  size_t         log_before, turns_before;
+  bool           tx_started, tx_committed, action_mutates;
   /* route */
   asngn_route_profile prof;
   asngn_route_evidence evidence; /* as weighed by the classifier     */
@@ -997,6 +1012,7 @@ typedef struct asngn_turn_state {
   bool           artifact_written; /* fs.write/edit content landed       */
   bool           verification_attempted; /* build/test/run after mutation */
   bool           verification_ok;  /* applicable verification succeeded  */
+  bool           authorization_blocked; /* denied action became a notice   */
   bool           answer_nudged;  /* outcome gate already bounced ANSWER */
   char         **tools_list;    /* labels for the cache entry        */
   size_t         tools_list_n;
@@ -1008,6 +1024,9 @@ typedef struct asngn_turn_state {
   bool           capped, clarify;
   /* streaming */
   asngn_token_fn token_cb; void *token_ud;
+  asngn_stream_fn stream_cb; void *stream_ud;
+  asngn_usage_mode usage_mode;
+  asngn_security_profile security_profile;
 } asngn_turn_state;
 
 void      asngn_turn_state_free(asngn_turn_state *t);
@@ -1015,6 +1034,8 @@ void      asngn_turn_state_free(asngn_turn_state *t);
 asngn_err asngn_loop_run(asngn_ctx *c, asngn_turn_state *t);
 asngn_err asngn_work_push(asngn_ctx *c, asngn_turn_state *t,
                           const char *text); /* counts + appends      */
+void asngn_turn_stream_emit(asngn_turn_state *t, asngn_stream_kind kind,
+                            const char *text);
 
 /* ── tasks and workers (worker.c, api.c) ──────────────────────────────── */
 
@@ -1040,6 +1061,9 @@ typedef struct {
   os_cond  cv;
 } asngn_confirm_slot;
 
+asngn_err asngn_runtime_create(asngn_ctx *owner, asngn_ctx **out);
+void asngn_runtime_free(asngn_ctx *c);
+size_t asngn_scheduler_capacity(const asngn_ctx *c);
 asngn_err asngn_workers_start(asngn_ctx *c);
 void      asngn_workers_stop(asngn_ctx *c);
 asngn_err asngn_worker_submit(asngn_ctx *c, asngn_task *t);
@@ -1047,9 +1071,26 @@ asngn_err asngn_worker_submit(asngn_ctx *c, asngn_task *t);
 void      asngn_background_kick(asngn_ctx *c);
 asngn_err asngn_run_due_work(asngn_ctx *c);
 
+struct xcdn_node *asngn_turn_node(const asngn_turn *t);
+bool asngn_turn_parse(const struct xcdn_node *n, asngn_turn *out);
+struct xcdn_node *asngn_ledger_node(const asngn_ledger_entry *e);
+bool asngn_ledger_parse(const struct xcdn_node *n, asngn_ledger_entry *out);
+asngn_err asngn_turn_journal(asngn_turn_state *t, const char *state,
+                             const char *action);
+asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer);
+asngn_err asngn_turn_recover(asngn_session *s);
+asngn_err asngn_session_stage_turn(asngn_session *s, const asngn_turn *t);
+/* Internal fault hook, per context. Return nonzero to fail the named boundary. */
+
+asngn_err asngn_retrieval_query(asngn_session *s, asngn_turn_state *t, char **out);
+asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t);
+void asngn_code_index_free(void *index);
+
 /* ── context struct ───────────────────────────────────────────────────── */
 
 struct asngn_ctx {
+  int (*fault)(void *ud, const char *point);
+  void *fault_ud;
   asngn_config  cfg;
   asngn_clock   clock;
   os_rwlock     lock;
@@ -1093,6 +1134,7 @@ struct asngn_ctx {
   int           role_slot[ASNGN_ROLE_COUNT];
   os_mutex      models_mu;
   asmodel_manager *shared_models;
+  void *model_aux;
 
   /* siblings */
   struct asper_ctx   *asper;
@@ -1137,6 +1179,12 @@ struct asngn_ctx {
 
   /* workers */
   os_thread     agent_thread, bg_thread;
+  struct asngn_ctx *owner; /* isolated inference/tool lane -> coordinator */
+  struct asngn_ctx *lanes[8];
+  size_t lanes_n, q_n;
+  asngn_task *active_task; /* guarded by owner's q_mu */
+  char *lane_project;
+
   os_mutex      q_mu;
   os_cond       q_cv;
   asngn_task   *q_head, *q_tail;

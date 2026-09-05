@@ -347,6 +347,7 @@ static int state_session(server_state *st, const char *slug,
 static int tool_agent_ask(server_state *st, const jx_value *args,
                           jx_value **out, const char **msg) {
   const char *message = NULL, *session = NULL, *detail = NULL;
+  const char *active_file=NULL,*objective=NULL;
   int no_tools = 0, rc, ok;
   asngn_session *s = NULL;
   asngn_submit_opts opts;
@@ -375,6 +376,14 @@ static int tool_agent_ask(server_state *st, const jx_value *args,
 
   rc = state_session(st, session, &s, out);
   if (rc != TOOL_OK) return rc;
+
+  if (arg_str(args,"active_file",&active_file,msg)<0 ||
+      arg_str(args,"objective",&objective,msg)<0)
+    BADP("agent_ask: active_file and objective must be strings");
+  if (active_file || objective) {
+    e=asngn_session_retrieval_context(s,active_file,objective);
+    if (e!=ASNGN_OK) return engine_fail(st,e,out);
+  }
 
   /* One synchronous turn: no streaming callback; timeout 0 waits until
    * completion — the engine's own turn deadline bounds the wait. */
@@ -519,6 +528,71 @@ static int tool_session_new(server_state *st, const jx_value *args,
   }
   o = jx_object();
   if (jx_object_set(o, "slug", jx_string(asngn_session_slug(s))) != 0) {
+    jx_free(o);
+    return TOOL_OOM;
+  }
+  *out = o;
+  return TOOL_OK;
+}
+
+static int parse_usage_mode(const char *value, asngn_usage_mode *out) {
+  if (strcmp(value, "chat") == 0) *out = ASNGN_USAGE_CHAT;
+  else if (strcmp(value, "coding") == 0) *out = ASNGN_USAGE_CODING;
+  else if (strcmp(value, "automate") == 0) *out = ASNGN_USAGE_AUTOMATE;
+  else return 0;
+  return 1;
+}
+
+static int parse_security_profile(const char *value,
+                                  asngn_security_profile *out) {
+  if (strcmp(value, "chat") == 0) *out = ASNGN_SECURITY_CHAT;
+  else if (strcmp(value, "coding-readonly") == 0)
+    *out = ASNGN_SECURITY_CODING_READONLY;
+  else if (strcmp(value, "coding-sandboxed") == 0)
+    *out = ASNGN_SECURITY_CODING_SANDBOXED;
+  else if (strcmp(value, "automation-ci") == 0)
+    *out = ASNGN_SECURITY_AUTOMATION_CI;
+  else return 0;
+  return 1;
+}
+
+static int tool_session_mode(server_state *st, const jx_value *args,
+                             jx_value **out, const char **msg) {
+  const char *session = NULL, *mode_value = NULL, *profile_value = NULL;
+  asngn_usage_mode mode;
+  asngn_security_profile profile;
+  asngn_session *s = NULL;
+  asngn_err e;
+  jx_value *o;
+  int rc, ok;
+
+  if (arg_str(args, "session", &session, msg) < 0)
+    BADP("session_mode: \"session\" must be a string");
+  rc = arg_str(args, "mode", &mode_value, msg);
+  if (rc < 0 || (rc == 1 && !parse_usage_mode(mode_value, &mode)))
+    BADP("session_mode: \"mode\" must be chat|coding|automate");
+  rc = arg_str(args, "security_profile", &profile_value, msg);
+  if (rc < 0 ||
+      (rc == 1 && !parse_security_profile(profile_value, &profile)))
+    BADP("session_mode: invalid \"security_profile\"");
+  rc = state_session(st, session, &s, out);
+  if (rc != TOOL_OK) return rc;
+  if (mode_value != NULL) {
+    e = asngn_session_set_mode(s, mode);
+    if (e != ASNGN_OK) return engine_fail(st, e, out);
+  }
+  if (profile_value != NULL) {
+    e = asngn_session_set_security_profile(s, profile);
+    if (e != ASNGN_OK) return engine_fail(st, e, out);
+  }
+  e = asngn_session_get_mode(s, &mode, &profile);
+  if (e != ASNGN_OK) return engine_fail(st, e, out);
+  o = jx_object();
+  ok = o != NULL;
+  ok &= jx_object_set(o, "mode", jx_string(asngn_usage_mode_name(mode))) == 0;
+  ok &= jx_object_set(o, "security_profile",
+                      jx_string(asngn_security_profile_name(profile))) == 0;
+  if (!ok) {
     jx_free(o);
     return TOOL_OOM;
   }
@@ -780,6 +854,8 @@ static const tool_def TOOLS[] = {
      "\"detail\":{\"type\":\"string\",\"enum\":[\"terse\",\"normal\","
      "\"rich\"],\"description\":\"Answer detail override; absent lets "
      "the engine decide\"},"
+     "\"active_file\":{\"type\":\"string\"},"
+     "\"objective\":{\"type\":\"string\"},"
      "\"no_tools\":{\"type\":\"boolean\",\"description\":\"Disable tool "
      "calls for this turn (default false)\"}},"
      "\"required\":[\"message\"]}",
@@ -817,6 +893,16 @@ static const tool_def TOOLS[] = {
      "\"slug\":{\"type\":\"string\",\"description\":\"Session to "
      "delete\"}},\"required\":[\"slug\"]}",
      tool_session_delete},
+    {"session_mode",
+     "Read or change a session mode and explicit security profile.",
+     "{\"type\":\"object\",\"properties\":{"
+     "\"session\":{\"type\":\"string\",\"description\":\"Session slug "
+     "(default \\\"main\\\")\"},"
+     "\"mode\":{\"type\":\"string\",\"enum\":[\"chat\",\"coding\","
+     "\"automate\"]},"
+     "\"security_profile\":{\"type\":\"string\",\"enum\":[\"chat\","
+     "\"coding-readonly\",\"coding-sandboxed\",\"automation-ci\"]}}}",
+     tool_session_mode},
     {"session_stats",
      "Ledger totals and route mix for one session.",
      "{\"type\":\"object\",\"properties\":{"

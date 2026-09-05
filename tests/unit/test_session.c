@@ -210,6 +210,39 @@ TEST(manifest_project_persists) {
   fx_drop(&f);
 }
 
+TEST(mode_and_security_profile_persist) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_usage_mode mode;
+  asngn_security_profile profile;
+
+  ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
+  ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
+  ASSERT_OK(asngn_session_get_mode(s, &mode, &profile));
+  ASSERT_EQ_INT(mode, ASNGN_USAGE_CODING);
+  ASSERT_EQ_INT(profile, ASNGN_SECURITY_CODING_SANDBOXED);
+
+  ASSERT_OK(asngn_session_set_mode(s, ASNGN_USAGE_AUTOMATE));
+  ASSERT_OK(asngn_session_get_mode(s, &mode, &profile));
+  ASSERT_EQ_INT(mode, ASNGN_USAGE_AUTOMATE);
+  ASSERT_EQ_INT(profile, ASNGN_SECURITY_AUTOMATION_CI);
+  ASSERT_OK(asngn_session_set_security_profile(
+      s, ASNGN_SECURITY_CODING_READONLY));
+  asngn_session_close(s);
+
+  ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
+  ASSERT_OK(asngn_session_get_mode(s, &mode, &profile));
+  ASSERT_EQ_INT(mode, ASNGN_USAGE_AUTOMATE);
+  ASSERT_EQ_INT(profile, ASNGN_SECURITY_CODING_READONLY);
+  ASSERT_ERR(asngn_session_set_mode(s, (asngn_usage_mode)99),
+             ASNGN_ERR_INVALID);
+  ASSERT_ERR(asngn_session_set_security_profile(
+                 s, (asngn_security_profile)99),
+             ASNGN_ERR_INVALID);
+  asngn_session_close(s);
+  fx_drop(&f);
+}
+
 TEST(transcript_roundtrip) {
   fx f;
   asngn_session *s = NULL;
@@ -438,11 +471,124 @@ TEST(session_workspace_is_private_and_switches_deterministically) {
   fx_drop(&f);
 }
 
+
+#if !defined(_WIN32)
+#include <sys/wait.h>
+static int crash_boundary(void *ud, const char *point) {
+  if (!strcmp((const char *)ud,point)) _exit(77);
+  return 0;
+}
+TEST(turn_journal_crash_recovery) {
+  const char *points[]={"started","action","before_commit","committed",
+    "project_user","project_assistant","project_ledger","project_manifest"};
+  for (size_t pi=0;pi<sizeof points/sizeof points[0];pi++) {
+    fx f;asngn_session *session=NULL;
+    ASSERT_TRUE(fx_setup(&f,NULL));
+    asngn_close(f.c);f.c=NULL;
+    pid_t child=fork();ASSERT_TRUE(child>=0);
+    if (!child) {
+      asngn_turn_state t;asngn_turn u,a;
+      if (!fx_open_ctx(&f) || asngn_session_open(f.c,"crash",&session)!=ASNGN_OK) _exit(2);
+      memset(&t,0,sizeof t);memset(&u,0,sizeof u);memset(&a,0,sizeof a);
+      t.s=session;t.user_msg="repair journal";asngn_uuid_v4(t.span_root);
+      memcpy(t.led.turn_id,t.span_root,37);t.led.turn=2;t.led.at=f.clk.now;t.led.gt_answer=9;
+      f.c->fault=crash_boundary;f.c->fault_ud=(void *)points[pi];
+      if (asngn_turn_journal(&t,"started",t.user_msg)!=ASNGN_OK) _exit(3);
+      u.n=1;u.at=f.clk.now;u.text=t.user_msg;strcpy(u.role,"user");memcpy(u.turn_id,t.span_root,37);
+      if (asngn_session_stage_turn(session,&u)!=ASNGN_OK) _exit(4);
+      session->turns=1;
+      t.action_mutates=true;
+      if (asngn_turn_journal(&t,"action","edit.apply {patch: pending}")!=ASNGN_OK) _exit(5);
+      a.n=2;a.at=f.clk.now;a.text="verified answer";strcpy(a.role,"assistant");memcpy(a.turn_id,t.span_root,37);
+      (void)asngn_turn_commit(&t,&a);_exit(6);
+    }
+    int status=0;ASSERT_EQ_INT(waitpid(child,&status,0),child);
+    ASSERT_TRUE(WIFEXITED(status));ASSERT_EQ_INT(WEXITSTATUS(status),77);
+    for (int replay=0;replay<2;replay++) {
+      ASSERT_TRUE(fx_open_ctx(&f));
+      ASSERT_OK(asngn_session_open(f.c,"crash",&session));
+      ASSERT_EQ_INT(session->log_n,pi>=3 ? 2 : 0);
+      ASSERT_EQ_INT(session->led_n,pi>=3 ? 1 : 0);
+      ASSERT_EQ_INT(session->spent_tokens,pi>=3 ? 9 : 0);
+      ASSERT_EQ_INT(session->world_epoch,pi ? 1 : 0);
+      size_t interrupted=0,uncertain=0;
+      ASSERT_OK(asngn_session_recovery_info(session,&interrupted,&uncertain));
+      ASSERT_EQ_INT(interrupted,pi<3 ? 1 : 0);
+      ASSERT_EQ_INT(uncertain,pi==1 || pi==2 ? 1 : 0);
+      if (pi>=3) {
+        ASSERT_EQ_STR(session->log[0].turn_id,session->log[1].turn_id);
+        ASSERT_EQ_STR(session->led[0].turn_id,session->log[0].turn_id);
+      }
+      asngn_session_close(session);asngn_close(f.c);f.c=NULL;
+    }
+    fx_drop(&f);
+  }
+}
+#endif
+
+
+TEST(contextual_code_retrieval_refreshes_evidence) {
+  fx f;asngn_session *session=NULL;asngn_turn_state t;
+  ASSERT_TRUE(fx_setup(&f,NULL));ASSERT_OK(asngn_session_open(f.c,"code",&session));
+  char *path=os_path_join(session->workspace.canonical_root,"journal.c");
+  ASSERT_TRUE(path!=NULL);
+  const char *code="int journal_commit(void) { return ERR_TORN_WRITE; }\n";
+  ASSERT_OK(os_write_file(path,code,strlen(code)));
+  ASSERT_OK(asngn_session_retrieval_context(session,"journal.c","recover ERR_TORN_WRITE"));
+  memset(&t,0,sizeof t);t.s=session;t.user_msg=asngn_strdup("fix it");
+  ASSERT_OK(asngn_retrieval_query(session,&t,&t.retrieval_query));
+  ASSERT_TRUE(strstr(t.retrieval_query,"active_file: journal.c")!=NULL);
+  ASSERT_TRUE(strstr(t.retrieval_query,"objective: recover ERR_TORN_WRITE")!=NULL);
+  ASSERT_OK(asngn_code_retrieve(f.c,&t));ASSERT_EQ_INT(t.work_n,1);
+  ASSERT_TRUE(strstr(t.work[0].text,"journal.c:1")!=NULL);
+  ASSERT_TRUE(strstr(t.work[0].text,"ERR_TORN_WRITE")!=NULL);
+  asngn_turn_state_free(&t);
+  code="int journal_commit(void) { return VERIFIED_COMMIT; }\n";
+  ASSERT_OK(os_write_file(path,code,strlen(code)));
+  memset(&t,0,sizeof t);t.s=session;t.user_msg=asngn_strdup("journal_commit");
+  ASSERT_OK(asngn_retrieval_query(session,&t,&t.retrieval_query));
+  ASSERT_OK(asngn_code_retrieve(f.c,&t));ASSERT_EQ_INT(t.work_n,1);
+  ASSERT_TRUE(strstr(t.work[0].text,"VERIFIED_COMMIT")!=NULL);
+  ASSERT_TRUE(strstr(t.work[0].text,"return ERR_TORN_WRITE")==NULL);
+  asngn_turn_state_free(&t);free(path);asngn_session_close(session);fx_drop(&f);
+}
+
+
+static int fail_projection(void *ud,const char *point) {
+  (void)ud;return !strcmp(point,"project_ledger");
+}
+TEST(uncertain_commit_blocks_until_reopen) {
+  fx f;asngn_session *session=NULL;asngn_task *task=NULL,*next=NULL;
+  asngn_turn_result result;asngn_submit_opts opts;
+  ASSERT_TRUE(fx_setup(&f,NULL));ASSERT_OK(asngn_session_open(f.c,"iofail",&session));
+  memset(&opts,0,sizeof opts);opts.no_tools=1;opts.no_cache=1;
+  ASSERT_TRUE(fake_model_push(&f.light,"Hello."));
+  f.c->fault=fail_projection;
+  ASSERT_OK(asngn_submit(session,"hello",&opts,NULL,NULL,&task));
+  ASSERT_TRUE(asngn_uuid_valid(asngn_task_id(task)));
+  memset(&result,0,sizeof result);
+  ASSERT_ERR(asngn_task_wait(task,10000,&result),ASNGN_ERR_IO);
+  asngn_turn_result_free(&result);asngn_task_free(task);
+  ASSERT_TRUE(session->recovery_required);
+  ASSERT_ERR(asngn_submit(session,"retry",&opts,NULL,NULL,&next),ASNGN_ERR_BUSY);
+  f.c->fault=NULL;asngn_session_close(session);
+  ASSERT_OK(asngn_session_open(f.c,"iofail",&session));
+  ASSERT_TRUE(!session->recovery_required);
+  ASSERT_EQ_INT(session->log_n,2);ASSERT_EQ_INT(session->led_n,1);
+  asngn_session_close(session);fx_drop(&f);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(uncertain_commit_blocks_until_reopen),
+  TEST_ENTRY(contextual_code_retrieval_refreshes_evidence),
+#if !defined(_WIN32)
+  TEST_ENTRY(turn_journal_crash_recovery),
+#endif
   TEST_ENTRY(create_layout_and_busy),
   TEST_ENTRY(generated_and_invalid_slugs),
   TEST_ENTRY(list_sorted),
   TEST_ENTRY(manifest_project_persists),
+  TEST_ENTRY(mode_and_security_profile_persist),
   TEST_ENTRY(transcript_roundtrip),
   TEST_ENTRY(transcript_public_api),
   TEST_ENTRY(pin_persists),

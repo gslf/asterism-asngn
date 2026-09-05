@@ -40,6 +40,7 @@ TEST(snapshot_and_containment) {
   snprintf(path, sizeof path, "%s/source.c", root);
   ASSERT_OK(os_write_file(path, "before", 6));
   ASSERT_OK(asngn_workspace_refresh(c));
+  session.workspace = c->workspace;
   memcpy(turn.verification_snapshot, c->workspace.fingerprint, 65);
   turn.verification_ok = true;
   ASSERT_TRUE(asngn_verification_current(&turn));
@@ -59,7 +60,32 @@ TEST(snapshot_and_containment) {
   free(c);
 }
 
+TEST(proof_follows_the_session_workspace) {
+  char root[256], other[256], path[512];
+  asngn_ctx *c = calloc(1,sizeof *c);
+  asngn_session session = {0};
+  asngn_turn_state turn = {0};
+  ASSERT_TRUE(c && asngn_test_tmpdir(root) && asngn_test_tmpdir(other));
+  snprintf(c->workspace.canonical_root,sizeof c->workspace.canonical_root,"%s",root);
+  snprintf(c->workspace.repository_root,sizeof c->workspace.repository_root,"%s",root);
+  ASSERT_OK(asngn_workspace_refresh(c));
+  session.ctx = c;
+  snprintf(session.workspace.canonical_root,sizeof session.workspace.canonical_root,"%s",other);
+  snprintf(session.workspace.repository_root,sizeof session.workspace.repository_root,"%s",other);
+  ASSERT_OK(asngn_workspace_snapshot(&session.workspace,NULL));
+  turn.s = &session; turn.verification_ok = true;
+  memcpy(turn.verification_snapshot,session.workspace.fingerprint,65);
+  snprintf(path,sizeof path,"%s/unrelated.c",root);
+  ASSERT_OK(os_write_file(path,"changed",7));
+  ASSERT_TRUE(asngn_verification_current(&turn));
+  snprintf(path,sizeof path,"%s/relevant.c",other);
+  ASSERT_OK(os_write_file(path,"changed",7));
+  ASSERT_TRUE(!asngn_verification_current(&turn));
+  asngn_test_rmtree(root); asngn_test_rmtree(other); free(c);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(proof_follows_the_session_workspace),
   TEST_ENTRY(snapshot_and_containment),
   TEST_ENTRY(workflow_identity),
   TEST_ENTRY(typed_exit_status),

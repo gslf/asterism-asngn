@@ -3,6 +3,8 @@
 #include "asngn_internal.h"
 #include "xcdn.h"
 #include <stdlib.h>
+#include <errno.h>
+#include <ctype.h>
 #include <string.h>
 
 #define WAL_FRAME_MAX (16u * 1024u * 1024u)
@@ -11,22 +13,24 @@
 static void digest(const char *s, size_t n, char out[65]) {
   uint8_t hash[32];
   asngn_sha256(s, n, hash);
-  for (size_t i = 0; i < 32; i++) snprintf(out + i * 2, 3, "%02x", (unsigned)hash[i]);
+  asngn_sha256_hex(hash, sizeof hash, out);
 }
 
 asngn_err asngn_wal_append(asngn_ctx *c, asngn_stream *st,
                            const char *record, size_t n) {
-  char hash[65];
+  char hash[65], header_hash[65], prefix[128];
   uint64_t size = 0;
   asngn_buf b;
   asngn_err e;
   if (!record || !n || n > WAL_FRAME_MAX) return ASNGN_ERR_LIMIT;
   e = os_file_size(st->path, &size);
   if (e != ASNGN_OK) return e;
-  if (size > WAL_LOG_MAX - n - 128) return ASNGN_ERR_LIMIT;
+  if (size > WAL_LOG_MAX - n - 256) return ASNGN_ERR_LIMIT;
   digest(record, n, hash);
   asngn_buf_init(&b);
-  e = asngn_buf_printf(&b, "// asngn-wal-v1 %zu %s\n", n, hash);
+  snprintf(prefix, sizeof prefix, "// asngn-wal-v2 %zu %s", n, hash);
+  digest(prefix, strlen(prefix), header_hash);
+  e = asngn_buf_printf(&b, "%s %s\n", prefix, header_hash);
   if (e == ASNGN_OK) e = asngn_buf_append(&b, record, n);
   if (e == ASNGN_OK) e = asngn_buf_append(&b, "\n", 1);
   if (e == ASNGN_OK) e = asngn_stream_append(c, st, b.data, b.len);
@@ -42,7 +46,7 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
   uint64_t file_size = 0;
   long good = 0;
   bool torn = false;
-  char header[128];
+  char header[224];
   *out = NULL;
   if (!os_file_exists(path)) return ASNGN_OK;
   if (os_file_size(path, &file_size) != ASNGN_OK) return ASNGN_ERR_IO;
@@ -52,18 +56,31 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
   asngn_buf_init(&payload);
   while (fgets(header, sizeof header, f)) {
     size_t n = 0, got;
-    int end = 0;
-    char expected[65], actual[65], canonical[128], *record;
+    char expected[65], actual[65], canonical[224], *record;
+    char *end;
     if (!strchr(header, '\n')) {
       if (feof(f)) torn = true;
       else e = ASNGN_ERR_PARSE;
       break;
     }
-    if (sscanf(header, "// asngn-wal-v1 %zu %64[0-9a-f]%n", &n, expected, &end) != 2 ||
-        strlen(expected) != 64 || header[end] != '\n' || header[end + 1] ||
-        n == 0 || n > WAL_FRAME_MAX) { e = ASNGN_ERR_PARSE; break; }
-    snprintf(canonical, sizeof canonical, "// asngn-wal-v1 %zu %s\n", n, expected);
-    if (strcmp(header, canonical)) { e = ASNGN_ERR_PARSE; break; }
+    const char magic[] = "// asngn-wal-v2 ";
+    if (strncmp(header, magic, sizeof magic-1) ||
+        !isdigit((unsigned char)header[sizeof magic-1])) { e = ASNGN_ERR_PARSE; break; }
+    errno = 0;
+    unsigned long long parsed = strtoull(header+sizeof magic-1, &end, 10);
+    if (errno == ERANGE || !parsed || parsed > WAL_FRAME_MAX ||
+        strlen(end) != 131 || end[0] != ' ' || end[65] != ' ' || end[130] != '\n') {
+      e = ASNGN_ERR_PARSE; break;
+    }
+    n = (size_t)parsed;
+    memcpy(expected, end+1, 64); expected[64] = 0;
+    snprintf(canonical, sizeof canonical, "%s%zu %s", magic, n, expected);
+    size_t prefix_len = strlen(canonical);
+    if (strncmp(header, canonical, prefix_len) || header[prefix_len] != ' ') {
+      e = ASNGN_ERR_PARSE; break;
+    }
+    digest(canonical, prefix_len, actual);
+    if (memcmp(end+66, actual, 64)) { e = ASNGN_ERR_PARSE; break; }
     record = malloc(n + 1);
     if (!record) { e = ASNGN_ERR_NOMEM; break; }
     got = fread(record, 1, n, f);

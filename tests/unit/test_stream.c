@@ -224,7 +224,7 @@ TEST(wal_only_repairs_incomplete_tail) {
   ASSERT_OK(os_file_size(path, &size));
   FILE *f = fopen(path, "ab");
   ASSERT_TRUE(f != NULL);
-  fputs("// asngn-wal-v1 5 aaaa", f); fclose(f);
+  fputs("// asngn-wal-v2 5 aaaa", f); fclose(f);
   ASSERT_OK(asngn_wal_load(c, path, &doc));
   ASSERT_EQ_INT(doc->values_len, 1);
   xcdn_document_free(doc);
@@ -233,7 +233,31 @@ TEST(wal_only_repairs_incomplete_tail) {
   asngn_test_rmtree(dir); bare_ctx_free(c);
 }
 
+TEST(wal_corrupt_length_cannot_discard_a_complete_frame) {
+  char dir[256], path[300];
+  asngn_ctx *c = bare_ctx();
+  asngn_stream st;
+  xcdn_document_t *doc = NULL;
+  uint64_t before, after;
+  ASSERT_TRUE(c && asngn_test_tmpdir(dir));
+  snprintf(path,sizeof path,"%s/wal.xcdn",dir);
+  ASSERT_OK(asngn_stream_open(c,&st,path,true));
+  ASSERT_OK(asngn_wal_append(c,&st,"{n:1}",5));
+  asngn_stream_close(&st);
+  char *text = asngn_test_read_file(path,NULL);
+  ASSERT_TRUE(text != NULL);
+  char *length = strstr(text," 5 ");
+  ASSERT_TRUE(length != NULL); length[1] = '9';
+  ASSERT_OK(asngn_write_atomic(c,path,text,strlen(text))); free(text);
+  ASSERT_OK(os_file_size(path,&before));
+  ASSERT_ERR(asngn_wal_load(c,path,&doc),ASNGN_ERR_PARSE);
+  ASSERT_TRUE(doc == NULL);
+  ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(before,after);
+  asngn_test_rmtree(dir); bare_ctx_free(c);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(wal_corrupt_length_cannot_discard_a_complete_frame),
   TEST_ENTRY(wal_checksum_and_io_faults),
   TEST_ENTRY(wal_only_repairs_incomplete_tail),
   TEST_ENTRY(stream_append_then_load),

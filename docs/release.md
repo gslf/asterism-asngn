@@ -26,7 +26,8 @@ then the engine commit containing their manifest. Local commits are not evidence
 that GitHub can fetch those revisions. Never replace pins with branch names to
 make a failing checkout appear compatible.
 
-The action/usage WAL uses schema 1 framing. Unframed older WALs are rejected; no
+The action/usage WAL uses version 2 framing with separate header and payload
+checksums. Older WAL formats are rejected; no
 implicit migration can establish checksums for their original historical contents.
 Keep a backup and use a fresh store for this development release. Conversation
 projections and operation consumption have distinct semantics.

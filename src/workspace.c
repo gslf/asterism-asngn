@@ -270,12 +270,12 @@ static void detect_adapter(asngn_workspace_info *w) {
   snprintf(w->build_adapter, sizeof w->build_adapter, "none");
 }
 
-asngn_err asngn_workspace_info_refresh(asngn_ctx *c,
-                                       asngn_workspace_info *workspace) {
+asngn_err asngn_workspace_snapshot(asngn_workspace_info *workspace,
+                                      asngn_repo_stats *stats) {
   asngn_sha256_ctx h;
   uint8_t digest[32];
   ws_scan scan;
-  if (c == NULL || workspace == NULL ||
+  if (workspace == NULL ||
       workspace->canonical_root[0] == '\0')
     return ASNGN_ERR_INVALID;
   memset(&scan, 0, sizeof scan);
@@ -302,8 +302,12 @@ asngn_err asngn_workspace_info_refresh(asngn_ctx *c,
   if (scan.incomplete) { workspace->fingerprint[0] = 0; return ASNGN_ERR_LIMIT; }
   asngn_sha256_final(&h, digest);
   asngn_sha256_hex(digest, sizeof digest, workspace->fingerprint);
-  ws_scan_finish(&scan, &c->repo_stats);
+  if (stats) ws_scan_finish(&scan, stats);
   return ASNGN_OK;
+}
+
+asngn_err asngn_workspace_info_refresh(asngn_ctx *c, asngn_workspace_info *workspace) {
+  return c ? asngn_workspace_snapshot(workspace, &c->repo_stats) : ASNGN_ERR_INVALID;
 }
 
 asngn_err asngn_workspace_refresh(asngn_ctx *c) {

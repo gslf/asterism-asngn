@@ -532,6 +532,8 @@ typedef struct {
   char   language[16];  /* dominant code language by file count; ""   */
   bool   loaded;
 } asngn_repo_stats;
+/* Snapshot only this workspace; optional census has caller-owned storage. */
+asngn_err asngn_workspace_snapshot(asngn_workspace_info *workspace, asngn_repo_stats *stats);
 
 asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p);
 asngn_err asngn_workspace_refresh(asngn_ctx *c);

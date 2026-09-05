@@ -60,8 +60,8 @@ trials require actual resources. No real-model result has been produced here.
   rollback cannot refund consumption. Replay validates reserve/settle identities
   and rejects double settlement. Session-lifetime cost and monetary reconciliation
   still need a dedicated operation projection.
-- The owner store has a single-writer lock. Action/consumption WALs have versioned
-  length/SHA-256 framing, per-frame and total-log quotas. Complete corrupt frames
+- The owner store has a single-writer lock. Action/consumption WALs have
+  version-2 length/header/payload SHA-256 framing, per-frame and total-log quotas. Complete corrupt frames
   fail closed; only incomplete final frames are repaired. Short writes and flush
   errors roll back; uncertain fsync closes the stream. POSIX replacement syncs the
   parent directory. This is not a demonstrated power-loss guarantee on every OS.
@@ -105,7 +105,8 @@ trials require actual resources. No real-model result has been produced here.
 - Clean local clones of all four repositories built and passed all four suites,
   including the integrated TUI. Pins are local commits; publication is not claimed.
 - Exact memory tests cover deleted/corrupt offset indices, late cursor pages,
-  payload corruption and altered lengths that must not trigger truncation.
+  payload corruption and altered lengths that must not trigger truncation,
+  in both memory event frames and the action/consumption WAL.
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.

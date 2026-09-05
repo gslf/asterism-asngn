@@ -35,9 +35,10 @@ bool asngn_verification_result_ok(const char *text) {
 
 bool asngn_verification_current(asngn_turn_state *t) {
   if (!t->verification_ok) return false;
-  if (asngn_workspace_refresh(t->s->ctx) != ASNGN_OK ||
+  asngn_workspace_info current = t->s->workspace;
+  if (asngn_workspace_snapshot(&current, NULL) != ASNGN_OK ||
       !t->verification_snapshot[0] ||
-      strcmp(t->verification_snapshot, t->s->ctx->workspace.fingerprint)) {
+      strcmp(t->verification_snapshot, current.fingerprint)) {
     t->verification_ok = false;
     return false;
   }

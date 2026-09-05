@@ -178,11 +178,10 @@ asngn_err asngn_session_save_manifest(asngn_session *s) {
   /* Persist the current worktree identity, not merely the fingerprint from
    * session open; editor/build changes are first-class workspace state.
    * An isolated session may be saved while another session is active. */
-  if (c->session_workspaces) {
-    (void)asngn_workspace_info_refresh(c, &s->workspace);
-  } else if (asngn_workspace_refresh(c) == ASNGN_OK) {
-    s->workspace = c->workspace;
-  }
+  asngn_workspace_info current = s->workspace;
+  if (asngn_workspace_snapshot(&current, NULL) != ASNGN_OK)
+    current.fingerprint[0] = '\0';
+  s->workspace = current;
 
   asngn_buf_init(&buf);
   ok = ok && asngn_xobj_put(obj, "slug", mk_str(s->slug));

@@ -43,6 +43,12 @@ trials require actual resources. No real-model result has been produced here.
   the current embedded wrapper serializes requests to one backend instance.
   This is shared residency, not native multi-sequence decoding. The former
   duplicate engine LRU/load machinery was removed.
+- Execution responsibilities are separate modules: the turn loop coordinates
+  ingestion/commit, while action application, tools, confirmations, drafts and
+  responses share explicit private boundaries. Structured generation preserves
+  roles/tool-result blocks through the watchdog and reserves schema costs before
+  dispatch. The active decision policy still uses constrained steps; selecting a
+  native action protocol is the next integration gate.
 - Output contracts now travel explicitly through asmodel ABI 7. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
   GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns

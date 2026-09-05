@@ -155,14 +155,16 @@ static void generation_token(const char *text, size_t len, void *ud) {
   (void)len;
   if (s->fn) s->fn(text, s->ud);
 }
-asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
-    const char *sys, const char *user, const char *grammar, const char *schema, int max_tokens,
+asngn_err asngn_models_generate_input(asngn_ctx *c, int slot, asngn_task_kind task,
+    const asmodel_input *input, const char *grammar, const char *schema,
+    const asmodel_tools *tools, int max_tokens,
     int64_t deadline, asngn_token_fn fn, void *ud, volatile int *cancel,
     char **out, int *in, int *gen) {
   asmodel_generate_params p = {0};
   asmodel_generation_info info = {0};
   generation_stream stream = {fn, ud};
   asngn_err e;
+  if (tools) asmodel_tool_calls_clear(tools->output);
   if (out) *out = NULL;
   if (in) *in = 0;
   if (gen) *gen = 0;
@@ -170,22 +172,31 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   const asngn_sampling *sp = task_sampling(&c->cfg, task);
   p.temperature=sp->temp; p.top_p=sp->top_p; p.repeat_penalty=sp->repeat_penalty;
   p.max_tokens=max_tokens > 0 ? max_tokens : sp->max_tokens;
-  p.reasoning=(task==ASNGN_TASK_DECIDE || task==ASNGN_TASK_CLASSIFY || task==ASNGN_TASK_JUDGE)
+  p.reasoning=!tools && (task==ASNGN_TASK_DECIDE || task==ASNGN_TASK_CLASSIFY || task==ASNGN_TASK_JUDGE)
       ? ASMODEL_REASONING_REQUIRED_OFF : ASMODEL_REASONING_DEFAULT;
-  p.output_schema = schema ? schema : asngn_protocol_scalar_schema(task);
+  p.output_schema = schema ? schema : tools ? NULL : asngn_protocol_scalar_schema(task);
+  p.tools = tools;
   p.require_constraint=grammar != NULL || p.output_schema != NULL; p.result_info=&info;
-  e=asngn_context_validate_text(c,slot,sys,user,p.max_tokens);
+  size_t extra = p.output_schema ? strlen(p.output_schema) : 0;
+  if (tools) {
+    if (!tools->schemas || tools->count > 64) return ASNGN_ERR_INVALID;
+    for (size_t i = 0; i < tools->count; i++) {
+      const asmodel_tool_schema *v = &tools->schemas[i];
+      if (!v->name || !v->description || !v->parameters) return ASNGN_ERR_INVALID;
+      extra += strlen(v->name)+strlen(v->description)+strlen(v->parameters)+128;
+    }
+  }
+  e=asngn_context_validate_input(c,slot,input,p.max_tokens,extra);
   if (e!=ASNGN_OK) return e;
   if (deadline > 0) {
     p.deadline_ms=deadline-asngn_clock_mono_ms(&c->clock);
     if (p.deadline_ms<=0) return asngn_seterr(c,ASNGN_ERR_TIMEOUT,"deadline expired before inference");
   }
-  asmodel_text_input input; asmodel_input_pair(&input,sys,user);
   char *text = NULL;
   int ti=0, to=0;
   int64_t started=asngn_clock_mono_ms(&c->clock);
   e=asngn_from_model_error(asmodel_generate(c->shared_models,c->models[slot].cfg.id,
-      &input.input,grammar,&p,fn ? generation_token : NULL,&stream,cancel,&text,&ti,&to));
+      input,grammar,&p,fn ? generation_token : NULL,&stream,cancel,&text,&ti,&to));
   if (e == ASNGN_OK && info.json_output) {
     e = asngn_protocol_decode(task, p.output_schema, &text);
     if (e != ASNGN_OK) snprintf(info.error, sizeof info.error,
@@ -204,19 +215,32 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
   return ASNGN_OK;
 }
 
+/* Small engine phases deliberately use two text messages. */
+asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
+    const char *sys, const char *user, const char *grammar, const char *schema, int max_tokens,
+    int64_t deadline, asngn_token_fn fn, void *ud, volatile int *cancel,
+    char **out, int *in, int *gen) {
+  asmodel_text_input pair; asmodel_input_pair(&pair,sys,user);
+  return asngn_models_generate_input(c,slot,task,&pair.input,grammar,schema,NULL,max_tokens,
+      deadline,fn,ud,cancel,out,in,gen);
+}
+
 int asngn_models_count_tokens(asngn_ctx *c, int slot, const char *text) {
   int n = c && c->shared_models && slot >= 0 && (size_t)slot < c->models_n ?
       asmodel_count_tokens(c->shared_models,c->models[slot].cfg.id,text ? text : "") : -1;
   return n >= 0 ? n : asngn_token_heuristic(text);
 }
-int asngn_models_count_prompt(asngn_ctx *c, int slot, const char *sys, const char *user) {
-  asmodel_text_input input; asmodel_input_pair(&input,sys,user);
+int asngn_models_count_input(asngn_ctx *c, int slot, const asmodel_input *input) {
   if (c && c->shared_models && slot >= 0 && (size_t)slot < c->models_n) {
-    int n=asmodel_count_prompt_tokens(c->shared_models,c->models[slot].cfg.id,&input.input);
-    if (n>=0) return n;
+    int n = asmodel_count_prompt_tokens(c->shared_models,c->models[slot].cfg.id,input);
+    if (n >= 0) return n;
   }
   asmodel_provider unavailable = {0};
-  return asmodel_provider_measure_prompt(&unavailable,&input.input).admission_tokens;
+  return asmodel_provider_measure_prompt(&unavailable,input).admission_tokens;
+}
+int asngn_models_count_prompt(asngn_ctx *c, int slot, const char *sys, const char *user) {
+  asmodel_text_input pair; asmodel_input_pair(&pair,sys,user);
+  return asngn_models_count_input(c,slot,&pair.input);
 }
 
 /* ---- embedding ---------------------------------------------------------- */

@@ -407,6 +407,11 @@ int       asngn_models_slot_for_id(asngn_ctx *c, const char *id);
 asngn_err asngn_from_model_error(asmodel_err e);
 asngn_err asngn_models_embed_many(asngn_ctx *c, const char *const *texts, size_t count,
     int is_query, float *out, asmodel_embedding_info *info);
+asngn_err asngn_models_generate_input(asngn_ctx *c, int slot, asngn_task_kind task,
+    const asmodel_input *input, const char *grammar, const char *schema,
+    const asmodel_tools *tools, int max_tokens, int64_t deadline, asngn_token_fn fn,
+    void *ud, volatile int *cancel, char **out, int *in, int *gen);
+int asngn_models_count_input(asngn_ctx *c, int slot, const asmodel_input *input);
 asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
                                 const char *system_prompt,
                                 const char *user_prompt, const char *gbnf, const char *schema,
@@ -618,6 +623,8 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
 asngn_err asngn_context_validate(asngn_ctx *c, int count_slot,
                                  const asngn_prompt *prompt,
                                  int output_reserve);
+asngn_err asngn_context_validate_input(asngn_ctx *c, int slot, const asmodel_input *input,
+    int output_reserve, size_t extra_tokens);
 asngn_err asngn_context_validate_text(asngn_ctx *c, int count_slot,
                                       const char *system_text,
                                       const char *user_text,

@@ -52,6 +52,8 @@ typedef struct {
   size_t embedding_batch_n;
   int embedding_batches;
   char embedded_documents[32][128];
+  size_t input_messages;
+  asmodel_role input_roles[8];
   int calls;          /* generate() invocations                 */
   int max_tokens_seen[32]; /* generation cap for each call       */
   asmodel_reasoning_mode reasoning_seen[32];

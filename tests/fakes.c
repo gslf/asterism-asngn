@@ -197,6 +197,9 @@ static asngn_err fake_model_embed(void *ud, const char *const *texts, size_t cou
 static asngn_err fake_model_generate(void *ud, const asmodel_input *input,
     const char *gbnf, const asngn_gen_params *p, asngn_token_fn fn, void *fn_ud,
     volatile int *cancel, char **out, int *in, int *gen) {
+  fake_model *fm = ud;
+  fm->input_messages = input->count;
+  for (size_t i = 0; i < input->count && i < 8; i++) fm->input_roles[i] = input->messages[i].role;
   const char *sys = input->messages[0].blocks[0].text;
   const char *user = input->messages[1].blocks[0].text;
   int ti = 0, to = 0;

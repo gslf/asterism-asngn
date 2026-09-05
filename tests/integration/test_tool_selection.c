@@ -1,6 +1,7 @@
 #include "asngn_test.h"
 #include "engine_fx.h"
 #include "astools.h"
+#include "execution.h"
 
 TEST(selection_binds_every_representation) {
   eng_fx f;
@@ -70,9 +71,9 @@ TEST(discovery_reaches_a_previously_omitted_command) {
       fake_model_push(&f.nano, "CLASS MODERATE | DETAIL NORMAL | MODE PLAN | TASK LOOKUP\n"));
   ASSERT_TRUE(fake_model_push(
       &f.light, "{action: \"discover\", why: \"find inspection\", input: \"fake run\"}\n"));
-  ASSERT_TRUE(
-      fake_model_push(&f.light, "{action: \"call\", why: \"inspect\", input: fake.run "
-                                "{msg:\"seen\"}, success:\"echo\", fallback:\"report\"}\n"));
+  ASSERT_TRUE(fake_model_push(&f.light,
+                              "{action: \"call\", why: \"inspect\", input: fake.run "
+                              "{msg:\"seen\"}, success:\"echo\", fallback:\"report\"}\n"));
   ASSERT_TRUE(fake_model_push(&f.light, "{action:\"answer\"}\n"));
   ASSERT_TRUE(fake_model_push(&f.stdm, "Observed seen.\n"));
   asngn_turn_result r = {0};
@@ -88,6 +89,57 @@ TEST(discovery_reaches_a_previously_omitted_command) {
   eng_drop(&f);
 }
 
-TEST_LIST = {TEST_ENTRY(selection_binds_every_representation),
+TEST(structured_generation_preserves_roles_and_admission) {
+  eng_fx f;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  asngn_turn_state turn = {.s = f.s, .gen_slot = 2};
+  asmodel_block blocks[] = {
+      {.kind = ASMODEL_BLOCK_TEXT, .text = "system"},
+      {.kind = ASMODEL_BLOCK_TEXT, .text = "inspect the result"},
+      {.kind = ASMODEL_BLOCK_TOOL_CALL, .id = "observed-1", .name = "inspect", .text = "{}"},
+      {.kind = ASMODEL_BLOCK_TOOL_RESULT, .id = "observed-1", .text = "actual evidence"},
+      {.kind = ASMODEL_BLOCK_TEXT, .text = "explain"}};
+  asmodel_message messages[] = {{ASMODEL_ROLE_SYSTEM, &blocks[0], 1},
+                                {ASMODEL_ROLE_USER, &blocks[1], 1},
+                                {ASMODEL_ROLE_ASSISTANT, &blocks[2], 1},
+                                {ASMODEL_ROLE_TOOL, &blocks[3], 1},
+                                {ASMODEL_ROLE_USER, &blocks[4], 1}};
+  asmodel_input input = {messages, 5};
+  char *text = NULL;
+  int ti = 0, to = 0;
+  ASSERT_TRUE(fake_model_push(&f.stdm, "Evidence explained."));
+  ASSERT_OK(asngn_generate_input(f.c, &turn, 2, ASNGN_TASK_ANSWER, &input, NULL, NULL, NULL, 128,
+                                 NULL, NULL, &text, &ti, &to));
+  ASSERT_EQ_STR(text, "Evidence explained.");
+  free(text);
+  text = NULL;
+  ASSERT_EQ_INT(f.stdm.input_messages, 5);
+  ASSERT_EQ_INT(f.stdm.input_roles[2], ASMODEL_ROLE_ASSISTANT);
+  ASSERT_EQ_INT(f.stdm.input_roles[3], ASMODEL_ROLE_TOOL);
+  ASSERT_EQ_INT(f.stdm.input_roles[4], ASMODEL_ROLE_USER);
+  int calls = f.stdm.calls;
+  asmodel_tool_calls proposed = {0};
+  asmodel_tool_schema schema = {"inspect", "inspect evidence", "{\"type\":\"object\"}"};
+  asmodel_tools tools = {
+      .schemas = &schema, .count = 1, .choice = ASMODEL_TOOLS_AUTO, .output = &proposed};
+  int occupied = asngn_models_count_input(f.c, 2, &input);
+  f.c->models[2].cfg.ctx = occupied + 128 + f.c->cfg.safety_margin;
+  /* Plain input fits exactly; the native schema must also be reserved. */
+  ASSERT_ERR(asngn_generate_input(f.c, &turn, 2, ASNGN_TASK_DECIDE, &input, NULL, NULL, &tools, 128,
+                                  NULL, NULL, &text, &ti, &to),
+             ASNGN_ERR_CONTEXT);
+  ASSERT_TRUE(text == NULL && proposed.count == 0);
+  ASSERT_EQ_INT(f.stdm.calls, calls);
+  turn.deadline_mono = f.clk.mono_ms - 1;
+  ASSERT_ERR(asngn_generate_input(f.c, &turn, 2, ASNGN_TASK_DECIDE, &input, NULL, NULL, &tools, 128,
+                                  NULL, NULL, &text, &ti, &to),
+             ASNGN_ERR_TIMEOUT);
+  ASSERT_TRUE(text == NULL && proposed.count == 0 && ti == 0 && to == 0);
+  asmodel_tool_calls_clear(&proposed);
+  eng_drop(&f);
+}
+
+TEST_LIST = {TEST_ENTRY(structured_generation_preserves_roles_and_admission),
+             TEST_ENTRY(selection_binds_every_representation),
              TEST_ENTRY(discovery_reaches_a_previously_omitted_command)};
 RUN_ALL_TESTS()

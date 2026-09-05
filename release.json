@@ -25,9 +25,9 @@
     },
     "astools": {
       "repository": "gslf/asterism-astools",
-      "revision": "8598f871abdb26ccb6387b54648c1107934c7c21",
+      "revision": "7cb30529518671041fbb1d48f201af6fb05b6a0d",
       "headers": {
-        "include/astools.h": "b9328586cb0ef64d650d8b4aa2556ec888ad8901fcde6e1918ce548469cec30d"
+        "include/astools.h": "67e437f17872431f9bb43c3c18eea445a837155eefd958940229f1543af6980a"
       }
     }
   },

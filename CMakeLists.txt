@@ -182,6 +182,17 @@ set(ASNGN_SOURCES
   src/work_api.c
   src/work_observe.c
   src/loop.c
+  src/turn_support.c
+  src/generation.c
+  src/action_state.c
+  src/draft.c
+  src/tool_outcome.c
+  src/confirmation.c
+  src/tool_action.c
+  src/action_instruction.c
+  src/action_loop.c
+  src/action_apply.c
+  src/answer.c
   src/tools.c
   src/safety.c
   src/redact.c

@@ -32,6 +32,7 @@ const char *asngn_step_name(asngn_step_kind k) {
   switch (k) {
     case ASNGN_STEP_CALL:    return "call";
     case ASNGN_STEP_RECALL:  return "recall";
+    case ASNGN_STEP_DISCOVER: return "discover";
     case ASNGN_STEP_OPEN:    return "open";
     case ASNGN_STEP_THINK:   return "think";
     case ASNGN_STEP_CLARIFY: return "clarify";
@@ -171,6 +172,7 @@ static asngn_err parse_handle(asngn_ctx *c, const char *s, int *out_n) {
 
 static bool action_kind(const char *name, asngn_step_kind *out) {
   if (strcmp(name, "call") == 0)    { *out = ASNGN_STEP_CALL;    return true; }
+  if (strcmp(name, "discover") == 0) { *out = ASNGN_STEP_DISCOVER; return true; }
   if (strcmp(name, "recall") == 0)  { *out = ASNGN_STEP_RECALL;  return true; }
   if (strcmp(name, "open") == 0)    { *out = ASNGN_STEP_OPEN;    return true; }
   if (strcmp(name, "think") == 0)   { *out = ASNGN_STEP_THINK;   return true; }
@@ -300,6 +302,7 @@ asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out) {
       goto fail;
     }
     break;
+  case ASNGN_STEP_DISCOVER:
   case ASNGN_STEP_CLARIFY:
   case ASNGN_STEP_OPEN:
     if (out->text == NULL || out->why == NULL || out->success != NULL ||

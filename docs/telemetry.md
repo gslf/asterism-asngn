@@ -15,7 +15,7 @@ and unknown `data` fields (forward compatibility).
 | `cache_probe` | `outcome` ("hit" \| "adapt" \| "miss"), `cos`          |
 | `model_call`  | `model` (pool id), `task` (classify \| decide \| draft \| answer \| compress \| adapt \| judge), `tokens_in`, `tokens_out`, `ms`, `tps` |
 | `tool_call`   | `tool`, `command`, `ok`, `ms`; or `cached: true` for a tool-result-cache hit |
-| `step`        | `action` (call \| recall \| open \| think \| clarify \| answer), `why` — the model's declared rationale (redacted, flattened, truncated) |
+| `step`        | `action` (call \| discover \| recall \| open \| think \| clarify \| answer), `why` — the model's declared rationale (redacted, flattened, truncated) |
 | `recall`      | (empty) — the recall step ran                          |
 | `fold`        | `mode` ("compressor" \| "extractive")                  |
 | `digest`      | `label` (tool.command or "recall"), `bytes` (full size)|

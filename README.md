@@ -8,7 +8,7 @@ Architecture and design: [docs/SPECS.md](docs/SPECS.md).
 
 - **Lossless zoned context** — Asper owns exact scoped events, semantic memory, checkpoints and content-addressed objects; each call materializes only the best bounded view with explicit exact/estimated token accounting.
 - **Continuation instead of retry** — partial output returned at a token ceiling is preserved. Artifact drafts resume from a hashed exact prefix, while oversized tool output becomes a short view plus an Asper object reopenable via `OPEN B1`.
-- **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; coding and complex work is orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
+- **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "discover" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; coding and complex work is orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
 - **Semantic cache** — embedding-keyed reuse and light-tier adaptation of previous answers; tool-touched entries are never replayed, only surfaced as plan hints; a world-epoch counter ties cache validity to destructive tool activity. A separate exact-key cache short-circuits repeated read-only tool calls.
 - **Safety** — input/plan/action/output gates, identical-call and oscillation guards, stall watchdog, step and tool caps, secret redaction, human confirmation for destructive tools, an optional judge pass — all measured in the ledger, never hidden.
 - **Telemetry** — per-turn attribution and savings plus a separate, durable operation log for inference consumption, including failed or cancelled calls. Unknown usage retains its reservation. QpT remains diagnostic only: coding quality is gated by task success, passing tests, applicable patches, valid tool calls, regressions, latency, and memory.
@@ -400,7 +400,7 @@ profile is equivalent to:
     pinned_max:      32,
   },
   integration: {
-    astools: { catalog_chars: 24000 },
+    astools: { tool_limit: 16, tool_schema_bytes: 24000 },
   },
   safety: {
     // Disabled: token budgets bound work; Esc/Ctrl+C cancels manually.

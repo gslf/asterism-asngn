@@ -1,6 +1,7 @@
 /* Startup diagnostics never load a model, run a tool, or create engine state. */
 #include "asngn_internal.h"
 #include "asper.h"
+#include "astools.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -39,7 +40,8 @@ asngn_err asngn_diagnose(const asngn_open_params *params, char **out) {
   e = asngn_buf_printf(&report, "Asterism %s\nConfiguration: %s (%s)\nEngine root: %s\n",
                        asngn_version(), config, configured ? "loaded" : "missing; defaults", root);
   if (params->config_path && !configured) ready = false;
-  if (asmodel_abi_version() != ASMODEL_ABI_VERSION || asper_abi_version() != ASPER_ABI_VERSION) {
+  if (asmodel_abi_version() != ASMODEL_ABI_VERSION || asper_abi_version() != ASPER_ABI_VERSION ||
+      astools_abi_version() != ASTOOLS_ABI_VERSION) {
     ready = false;
     if (e == ASNGN_OK) e = asngn_buf_appends(&report, "Component ABI mismatch: rebuild the pinned release.\n");
   }

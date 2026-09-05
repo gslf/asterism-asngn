@@ -946,6 +946,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
   asngn_err e = ASNGN_OK;
   astools_err ae;
   bool cached_hit = false;
+  const astools_selected_command *selected = NULL;
   int64_t t0 = asngn_clock_mono_ms(&c->clock);
 
   if (t->phase != ASNGN_PHASE_ACTION)
@@ -959,6 +960,32 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
   if (ae != ASTOOLS_OK)
     return call_push_error(c, t, "tool", "call", NULL,
                            "astools/invalid-args", "malformed call line");
+
+  int selected_index = asngn_tools_find(t,ref,cmd);
+  if (selected_index < 0) {
+    asngn_tool_note denied_note = {0};
+    if (t->security_profile == ASNGN_SECURITY_CODING_READONLY &&
+        asngn_siblings_annotations(c,ref,cmd,&denied_note) == ASNGN_OK &&
+        (!denied_note.read_only || denied_note.destructive)) {
+      t->authorization_blocked = true;
+      asngn_turn_stream_emit(t,ASNGN_STREAM_NOTICE,
+          "The coding-readonly profile excludes this mutation; a writable profile is required.");
+    }
+    e = call_push_error(c,t,ref,cmd,args,"asngn/not-selected",
+        "command unavailable in this selection; use discover with its name or purpose");
+    goto out;
+  }
+  selected = astools_selection_get(t->tool_selection,(size_t)selected_index);
+  ae = astools_selection_validate(t->tool_selection,selected->tool,args);
+  if (ae != ASTOOLS_OK) {
+    if (ae == ASTOOLS_ERR_DENIED) {
+      t->authorization_blocked = true;
+      asngn_turn_stream_emit(t,ASNGN_STREAM_NOTICE,
+          "The tool's identity or permissions changed; rediscover it before continuing.");
+    }
+    e = call_push_error(c,t,ref,cmd,args,"astools/preflight",astools_last_error(c->astools));
+    goto out;
+  }
 
   /* A draft marker expands into freshly sampled content, so the ordinary
    * post-expansion call hash would consider every repeat different. Track the
@@ -1033,18 +1060,16 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
   }
 
   /* plan gate: args validated before any confirmation UI */
-  ae = astools_validate_args(c->astools, ref, cmd, exec_args);
+  ae = expanded_args ? astools_selection_validate(t->tool_selection, selected->tool, exec_args) : ASTOOLS_OK;
   if (ae != ASTOOLS_OK) {
     e = call_push_error(c, t, ref, cmd, args, "astools/invalid-args",
                         astools_last_error(c->astools));
     goto out;
   }
   memset(&note, 0, sizeof note);
-  if (asngn_siblings_annotations(c, ref, cmd, &note) != ASNGN_OK) {
-    /* unknown command should have failed validation; be conservative */
-    note.read_only = false;
-    note.destructive = true;
-  }
+  note.read_only = selected->read_only; note.destructive = selected->destructive;
+  note.idempotent = selected->idempotent; note.long_running = selected->long_running;
+  snprintf(note.version,sizeof note.version,"%s",strchr(selected->ref,'@')+1);
 
   if (t->security_profile == ASNGN_SECURITY_CODING_READONLY &&
       (!note.read_only || note.destructive)) {
@@ -1072,7 +1097,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     uint8_t workspace_hash[32];
     char workspace_hex[65];
     asngn_buf_init(&kb);
-    if (asngn_buf_printf(&kb, "%s|%s|%s|%s", ref, note.version, cmd,
+    if (asngn_buf_printf(&kb, "%s|%s|%s|%s", selected->ref, selected->content_sha256, cmd,
                          canon_args) != ASNGN_OK) {
       asngn_buf_free(&kb);
       e = ASNGN_ERR_NOMEM;
@@ -1280,7 +1305,7 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     if (asngn_verification_command(ref, cmd, expanded_args) &&
         asngn_workspace_refresh(c) == ASNGN_OK)
       memcpy(proof_base, c->workspace.fingerprint, sizeof proof_base);
-    ae = astools_invoke(c->astools, ref, cmd, exec_args, deadline_ms, &r);
+    ae = (astools_err)asngn_tools_invoke(t, selected->tool, exec_args, deadline_ms, &r);
     t->tool_calls++;
     t->tools_used = true;
     if (ae == ASTOOLS_OK && r.ok) t->tool_ok_seen = true;
@@ -1456,6 +1481,11 @@ static asngn_err step_instruction(asngn_ctx *c, asngn_turn_state *t,
       c->cfg.max_steps > t->steps ? c->cfg.max_steps - t->steps : 0,
       c->cfg.max_tool_calls > t->tool_calls
           ? c->cfg.max_tool_calls - t->tool_calls : 0);
+  if (e == ASNGN_OK && c->astools_ok && !t->opts.no_tools)
+    e = asngn_buf_appends(&b,
+        "{action: \"discover\", why: \"<short reason>\", input: \"<tool name or purpose>\"} "
+        "# replace the shortlist by searching all authorized tools. "
+        "Use when a needed command is absent or its package changed.\n");
   if (e == ASNGN_OK && call_ok)
     e = asngn_buf_appends(&b,
                           "{action: \"call\", why: \"<short reason>\", "
@@ -1519,7 +1549,7 @@ static asngn_err step_instruction(asngn_ctx *c, asngn_turn_state *t,
    * deliverable is source files in the workspace, and a planner left
    * with the generic example pastes the code into the answer instead. */
   if (e == ASNGN_OK && call_ok && t->prof.task == ASNGN_RTASK_GENERATE &&
-      !t->artifact_written)
+      !t->artifact_written && asngn_tools_find(t,"fs","write") >= 0)
     e = asngn_buf_appends(&b,
                           "This is the private action phase. Treat the "
                           "request as professional software work: inspect "
@@ -1541,14 +1571,8 @@ static asngn_err step_instruction(asngn_ctx *c, asngn_turn_state *t,
                           "fallback: \"report that the write failed\"}\n");
   else if (e == ASNGN_OK && call_ok && !t->tools_used)
     e = asngn_buf_appends(&b,
-                          "Prefer acting: call the tool that gets what "
-                          "the task needs, then answer from its RESULT. "
-                          "Example first step for \"what is in that "
-                          "folder?\":\n{action: \"call\", why: \"need "
-                          "the folder contents\", input: fs.list {path: "
-                          "\"<dir>\"}, success: \"a RESULT listing the "
-                          "entries\", fallback: \"answer from what I "
-                          "know\"}\n");
+        "Choose a selected tool that obtains evidence needed by the task. "
+        "If none fits, discover a tool by name or purpose.\n");
   else if (e == ASNGN_OK && coding_task(t->prof.task) &&
            t->artifact_written && !t->verification_attempted && call_ok)
     e = asngn_buf_appends(
@@ -1662,15 +1686,16 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
 
     call_muted = t->call_mute;
     t->call_mute = false; /* one pass only */
-    call_now = c->astools_ok && !t->opts.no_tools && !call_muted;
+    bool discover_now = c->astools_ok && !t->opts.no_tools;
+    call_now = discover_now && astools_selection_count(t->tool_selection) > 0 && !call_muted;
     think_muted = t->think_mute;
     t->think_mute = false; /* one pass only */
     think_now = c->cfg.think_limit > 0 && !think_muted;
     e = step_instruction(c, t, call_now, call_muted, think_now,
                          think_muted, &instr);
     if (e != ASNGN_OK) return e;
-    e = asngn_grammar_steps(c, call_now, c->asper_ok, think_now, s->blobs_n,
-                             t->astools_gbnf, &gbnf);
+    e = asngn_grammar_steps(c, call_now, c->asper_ok, think_now, discover_now, s->blobs_n,
+                             astools_selection_grammar(t->tool_selection), &gbnf);
     if (e != ASNGN_OK) {
       free(instr);
       return e;
@@ -1693,7 +1718,8 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       free(gbnf);
       return e;
     }
-    e = asngn_protocol_steps(c, call_now, c->asper_ok, think_now, s->blobs_n,
+    e = asngn_protocol_steps(astools_selection_schemas(t->tool_selection),
+                              call_now, c->asper_ok, think_now, discover_now, s->blobs_n,
                               generation_needs_artifact(c, t), &schema);
     if (e != ASNGN_OK) {
       asngn_prompt_free(&prompt); free(instr); free(gbnf); return e;
@@ -1771,6 +1797,19 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
       asngn_step_free(&st);
       free(line);
       return ASNGN_OK;
+    case ASNGN_STEP_DISCOVER:
+      t->thinks_row = 0;
+      if (!discover_now) {
+        t->futile_row++;
+        e = asngn_work_push(c,t,"[notice] tool discovery is disabled for this turn");
+      } else {
+        e = asngn_tools_select(c,t,st.text);
+        if (e == ASNGN_OK) e = asngn_work_push(c,t,
+            "[notice] tool selection replaced; use the current catalog for the next action");
+        t->futile_row = 0;
+      }
+      if (e != ASNGN_OK) { asngn_step_free(&st); free(line); return e; }
+      break;
     case ASNGN_STEP_CLARIFY:
       t->clarify = true;
       t->answer = st.text;
@@ -1893,6 +1932,11 @@ static asngn_err run_step_loop(asngn_ctx *c, asngn_turn_state *t) {
     }
     case ASNGN_STEP_CALL:
       t->thinks_row = 0;
+      if (!call_now) {
+        t->futile_row++;
+        asngn_work_push(c,t,"[notice] CALL is unavailable for this decision");
+        break;
+      }
       /* synthesize the call line for astools' authoritative parser:
        * the action object carries the call as its input field */
       {
@@ -2424,10 +2468,8 @@ asngn_err asngn_loop_run(asngn_ctx *c, asngn_turn_state *t) {
     free(proj);
   }
   if (c->astools_ok && !t->opts.no_tools) {
-    if (asngn_siblings_catalog(c, &t->catalog) != ASNGN_OK)
-      t->catalog = NULL;
-    if (asngn_siblings_grammar(c, &t->astools_gbnf) != ASNGN_OK)
-      t->astools_gbnf = NULL;
+    e = asngn_tools_select(c,t,t->user_msg);
+    if (e != ASNGN_OK) return e;
   }
 
   e=asngn_retrieval_query(s,t,&t->retrieval_query);

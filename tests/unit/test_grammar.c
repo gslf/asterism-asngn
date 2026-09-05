@@ -59,7 +59,7 @@ TEST(judge_grammar_exact) {
 
 TEST(steps_minimal_grammar) {
   char *g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, false, false, true, 0, NULL, &g));
+  ASSERT_OK(asngn_grammar_steps(NULL, false, false, true, false, 0, NULL, &g));
   ASSERT_EQ_STR(g,
       "root      ::= step \"\\n\"\n"
       "step      ::= think | clarify | answer\n"
@@ -72,7 +72,7 @@ TEST(steps_minimal_grammar) {
 
 TEST(steps_recall_alternative) {
   char *g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, false, true, true, 0, NULL, &g));
+  ASSERT_OK(asngn_grammar_steps(NULL, false, true, true, false, 0, NULL, &g));
   ASSERT_EQ_STR(g,
       "root      ::= step \"\\n\"\n"
       "step      ::= recall | think | clarify | answer\n"
@@ -85,7 +85,7 @@ TEST(steps_recall_alternative) {
 
 TEST(steps_blob_handles) {
   char *g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, false, false, true, 3, NULL, &g));
+  ASSERT_OK(asngn_grammar_steps(NULL, false, false, true, false, 3, NULL, &g));
   ASSERT_EQ_STR(g,
       "root      ::= step \"\\n\"\n"
       "step      ::= open | think | clarify | answer\n"
@@ -100,7 +100,7 @@ TEST(steps_blob_handles) {
 
 TEST(steps_think_can_be_withheld) {
   char *g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, false, false, false, 0, NULL, &g));
+  ASSERT_OK(asngn_grammar_steps(NULL, false, false, false, false, 0, NULL, &g));
   ASSERT_EQ_STR(g,
       "root      ::= step \"\\n\"\n"
       "step      ::= clarify | answer\n"
@@ -129,7 +129,7 @@ static const char k_grafted[] =
 
 TEST(steps_graft_astools) {
   char *g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, 0, k_export, &g));
+  ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, false, 0, k_export, &g));
   ASSERT_EQ_STR(g, k_grafted);
   /* astools' own root line is dropped: exactly one root rule remains */
   ASSERT_EQ_INT((long long)count_substr(g, "root"), 1);
@@ -144,8 +144,8 @@ TEST(steps_graft_astools) {
 
 TEST(steps_graft_deterministic) {
   char *g1 = NULL, *g2 = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, true, true, true, 2, k_export, &g1));
-  ASSERT_OK(asngn_grammar_steps(NULL, true, true, true, 2, k_export, &g2));
+  ASSERT_OK(asngn_grammar_steps(NULL, true, true, true, false, 2, k_export, &g1));
+  ASSERT_OK(asngn_grammar_steps(NULL, true, true, true, false, 2, k_export, &g2));
   ASSERT_EQ_STR(g1, g2); /* byte-identical */
   ASSERT_EQ_INT((long long)count_substr(g1, "root"), 1);
   free(g1);
@@ -156,18 +156,18 @@ TEST(steps_call_dropped_without_export) {
   /* with_call without a usable astools grammar: CALL is dropped, not
    * emitted with an undefined rule. */
   char *g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, 0, NULL, &g));
+  ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, false, 0, NULL, &g));
   ASSERT_TRUE(strstr(g, "call") == NULL);
   free(g);
   g = NULL;
-  ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, 0,
+  ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, false, 0,
                                 "root ::= \"x\"\nfoo ::= \"y\"\n", &g));
   ASSERT_TRUE(strstr(g, "call") == NULL);
   ASSERT_TRUE(strstr(g, "foo") == NULL); /* nothing grafted either */
   free(g);
   g = NULL;
   ASSERT_OK(asngn_grammar_steps(
-      NULL, true, false, true, 0,
+      NULL, true, false, true, false, 0,
       "root ::= \"CALL \" call \"\\n\"\ncall ::= \"\"\n", &g));
   ASSERT_TRUE(strstr(g, "call") == NULL); /* empty registry */
   free(g);
@@ -176,7 +176,7 @@ TEST(steps_call_dropped_without_export) {
 TEST(json_schema_respects_available_actions_and_handles) {
   char *schema = NULL;
   asmodel_json_value *root = NULL;
-  ASSERT_OK(asngn_protocol_steps(NULL, false, false, false, 2, false, &schema));
+  ASSERT_OK(asngn_protocol_steps(NULL, false, false, false, false, 2, false, &schema));
   ASSERT_EQ_INT(asmodel_json_parse(schema, strlen(schema), &root), 0);
   const asmodel_json_value *variants = asmodel_json_object_get(root, "oneOf");
   ASSERT_EQ_INT(asmodel_json_array_len(variants), 3);

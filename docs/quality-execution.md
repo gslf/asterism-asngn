@@ -15,7 +15,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Native engine decision path, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
-| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results | Durable resume, approvals, persistent processes, policy-consistent discovery, platform enforcement matrix, fuzzing/TSan |
+| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues | Durable resume, approvals, persistent processes, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, accurate build/accounting documentation | ACP, SDKs, MCP client, signed packages, editor flows and external user trials |
 
@@ -103,6 +103,15 @@ trials require actual resources. No real-model result has been produced here.
   definition/read/invalidation and per-criterion state; old jobs report superseded
   after definition changes. See [acceptance contracts](acceptance.md) for coverage
   limits and the required host invalidation after external toolchain changes.
+- A turn owns one bounded command snapshot for its prompt, GBNF, JSON Schema and
+  actual invocation. `discover` replaces that snapshot by searching all statically
+  permitted candidates; unavailable commands cannot bypass selection. Read-only
+  profiles omit mutating commands. Runtime preflight precedes cached-result reuse
+  and confirmation; package hashes enter cache keys. Post-queue checks reject
+  revoked or changed packages, and tool waits now receive turn cancellation.
+  Selection quality is lexical and uncalibrated; file-check/spawn is not atomic.
+  Obsolete catalog/grammar/annotation caches and catalog-level configuration were
+  removed. See [tool selection](tool-selection.md).
 - MCP jobs retain at most 256 events and 32 handles; poll reports cursor gaps.
   Without a host acceptance contract, a committed turn remains `unconfirmed`.
   Process restart does not preserve these event rings.
@@ -112,10 +121,10 @@ trials require actual resources. No real-model result has been produced here.
 ## Validation at this checkpoint
 
 - Native CPU build against the pinned llama.cpp submodule compiles the actual
-  adapters and passes 32/32 fake-based tests; no weights were loaded.
-- Integrated no-llama suite: 32/32 CTest executables passed.
-- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 32/32 passed.
-- Standalone Asper: 24/24; astools: 24/24; asmodel: 7/7.
+  adapters and passes 33/33 fake-based tests; no weights were loaded.
+- Integrated no-llama suite: 33/33 CTest executables passed.
+- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 33/33 passed.
+- Standalone Asper: 24/24; astools: 25/25; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -180,6 +189,6 @@ behavior have not been validated by these Linux no-llama runs.
    remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
-3. Add discovery, resumable approvals, controlled processes and editor protocols.
+3. Add resumable approvals, controlled processes and editor protocols.
 4. Run the real-model matrix with supplied configuration before admitting learned
    routing, reusable procedures, alternative patches or offline policy promotion.

@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
+#include "astools.h"
 #include "work_state.h"
 
 /* ── version and error names ──────────────────────────────────────────── */
@@ -353,7 +354,6 @@ asngn_err asngn_workspace_get(asngn_ctx *c, asngn_workspace_info *out) {
 }
 
 void asngn_close(asngn_ctx *c) {
-  size_t i;
   if (c == NULL) return;
   asngn_workers_stop(c);
   /* close any sessions the host leaked */
@@ -378,7 +378,6 @@ void asngn_close(asngn_ctx *c) {
   free(c->sessions_dir);
   free(c->cache_dir);
   free(c->tele_dir);
-  for (i = 0; i < c->notes_n; i++) { /* notes cache freed in siblings */ }
   ctx_locks_destroy(c);
   free(c);
 }
@@ -980,7 +979,7 @@ void asngn_turn_state_free(asngn_turn_state *t) {
   for (i = 0; i < t->work_n; i++) free(t->work[i].text);
   free(t->work);
   free(t->catalog);
-  free(t->astools_gbnf);
+  astools_selection_free(t->tool_selection);
   free(t->call_keys);
   for (i = 0; i < t->tools_list_n; i++) free(t->tools_list[i]);
   free(t->tools_list);

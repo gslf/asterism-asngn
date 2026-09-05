@@ -62,7 +62,7 @@ The decision pass emits one object with one action:
 {action, why, input, success, fallback}
 ```
 
-Supported actions are `call`, `recall`, `open`, `think`, `clarify` and `answer`.
+Supported actions are `call`, `discover`, `recall`, `open`, `think`, `clarify` and `answer`.
 The exact schema is grammar-constrained through asmodel. The pass is short,
 reasoning is disabled, and the output ceiling is explicit because its purpose is
 selection, not prose generation.
@@ -81,6 +81,9 @@ not automatically proof that the task succeeded.
 `call` selects a typed astools command. astools validates its arguments and
 permissions before execution and returns a structured result. asngn records the
 invocation, exit status, diagnostics and changed-world signal.
+
+`discover` replaces the turn's command shortlist by matching a tool name or purpose.
+The same snapshot supplies prompt/schema/grammar and checked invocation.
 
 `recall` asks Asper for a focused memory answer. `open` reads a range from a
 previously stored exact object. `think` allows one bounded private reasoning

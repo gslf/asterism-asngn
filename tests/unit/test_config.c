@@ -118,8 +118,8 @@ TEST(defaults_spot_check) {
   ASSERT_TRUE(cfg.log_path == NULL);
   ASSERT_EQ_INT(cfg.theme, ASNGN_THEME_ASTERISM);
   ASSERT_EQ_STR(cfg.sidebar, "trace");
-  ASSERT_EQ_INT(cfg.catalog_level, ASNGN_CATALOG_SUMMARY);
-  ASSERT_EQ_INT(cfg.catalog_chars, 24000);
+  ASSERT_EQ_INT(cfg.tool_limit, 16);
+  ASSERT_EQ_INT(cfg.tool_schema_bytes, 24000);
   ASSERT_EQ_INT(cfg.mcp_autoconfirm, ASNGN_CONFIRM_DENY);
 
   asngn_config_free(&cfg);
@@ -146,7 +146,7 @@ TEST(overlay_overrides) {
     " decide: { repeat_penalty: 1.3 } },\n"
     "  },\n"
     "  integration: { astls: { workspace: \"session\", "
-    "catalog_chars: 1234 } },\n"
+    "tool_schema_bytes: 1234 } },\n"
     "  routing: { max_escalations: 0 },\n"
     "}\n";
   char dir[256], path[300];
@@ -187,7 +187,7 @@ TEST(overlay_overrides) {
   ASSERT_EQ_DBL(cfg.s_answer.top_p, 0.9, 1e-9);     /* untouched        */
   ASSERT_EQ_DBL(cfg.s_decide.repeat_penalty, 1.3, 1e-9);
   ASSERT_EQ_INT(cfg.s_decide.max_tokens, 1024);     /* untouched        */
-  ASSERT_EQ_INT(cfg.catalog_chars, 1234);
+  ASSERT_EQ_INT(cfg.tool_schema_bytes, 1234);
   ASSERT_EQ_STR(cfg.astools_workspace, "session");
   ASSERT_EQ_INT(cfg.max_escalations, 0);            /* 0 is allowed     */
 

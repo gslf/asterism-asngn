@@ -160,8 +160,8 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->astools_root = cfg_dup("tools");
   cfg->astools_workspace = cfg_dup("session");
   cfg->astools_config = NULL;
-  cfg->catalog_level = ASNGN_CATALOG_SUMMARY;
-  cfg->catalog_chars = 24000;
+  cfg->tool_limit = 16;
+  cfg->tool_schema_bytes = 24000;
 
   cfg->mcp_autoconfirm = ASNGN_CONFIRM_DENY;
 }
@@ -220,9 +220,6 @@ static const enum_map THEME_MAP[] = {
 static const enum_map TRUECOLOR_MAP[] = {
   { "auto", ASNGN_TRUECOLOR_AUTO }, { "on", ASNGN_TRUECOLOR_ON },
   { "off", ASNGN_TRUECOLOR_OFF }, { NULL, 0 } };
-static const enum_map CATALOG_MAP[] = {
-  { "index", ASNGN_CATALOG_INDEX }, { "summary", ASNGN_CATALOG_SUMMARY },
-  { "full", ASNGN_CATALOG_FULL }, { NULL, 0 } };
 static const enum_map SIDEBAR_MAP[] = {
   { "trace", 0 }, { "stats", 1 }, { "memory", 2 }, { "tools", 3 },
   { "cache", 4 }, { NULL, 0 } };
@@ -760,13 +757,12 @@ static asngn_err cfg_apply_integration(asngn_ctx *c, asngn_config *cfg,
     } else if (is_astools && strcmp(key, "workspace") == 0) {
       k.kind = K_STR;
       k.off = OFF(astools_workspace);
-    } else if (is_astools && strcmp(key, "catalog_level") == 0) {
-      k.kind = K_ENUM;
-      k.off = OFF(catalog_level);
-      k.emap = CATALOG_MAP;
-    } else if (is_astools && strcmp(key, "catalog_chars") == 0) {
+    } else if (is_astools && strcmp(key, "tool_limit") == 0) {
       k.kind = K_INT;
-      k.off = OFF(catalog_chars);
+      k.off = OFF(tool_limit);
+    } else if (is_astools && strcmp(key, "tool_schema_bytes") == 0) {
+      k.kind = K_INT;
+      k.off = OFF(tool_schema_bytes);
     } else {
       asngn_log(c, ASNGN_LOG_WARN, "config",
                 "unknown key integration.%s.%s", sub, key);
@@ -777,6 +773,8 @@ static asngn_err cfg_apply_integration(asngn_ctx *c, asngn_config *cfg,
       if (e != ASNGN_OK) return e;
     }
   }
+  if (cfg->tool_limit > 64 || cfg->tool_schema_bytes > 1024*1024)
+    return asngn_seterr(c,ASNGN_ERR_CONFIG,"tool_limit exceeds 64 or tool_schema_bytes exceeds 1048576");
   return ASNGN_OK;
 }
 

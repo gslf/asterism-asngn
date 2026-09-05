@@ -100,15 +100,6 @@ static void sib_astools_log(int level, const char *msg, void *ud) {
   sib_log((asngn_ctx *)ud, level, "astools", msg);
 }
 
-static astools_catalog_level sib_catalog_level(asngn_catalog_level l) {
-  switch (l) {
-    case ASNGN_CATALOG_INDEX: return ASTOOLS_CATALOG_INDEX;
-    case ASNGN_CATALOG_FULL: return ASTOOLS_CATALOG_FULL;
-    case ASNGN_CATALOG_SUMMARY:
-    default: return ASTOOLS_CATALOG_SUMMARY;
-  }
-}
-
 /* Longest prefix of s[0..len) not exceeding max bytes that does not split
  * a UTF-8 sequence. */
 static size_t sib_utf8_clip(const char *s, size_t len, size_t max) {
@@ -181,6 +172,7 @@ static asngn_err sib_open_asper(asngn_ctx *c) {
 }
 
 static asngn_err sib_open_astools_at(asngn_ctx *c, const char *workspace) {
+  if (astools_abi_version() != ASTOOLS_ABI_VERSION) return ASNGN_ERR_CONFIG;
   char *root, *work, *conf = NULL;
   asngn_err e;
 
@@ -312,14 +304,7 @@ void asngn_siblings_close(asngn_ctx *c) {
   c->astools_ok = false;
   free(c->astools_workspace_active);
   c->astools_workspace_active = NULL;
-  free(c->astools_catalog);
-  c->astools_catalog = NULL;
-  free(c->astools_grammar);
-  c->astools_grammar = NULL;
-  free(c->notes);
-  c->notes = NULL;
-  c->notes_n = 0;
-  c->notes_cap = 0;
+
 }
 
 asngn_err asngn_siblings_workspace_sync(asngn_ctx *c, const char *root) {
@@ -348,97 +333,6 @@ asngn_err asngn_siblings_workspace_sync(asngn_ctx *c, const char *root) {
   return ASNGN_OK;
 }
 
-/* ═══════════════════════ catalog / grammar ═══════════════════════ */
-
-/* Fetch, refresh the context cache under sib_mu, and hand the caller an
- * independent malloc'd copy (never the astools allocation). */
-static asngn_err sib_refresh(asngn_ctx *c, char *text /* astools-owned */,
-                             char **cache_slot, char **out) {
-  char *mine, *theirs;
-
-  mine = asngn_strdup(text ? text : "");
-  theirs = asngn_strdup(text ? text : "");
-  astools_free(text);
-  if (!mine || !theirs) {
-    free(mine);
-    free(theirs);
-    return asngn_seterr(c, ASNGN_ERR_NOMEM, "siblings: out of memory");
-  }
-
-  os_mutex_lock(&c->sib_mu);
-  free(*cache_slot);
-  *cache_slot = mine;
-  os_mutex_unlock(&c->sib_mu);
-
-  *out = theirs;
-  return ASNGN_OK;
-}
-
-asngn_err asngn_siblings_catalog(asngn_ctx *c, char **out_text) {
-  char *text = NULL;
-  astools_err ae;
-  size_t budget;
-
-  if (!c || !out_text) return ASNGN_ERR_INVALID;
-  *out_text = NULL;
-  if (!c->astools_ok) return ASNGN_OK;
-
-  budget = c->cfg.catalog_chars > 0 ? (size_t)c->cfg.catalog_chars : 0;
-  ae = astools_catalog(c->astools, sib_catalog_level(c->cfg.catalog_level),
-                       budget, &text);
-  if (ae != ASTOOLS_OK)
-    return asngn_seterr(c, ASNGN_ERR_SIBLING, "astools: %s: %s",
-                        astools_err_name(ae),
-                        astools_last_error(c->astools));
-  return sib_refresh(c, text, &c->astools_catalog, out_text);
-}
-
-asngn_err asngn_siblings_grammar(asngn_ctx *c, char **out_gbnf) {
-  char *text = NULL;
-  astools_err ae;
-
-  if (!c || !out_gbnf) return ASNGN_ERR_INVALID;
-  *out_gbnf = NULL;
-  if (!c->astools_ok) return ASNGN_OK;
-
-  ae = astools_grammar_export(c->astools, &text);
-  if (ae != ASTOOLS_OK)
-    return asngn_seterr(c, ASNGN_ERR_SIBLING, "astools: %s: %s",
-                        astools_err_name(ae),
-                        astools_last_error(c->astools));
-  return sib_refresh(c, text, &c->astools_grammar, out_gbnf);
-}
-
-/* ═══════════════════════ annotations ═══════════════════════ */
-
-/* Remember a note in the context cache; a full cache or OOM only costs a
- * re-parse on the next lookup, so failures are silent. */
-static void sib_note_remember(asngn_ctx *c, const asngn_tool_note *note) {
-  size_t i;
-
-  os_mutex_lock(&c->sib_mu);
-  for (i = 0; i < c->notes_n; i++) {
-    if (strcmp(c->notes[i].ref, note->ref) == 0 &&
-        strcmp(c->notes[i].cmd, note->cmd) == 0) {
-      os_mutex_unlock(&c->sib_mu);
-      return; /* raced with another lookup; first entry wins */
-    }
-  }
-  if (c->notes_n == c->notes_cap) {
-    size_t cap = c->notes_cap ? c->notes_cap * 2 : 8;
-    asngn_tool_note *grown =
-        (asngn_tool_note *)realloc(c->notes, cap * sizeof(*grown));
-    if (!grown) {
-      os_mutex_unlock(&c->sib_mu);
-      return;
-    }
-    c->notes = grown;
-    c->notes_cap = cap;
-  }
-  c->notes[c->notes_n++] = *note;
-  os_mutex_unlock(&c->sib_mu);
-}
-
 asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
                                      const char *cmd, asngn_tool_note *out) {
   char *text = NULL;
@@ -457,17 +351,6 @@ asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
   memset(out, 0, sizeof(*out));
   if (!c->astools_ok)
     return asngn_seterr(c, ASNGN_ERR_UNSUPPORTED, "astools disabled");
-
-  os_mutex_lock(&c->sib_mu);
-  for (i = 0; i < c->notes_n; i++) {
-    if (strcmp(c->notes[i].ref, ref) == 0 &&
-        strcmp(c->notes[i].cmd, cmd) == 0) {
-      *out = c->notes[i];
-      os_mutex_unlock(&c->sib_mu);
-      return ASNGN_OK;
-    }
-  }
-  os_mutex_unlock(&c->sib_mu);
 
   ae = astools_tool_manifest(c->astools, ref, &text);
   if (ae != ASTOOLS_OK)
@@ -551,7 +434,6 @@ asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
     return e;
   }
 
-  sib_note_remember(c, &note);
   *out = note;
   return ASNGN_OK;
 }

@@ -58,16 +58,14 @@ static asmodel_json_value *variant(const char *action, const char *tool,
   return v;
 }
 
-asngn_err asngn_protocol_steps(asngn_ctx *c, bool call, bool recall,
-    bool think, size_t blobs, bool draft, char **out) {
+asngn_err asngn_protocol_steps(const char *schemas, bool call, bool recall,
+    bool think, bool discover, size_t blobs, bool draft, char **out) {
   asmodel_json_value *root = asmodel_json_object(), *variants = asmodel_json_array(), *commands = NULL;
-  char *text = NULL;
   int bad = 0;
-  if (!out || (call && !c)) { asmodel_json_free(root); asmodel_json_free(variants); return ASNGN_ERR_INVALID; }
+  if (!out || (call && !schemas)) { asmodel_json_free(root); asmodel_json_free(variants); return ASNGN_ERR_INVALID; }
   *out = NULL;
   if (call) {
-    if (!c->astools || astools_command_schemas(c->astools, &text) != ASTOOLS_OK ||
-        asmodel_json_parse(text, strlen(text), &commands)) bad = 1;
+    if (asmodel_json_parse(schemas, strlen(schemas), &commands)) bad = 1;
     for (size_t i = 0; !bad && i < asmodel_json_array_len(commands); i++) {
       const asmodel_json_value *cmd = asmodel_json_array_at(commands, i);
       const char *tool = asmodel_json_string_value(asmodel_json_object_get(cmd, "tool"));
@@ -78,6 +76,7 @@ asngn_err asngn_protocol_steps(asngn_ctx *c, bool call, bool recall,
           asmodel_json_object_get(cmd, "arguments"), 0, draft && !strcmp(tool, "fs.write")));
     }
   }
+  if (discover) bad |= asmodel_json_array_push(variants, variant("discover", NULL, NULL, 0, 0));
   if (recall) bad |= asmodel_json_array_push(variants, variant("recall", NULL, NULL, 0, 0));
   if (blobs) bad |= asmodel_json_array_push(variants, variant("open", NULL, NULL, blobs, 0));
   if (think) bad |= asmodel_json_array_push(variants, variant("think", NULL, NULL, 0, 0));
@@ -85,7 +84,7 @@ asngn_err asngn_protocol_steps(asngn_ctx *c, bool call, bool recall,
   bad |= asmodel_json_array_push(variants, variant("answer", NULL, NULL, 0, 0));
   bad |= asmodel_json_object_set(root, "oneOf", variants);
   if (!bad) *out = asmodel_json_write(root, 0);
-  asmodel_json_free(root); asmodel_json_free(commands); astools_free(text);
+  asmodel_json_free(root); asmodel_json_free(commands);
   return *out ? ASNGN_OK : ASNGN_ERR_PROTOCOL;
 }
 

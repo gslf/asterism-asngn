@@ -121,7 +121,7 @@ static asngn_err graft_astools(asngn_buf *b, const char *gbnf) {
 /* ---- step grammar ------------------------------------- */
 
 asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
-                               bool with_think, size_t blobs_n,
+                               bool with_think, bool discover, size_t blobs_n,
                                const char *astools_gbnf, char **out) {
   asngn_buf b;
   asngn_err e = ASNGN_OK;
@@ -138,6 +138,7 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
   if (e == ASNGN_OK) e = asngn_buf_appends(&b, "root      ::= step \"\\n\"\n");
   if (e == ASNGN_OK) e = asngn_buf_appends(&b, "step      ::= ");
   if (e == ASNGN_OK && call_on) e = asngn_buf_appends(&b, "call | ");
+  if (e == ASNGN_OK && discover) e = asngn_buf_appends(&b, "discover | ");
   if (e == ASNGN_OK && with_recall) e = asngn_buf_appends(&b, "recall | ");
   if (e == ASNGN_OK && open_on) e = asngn_buf_appends(&b, "open | ");
   if (e == ASNGN_OK && with_think) e = asngn_buf_appends(&b, "think | ");
@@ -154,6 +155,11 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
                           "\\\"\" meta \"\\\", input: \\\"\" text "
                           "\"\\\", success: \\\"\" meta \"\\\", fallback: "
                           "\\\"\" meta \"\\\"}\"\n");
+  if (e == ASNGN_OK && discover)
+    e = asngn_buf_appends(&b,
+                          "discover  ::= \"{action: \\\"discover\\\", why: "
+                          "\\\"\" meta \"\\\", input: \\\"\" text "
+                          "\"\\\"}\"\n");
   if (e == ASNGN_OK && open_on)
     e = asngn_buf_appends(&b,
                           "open      ::= \"{action: \\\"open\\\", why: "

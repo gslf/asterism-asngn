@@ -32,6 +32,8 @@
 
 struct asper_ctx;
 struct astools_ctx;
+struct astools_selection;
+struct astools_result_s;
 
 /* ── growable buffer (util.c) ─────────────────────────────────────────── */
 
@@ -210,8 +212,6 @@ typedef enum { ASNGN_JUDGE_OFF = 0, ASNGN_JUDGE_LIGHT,
 typedef enum { ASNGN_CONFIRM_PROMPT = 0, ASNGN_CONFIRM_DENY,
                ASNGN_CONFIRM_ALLOW } asngn_confirm_mode;
 typedef enum { ASNGN_SCOPE_SESSION = 0, ASNGN_SCOPE_GLOBAL } asngn_cache_scope;
-typedef enum { ASNGN_CATALOG_INDEX = 0, ASNGN_CATALOG_SUMMARY,
-               ASNGN_CATALOG_FULL } asngn_catalog_level;
 typedef enum { ASNGN_PROFILE_GENERAL = 0, ASNGN_PROFILE_CODING }
     asngn_profile;
 typedef enum { ASNGN_THEME_ASTERISM = 0, ASNGN_THEME_PLAIN } asngn_theme;
@@ -312,8 +312,7 @@ typedef struct {
   char *asper_root, *asper_config;   /* owned; root relative to engine root */
   bool astools_enable;
   char *astools_root, *astools_workspace, *astools_config;
-  asngn_catalog_level catalog_level;
-  int catalog_chars;
+  int tool_limit, tool_schema_bytes;
   /* mcp */
   asngn_confirm_mode mcp_autoconfirm;
 } asngn_config;
@@ -850,7 +849,7 @@ double asngn_session_qpt(const asngn_session *s);
 #define ASNGN_STEP_TEXT_MAX 2048
 #define ASNGN_STEP_META_MAX 512
 
-typedef enum { ASNGN_STEP_CALL = 0, ASNGN_STEP_RECALL, ASNGN_STEP_OPEN,
+typedef enum { ASNGN_STEP_CALL = 0, ASNGN_STEP_RECALL, ASNGN_STEP_DISCOVER, ASNGN_STEP_OPEN,
                ASNGN_STEP_THINK, ASNGN_STEP_CLARIFY,
                ASNGN_STEP_ANSWER } asngn_step_kind;
 const char *asngn_step_name(asngn_step_kind k);
@@ -876,10 +875,10 @@ asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out);
  * with_call/with_recall reflect sibling availability and turn options;
  * with_think supports the one-pass consecutive-thinking guard. */
 asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
-                              bool with_think, size_t blobs_n,
+                              bool with_think, bool discover, size_t blobs_n,
                               const char *astools_gbnf, char **out);
-asngn_err asngn_protocol_steps(asngn_ctx *c, bool call, bool recall, bool think,
-    size_t blobs, bool draft, char **out);
+asngn_err asngn_protocol_steps(const char *schemas, bool call, bool recall, bool think,
+    bool discover, size_t blobs, bool draft, char **out);
 const char *asngn_protocol_scalar_schema(asngn_task_kind kind);
 asngn_err asngn_protocol_decode(asngn_task_kind kind, const char *schema, char **text);
 
@@ -920,10 +919,7 @@ typedef struct {
 
 asngn_err asngn_siblings_open(asngn_ctx *c);
 void      asngn_siblings_close(asngn_ctx *c);
-/* Cached astools catalog + exported grammar; refreshed per turn. */
-asngn_err asngn_siblings_catalog(asngn_ctx *c, char **out_text);
-asngn_err asngn_siblings_grammar(asngn_ctx *c, char **out_gbnf);
-/* Annotation lookup: parses (and caches) the tool manifest. */
+/* Annotation lookup for output filtering; no mutable metadata cache. */
 asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
                                      const char *cmd, asngn_tool_note *out);
 asngn_err asngn_siblings_recall(asngn_ctx *c, const char *question,
@@ -1019,9 +1015,9 @@ typedef struct asngn_turn_state {
   /* working zone */
   asngn_work_item *work;
   size_t         work_n, work_cap;
-  /* catalog + grammar snapshots (owned) */
+  /* One command snapshot owns every tool representation and identity. */
+  struct astools_selection *tool_selection;
   char          *catalog;
-  char          *astools_gbnf;
   asngn_turn_phase phase;
   /* step accounting + guards */
   int            steps, tool_calls, thinks_row, thinks_total;
@@ -1063,6 +1059,11 @@ typedef struct asngn_turn_state {
   asngn_usage_mode usage_mode;
   asngn_security_profile security_profile;
 } asngn_turn_state;
+
+asngn_err asngn_tools_select(asngn_ctx *c, asngn_turn_state *t, const char *intent);
+int asngn_tools_find(asngn_turn_state *t, const char *ref, const char *command);
+int asngn_tools_invoke(asngn_turn_state *t, const char *tool, const char *args,
+    uint32_t deadline_ms, struct astools_result_s *out);
 
 /* Revalidate immediately before consuming a proof; false includes scan failure. */
 bool asngn_verification_current(asngn_turn_state *t);
@@ -1178,10 +1179,6 @@ struct asngn_ctx {
   struct astools_ctx *astools;
   bool          asper_ok, astools_ok;
   char         *astools_workspace_active; /* canonical root, owned      */
-  char         *astools_catalog;   /* cached, owned                  */
-  char         *astools_grammar;   /* cached, owned                  */
-  asngn_tool_note *notes;          /* annotation cache               */
-  size_t        notes_n, notes_cap;
   os_mutex      sib_mu;
 
   /* caches */

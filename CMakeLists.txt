@@ -182,6 +182,7 @@ set(ASNGN_SOURCES
   src/work_api.c
   src/work_observe.c
   src/loop.c
+  src/tools.c
   src/safety.c
   src/redact.c
   src/judge.c

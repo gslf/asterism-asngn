@@ -7,13 +7,12 @@
  * Locking protocol:
  *   - c->lock      rwlock: sessions table, stats, budgets.
  *   - s->lock      rwlock: one per session (transcript, summary, pins).
- *   - c->models_mu registry mutex for the model pool; each slot has its
- *                  own mutex, taken while a call runs on that instance.
+ *   - asmodel owns model residency and per-provider serialization.
  *   - c->cache_mu  rwlock for the semantic + tool caches.
  *   - c->tele_mu   telemetry ring; never held while taking other locks.
  *   - c->log_mu, c->err_mu as in the siblings.
  *   Registry lock is released before taking session locks. Commit accounting
- *   may take c->lock under s->lock; cache_mu precedes models_mu. tele_mu/log_mu
+ *   may take c->lock under s->lock; Model provider serialization belongs to asmodel. tele_mu/log_mu
  *   are leaves.
  *
  * MIT License — per aspera ad astra.
@@ -378,11 +377,8 @@ typedef struct asngn_model_iface {
 
 typedef struct {
   asngn_pool_entry  cfg;      /* copy of the pool entry                  */
-  asngn_model_iface iface;    /* valid when state == LOADED or injected  */
+  asngn_model_iface iface;    /* only injected test providers */
   bool              injected; /* fake provided at open; never unloaded   */
-  bool              loaded;
-  int64_t           last_used_ms;
-  os_mutex          mu;       /* held while a call runs on the instance  */
 } asngn_model_slot;
 
 typedef enum { ASNGN_ROLE_ROUTER = 0, ASNGN_ROLE_PLANNER, ASNGN_ROLE_GENERATOR,
@@ -1163,9 +1159,8 @@ struct asngn_ctx {
   asngn_model_slot models[ASNGN_MAX_POOL];
   size_t        models_n;
   int           role_slot[ASNGN_ROLE_COUNT];
-  os_mutex      models_mu;
   asmodel_manager *shared_models;
-  void *model_aux;
+  uint8_t embedding_hash[32]; /* immutable after open; copied into lanes */
 
   /* siblings */
   struct asper_ctx   *asper;

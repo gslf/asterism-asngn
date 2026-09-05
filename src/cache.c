@@ -12,7 +12,7 @@
  *   - Probes take the WRITE lock: a probe may lazily re-embed entries
  *     (mutating entry->vec) and mutates hit_count/last_hit on a hit.
  *   - Plan hints and counts take the READ lock (no mutation).
- *   - The lock order permits cache_mu -> models_mu, so embedding calls
+ *   - The lock order permits cache_mu -> asmodel provider lock, so embedding calls
  *     are legal under the cache lock.
  *   - init and shutdown run single-threaded (the asngn_open/close
  *     contract) and touch the array without contention.

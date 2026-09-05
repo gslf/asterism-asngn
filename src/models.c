@@ -6,20 +6,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* ---- per-context auxiliary state ---------------------------------------- */
-/* Per-context residency counters and embedding identity. Guarded by models_mu. */
-
-typedef struct {
-  uint8_t    embed_hash[32];      /* sha256 of embedder weights (or 0)  */
-} models_aux;
-
-static models_aux *aux_find(asngn_ctx *c) { return c ? c->model_aux : NULL; }
-static models_aux *aux_claim(asngn_ctx *c) {
-  if (!c->model_aux) c->model_aux=calloc(1,sizeof(models_aux));
-  return c->model_aux;
-}
-static void aux_release(asngn_ctx *c) { free(c->model_aux);c->model_aux=NULL; }
-
 /* ---- names -------------------------------------------------------------- */
 
 const char *asngn_role_name(asngn_role r) {
@@ -65,7 +51,6 @@ static const asngn_sampling *task_sampling(const asngn_config *cfg,
 /* ---- lifecycle ---------------------------------------------------------- */
 
 asngn_err asngn_models_init(asngn_ctx *c) {
-  models_aux *aux;
   size_t i;
   int r;
 
@@ -84,30 +69,7 @@ asngn_err asngn_models_init(asngn_ctx *c) {
     s->injected = injected;
     if (injected) s->iface = saved;
 
-    s->cfg = *src;
-    s->cfg.path = asngn_strdup(src->path); /* slot owns its copy */
-    s->cfg.base_url = src->base_url ? asngn_strdup(src->base_url) : NULL;
-    s->cfg.remote_model = src->remote_model ? asngn_strdup(src->remote_model) : NULL;
-    s->cfg.api_key_env = src->api_key_env ? asngn_strdup(src->api_key_env) : NULL;
-    if ((src->path != NULL && s->cfg.path == NULL) ||
-        (src->base_url && !s->cfg.base_url) ||
-        (src->remote_model && !s->cfg.remote_model) ||
-        (src->api_key_env && !s->cfg.api_key_env)) {
-      size_t j;
-      free(s->cfg.path); free(s->cfg.base_url); free(s->cfg.remote_model);
-      free(s->cfg.api_key_env);
-      for (j = 0; j < i; j++) {
-        free(c->models[j].cfg.path);
-        free(c->models[j].cfg.base_url);
-        free(c->models[j].cfg.remote_model);
-        free(c->models[j].cfg.api_key_env);
-        c->models[j].cfg.path = NULL;
-        os_mutex_destroy(&c->models[j].mu);
-      }
-      c->models_n = 0;
-      return asngn_seterr(c, ASNGN_ERR_NOMEM, "out of memory");
-    }
-    os_mutex_init(&s->mu);
+    s->cfg = *src; /* Configuration strings are immutable and outlive the lanes. */
     if (s->cfg.backend == ASMODEL_BACKEND_EMBEDDED &&
         s->cfg.ram_mb == 0 && s->cfg.path && s->cfg.path[0]) {
       uint64_t bytes = 0;
@@ -143,11 +105,8 @@ asngn_err asngn_models_init(asngn_ctx *c) {
     }
   }
 
-  aux = aux_claim(c);
-  if (aux == NULL) {
-    asngn_log(c, ASNGN_LOG_WARN, "model",
-              "model aux table exhausted; LRU unloading disabled for this "
-              "context");
+  if (c->owner) {
+    memcpy(c->embedding_hash, c->owner->embedding_hash, 32);
     return ASNGN_OK;
   }
 
@@ -159,7 +118,7 @@ asngn_err asngn_models_init(asngn_ctx *c) {
     if (es >= 0) {
       asngn_model_slot *s = &c->models[es];
       if (s->injected) {
-        memset(aux->embed_hash, 0x11, sizeof aux->embed_hash);
+        memset(c->embedding_hash, 0x11, sizeof c->embedding_hash);
       } else if (s->cfg.backend == ASMODEL_BACKEND_OPENAI) {
         asngn_sha256_ctx sh;
         asngn_sha256_init(&sh);
@@ -168,10 +127,10 @@ asngn_err asngn_models_init(asngn_ctx *c) {
         if (s->cfg.remote_model)
           asngn_sha256_update(&sh, s->cfg.remote_model,
                               strlen(s->cfg.remote_model));
-        asngn_sha256_final(&sh, aux->embed_hash);
+        asngn_sha256_final(&sh, c->embedding_hash);
       } else if (s->cfg.path != NULL && s->cfg.path[0] != '\0') {
-        if (asngn_sha256_file(s->cfg.path, aux->embed_hash) != ASNGN_OK) {
-          memset(aux->embed_hash, 0, sizeof aux->embed_hash);
+        if (asngn_sha256_file(s->cfg.path, c->embedding_hash) != ASNGN_OK) {
+          memset(c->embedding_hash, 0, sizeof c->embedding_hash);
           asngn_log(c, ASNGN_LOG_WARN, "model",
                     "cannot hash embedder weights '%s'", s->cfg.path);
         }
@@ -186,20 +145,13 @@ void asngn_models_shutdown(asngn_ctx *c) {
   if (c == NULL) return;
   for (i = 0; i < c->models_n; i++) {
     asngn_model_slot *s = &c->models[i];
-    if ((s->loaded || s->injected) && s->iface.destroy != NULL)
+    if (s->injected && s->iface.destroy != NULL)
       s->iface.destroy(s->iface.ud); /* fakes carry no-op destroys */
     memset(&s->iface, 0, sizeof s->iface);
-    s->loaded = false;
     s->injected = false;
-    os_mutex_destroy(&s->mu);
-    free(s->cfg.path);
-    free(s->cfg.base_url);
-    free(s->cfg.remote_model);
-    free(s->cfg.api_key_env);
-    s->cfg.path = NULL;
   }
   c->models_n = 0;
-  aux_release(c);
+
 }
 
 /* ---- lookups ------------------------------------------------------------ */
@@ -307,11 +259,6 @@ int asngn_models_embed_dim(asngn_ctx *c) {
 }
 
 void asngn_models_embed_hash(asngn_ctx *c, uint8_t out[32]) {
-  models_aux *aux;
-  memset(out, 0, 32);
-  if (c == NULL) return;
-  os_mutex_lock(&c->models_mu);
-  aux = aux_find(c);
-  if (aux != NULL) memcpy(out, aux->embed_hash, 32);
-  os_mutex_unlock(&c->models_mu);
+  if (c) memcpy(out, c->embedding_hash, 32);
+  else memset(out, 0, 32);
 }

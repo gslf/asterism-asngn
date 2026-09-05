@@ -132,7 +132,6 @@ static void ctx_locks_init(asngn_ctx *c) {
   os_mutex_init(&c->err_mu);
   os_mutex_init(&c->log_mu);
   os_mutex_init(&c->tele_mu);
-  os_mutex_init(&c->models_mu);
   os_mutex_init(&c->sib_mu);
   os_rwlock_init(&c->cache_mu);
   os_mutex_init(&c->q_mu);
@@ -148,7 +147,6 @@ static void ctx_locks_destroy(asngn_ctx *c) {
   os_mutex_destroy(&c->q_mu);
   os_rwlock_destroy(&c->cache_mu);
   os_mutex_destroy(&c->sib_mu);
-  os_mutex_destroy(&c->models_mu);
   os_mutex_destroy(&c->tele_mu);
   os_mutex_destroy(&c->log_mu);
   os_mutex_destroy(&c->err_mu);
@@ -293,7 +291,6 @@ asngn_err asngn_open_with(const asngn_open_params *p,
           strcmp(fake_ids[f], c->cfg.pool[i].id) == 0) {
         c->models[i].iface = fakes[f];
         c->models[i].injected = true;
-        c->models[i].loaded = true;
       }
     }
   }

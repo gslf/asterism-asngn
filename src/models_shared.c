@@ -92,6 +92,7 @@ static int embed(void *ud, const char *text, int is_query, float *out) {
   backend *b = ud;
   asngn_operation op;
   int n = b->iface.count_tokens ? b->iface.count_tokens(b->iface.ud, text) : asngn_token_heuristic(text);
+  if (n < 0) n = asngn_token_heuristic(text);
   asngn_err e = asngn_operation_begin(b->ctx, b->id, is_query ? "embed-query" : "embed-document", n, &op);
   if (e != ASNGN_OK) return model_error(e);
   e = b->iface.embed(b->iface.ud, text, is_query, out);

@@ -10,11 +10,11 @@ astools efa6d22. Local source changes are included in the tested builds.
 | Milestone | Work items | Implemented and tested | Remaining gate |
 |---|---|---|---|
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
-| 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone builds, explicit token uncertainty, durable operation reservations | Clean release reconstruction, published pins, calibrated remote tokenizer margins |
-| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, I/O fault tests | Incremental snapshots, durable approval recovery, standalone sibling locks, compaction/migration, cross-process workspace coordination |
-| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, elapsed queue time charged to deadline | Typed message/constraint IR, interruptible queue waits, native sequence batching, embedding pipeline identity/batch/deadline, real provider conformance |
+| 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
+| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, I/O fault tests | Incremental snapshots, durable approval recovery, compaction/migration, cross-process workspace coordination |
+| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queue waits and remaining deadlines | Typed message/constraint IR, native sequence batching, embedding pipeline identity/batch/deadline, real provider conformance |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, acceptance graph and independently validated task success |
-| 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), exact-event cursor search | Persistent index, granular support/contradiction/revocation, dependency validity, retention/export/delete, owner authorization |
+| 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store | Inverted text index, granular support/contradiction/revocation, dependency validity, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results | Durable resume, approvals, persistent processes, policy-consistent discovery, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, accurate build/accounting documentation | ACP, SDKs, MCP client, signed packages, editor flows and external user trials |
@@ -62,6 +62,11 @@ trials require actual resources. No real-model result has been produced here.
   changed files and before/after versions. Rechecks precede replacement; rollback
   preserves intervening external edits. This is optimistic conflict detection,
   not atomic compare-and-swap against arbitrary editors.
+- Asper stores AEV2 frames with separate metadata/payload checksums and bounded
+  event/log sizes. Cursor pages use a rebuildable offset index and one temporary
+  frame; literal search can still scan the remaining tail. Full-list callers
+  allocate the full result. A page validates returned events, not unrelated
+  earlier frames. Existing AEV1 logs are not silently migrated.
 - Response cache keys include conversation, objective, active file, prompt,
   security profile and current workspace. Response reuse is disabled while Asper
   is active because a verifiable memory revision is not yet available.
@@ -75,7 +80,7 @@ trials require actual resources. No real-model result has been produced here.
 
 - Integrated no-llama suite: 30/30 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 30/30 passed.
-- Standalone Asper: 22/22; astools: 24/24; asmodel: 2/2.
+- Standalone Asper: 22/22; astools: 24/24; asmodel: 3/3.
 - Five oracle regressions passed: changed original tests rejected, cosmetic patch
   still fails, real recursive repair passes, new tests cannot disable originals,
   arbitrary startup code additions rejected.
@@ -84,6 +89,10 @@ trials require actual resources. No real-model result has been produced here.
 - Actual `project.test` integration exercised a CTest suite that ran, a disabled
   suite and an empty suite. This exposed and fixed multiline JUnit parsing that
   the initial synthetic test did not cover.
+- Clean local clones of all four repositories built and passed all four suites,
+  including the integrated TUI. Pins are local commits; publication is not claimed.
+- Exact memory tests cover deleted/corrupt offset indices, late cursor pages,
+  payload corruption and altered lengths that must not trigger truncation.
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.
@@ -96,8 +105,8 @@ behavior have not been validated by these Linux no-llama runs.
 
 ## Next implementation order
 
-1. Reconstruct/build the exact local release, then finish interruptible model
-   requests and the typed protocol before extending adapters.
+1. Finish the typed protocol and embedding request contract before extending
+   provider adapters. Native loader interruption remains backend-dependent.
 2. Add persistent task acceptance state and evidence dependencies; then memory
    validity/revocation and indexed history.
 3. Add discovery, resumable approvals, controlled processes and editor protocols.

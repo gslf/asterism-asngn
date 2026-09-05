@@ -1,6 +1,7 @@
 /* Bounded event retention. Cursor gaps are explicit; polling never waits for
  * an entire turn, and only the main thread writes JSON-RPC responses. */
 #include "tasks.h"
+#include "work.h"
 #include "os.h"
 #include <stdlib.h>
 #include <string.h>
@@ -9,6 +10,7 @@
 
 struct mcp_job {
   asngn_task *task;
+  asngn_session *session;
   asngn_turn_result result;
   asngn_err outcome;
   int done;
@@ -41,6 +43,7 @@ asngn_err mcp_job_submit(asngn_session *session, const char *message, mcp_job **
   asngn_err e;
   *out = NULL;
   if (!j) return ASNGN_ERR_NOMEM;
+  j->session = session;
   os_mutex_init(&j->mu);
   e = asngn_submit_stream(session, message, NULL, event, j, &j->task);
   if (e != ASNGN_OK) { os_mutex_destroy(&j->mu); free(j); return e; }
@@ -81,7 +84,7 @@ asngn_err mcp_job_poll(mcp_job *j, unsigned long long cursor, jx_value **out) {
   if (j->done) {
     ok &= jx_object_set(o, "outcome", jx_string(asngn_err_name(j->outcome))) == 0;
     ok &= jx_object_set(o, "answer", jx_string(j->result.answer ? j->result.answer : "")) == 0;
-    ok &= jx_object_set(o, "task_state", jx_string("unconfirmed")) == 0;
+    ok &= mcp_work_status(j->session,asngn_task_work_revision(j->task),o) == ASNGN_OK;
   }
   if (!ok) { jx_free(o); return ASNGN_ERR_NOMEM; }
   *out = o;
@@ -96,4 +99,8 @@ void mcp_job_free(mcp_job *j) {
   for (size_t i = 0; i < EVENTS; i++) free(j->events[i].text);
   os_mutex_destroy(&j->mu);
   free(j);
+}
+
+int mcp_job_uses_session(const mcp_job *job, const asngn_session *session) {
+  return job && job->session == session;
 }

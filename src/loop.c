@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "work_state.h"
 #include "asngn_internal.h"
 
 #include "astools.h"
@@ -1270,6 +1271,10 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
         !asngn_verification_command(ref, cmd, expanded_args)) {
       t->verification_attempted = false;
       t->verification_ok = false;
+      os_rwlock_wrlock(&s->lock);
+      e = asngn_work_revoke(s);
+      os_rwlock_wrunlock(&s->lock);
+      if (e != ASNGN_OK) goto out;
     }
     char proof_base[65] = "";
     if (asngn_verification_command(ref, cmd, expanded_args) &&
@@ -1279,18 +1284,22 @@ static asngn_err step_call(asngn_ctx *c, asngn_turn_state *t,
     t->tool_calls++;
     t->tools_used = true;
     if (ae == ASTOOLS_OK && r.ok) t->tool_ok_seen = true;
-    if (t->artifact_written &&
-        asngn_verification_command(ref, cmd, expanded_args)) {
+    char proof_after[65] = "";
+    if (asngn_verification_command(ref, cmd, expanded_args)) {
+      if (asngn_workspace_refresh(c) == ASNGN_OK)
+        memcpy(proof_after,c->workspace.fingerprint,sizeof proof_after);
       t->verification_attempted = true;
       t->verification_ok = ae == ASTOOLS_OK && r.ok &&
                            asngn_verification_result_ok(r.result_xcdn) &&
-                           proof_base[0] && asngn_workspace_refresh(c) == ASNGN_OK &&
-                           !strcmp(proof_base, c->workspace.fingerprint);
+                           proof_base[0] && !strcmp(proof_base, proof_after);
       memcpy(t->verification_snapshot, proof_base, sizeof proof_base);
       memcpy(t->verification_action_id, t->action_id, sizeof t->action_id);
     }
     e = asngn_turn_journal(t, "observed", r.result_xcdn ? r.result_xcdn :
                             (r.error_code ? r.error_code : "unknown outcome"));
+    if (e == ASNGN_OK)
+      e = asngn_work_observe(t,ref,cmd,exec_args,ae == ASTOOLS_OK && r.ok,
+                             r.result_xcdn,proof_base,proof_after);
     if (e != ASNGN_OK) { astools_result_free(&r); goto out; }
     {
       char lbl[132];

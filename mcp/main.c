@@ -40,6 +40,7 @@
 #include "asngn_internal.h" /* the one sanctioned internal touch; see above */
 #include "json.h"
 #include "tasks.h"
+#include "work.h"
 
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
@@ -346,6 +347,17 @@ static int state_session(server_state *st, const char *slug,
   return TOOL_OK;
 }
 
+static int tool_session_work(server_state *st, const jx_value *args,
+                             jx_value **out, const char **msg) {
+  const char *slug = NULL;
+  asngn_session *s = NULL;
+  if (arg_str(args,"session",&slug,msg) < 0) BADP("session must be a string");
+  int rc = state_session(st,slug,&s,out);
+  if (rc != TOOL_OK) return rc;
+  asngn_err e = mcp_work_request(s,args,out);
+  return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
+}
+
 static int tool_agent_submit(server_state *st, const jx_value *args,
                               jx_value **out, const char **msg) {
   const char *message = NULL, *session = NULL;
@@ -543,6 +555,9 @@ static int tool_session_delete(server_state *st, const jx_value *args,
   /* a session this server holds open must be closed first */
   for (i = 0; i < st->sessions_n; i++) {
     if (strcmp(asngn_session_slug(st->sessions[i]), slug) == 0) {
+      for (size_t j = 0; j < 32; j++)
+        if (st->jobs[j] && mcp_job_uses_session(st->jobs[j],st->sessions[i]))
+          return fail_payload(out,"ASNGN_ERR_BUSY","release session tasks before deleting the session");
       asngn_session_close(st->sessions[i]);
       memmove(&st->sessions[i], &st->sessions[i + 1],
               (st->sessions_n - i - 1) * sizeof st->sessions[0]);
@@ -899,6 +914,8 @@ typedef struct {
 } tool_def;
 
 static const tool_def TOOLS[] = {
+    {"session_work", "Read or define host acceptance criteria; revisions prevent stale updates. Only the runtime records proof.",
+     MCP_WORK_SCHEMA, tool_session_work},
     {"agent_submit", "Submit asynchronously; returns a task ID.",
      "{\"type\":\"object\",\"properties\":{\"message\":{\"type\":\"string\"},\"session\":{\"type\":\"string\"}},\"required\":[\"message\"]}", tool_agent_submit},
     {"agent_poll", "Read retained events using a cursor; gaps are explicit.",

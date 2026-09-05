@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
+#include "work_state.h"
 
 /* ── version and error names ──────────────────────────────────────────── */
 
@@ -1042,6 +1043,7 @@ static asngn_err submit_common(asngn_session *s, char *gated_msg,
                         "session %s: a turn is already running", s->slug);
   }
   s->busy = true;
+  t->work_revision = s->work ? s->work->state.revision : 0;
   s->running = task;
   t->usage_mode = s->usage_mode;
   t->security_profile = s->security_profile;
@@ -1311,4 +1313,8 @@ asngn_err asngn_session_recovery_info(asngn_session *s,
   os_rwlock_rdlock(&s->lock);*interrupted_turns=s->interrupted_turns;
   *uncertain_actions=s->uncertain_actions;os_rwlock_rdunlock(&s->lock);
   return ASNGN_OK;
+}
+
+uint64_t asngn_task_work_revision(const asngn_task *task) {
+  return task && task->turn ? task->turn->work_revision : 0;
 }

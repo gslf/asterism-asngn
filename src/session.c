@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "work_state.h"
 #include "asngn_internal.h"
 #include "xcdn.h"
 
@@ -473,6 +474,7 @@ void asngn_session_free(asngn_session *s) {
   if (s == NULL) return;
   asngn_stream_close(&s->ledger_st);
   asngn_stream_close(&s->journal_st);
+  asngn_work_free(s->work);
   for (i = 0; i < s->log_n; i++) free(s->log[i].text);
   free(s->log);
   asngn_session_clear_blobs(s);
@@ -589,6 +591,9 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
     if (e==ASNGN_OK) e=asngn_turn_recover(s);
     if (e!=ASNGN_OK) goto fail;
   }
+
+  e = asngn_work_load(s);
+  if (e != ASNGN_OK) goto fail;
 
   /* fresh manifest for brand-new sessions */
   if (!os_file_exists(mpath)) {

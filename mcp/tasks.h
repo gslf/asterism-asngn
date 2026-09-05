@@ -8,4 +8,5 @@ const char *mcp_job_id(const mcp_job *job);
 asngn_err mcp_job_poll(mcp_job *job, unsigned long long cursor, jx_value **out);
 asngn_err mcp_job_cancel(mcp_job *job);
 void mcp_job_free(mcp_job *job);
+int mcp_job_uses_session(const mcp_job *job, const asngn_session *session);
 #endif

@@ -12,6 +12,7 @@ set(ASNGN_TEST_PROGRAMS
   test_log
   test_redact
   test_verification
+  test_work
   test_steps
   test_grammar
   test_route
@@ -111,8 +112,17 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME test_quality_oracle
     COMMAND ${Python3_EXECUTABLE} -B -m unittest discover
       -s ${CMAKE_CURRENT_SOURCE_DIR}/quality -p test_oracle.py)
+  if(TARGET asngn-mcp)
+    add_test(NAME test_work_mcp
+      COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/work_smoke.py
+        $<TARGET_FILE:asngn-mcp>)
+  endif()
 endif()
 
 if(TARGET test_engine_turns)
-  target_sources(test_engine_turns PRIVATE ../mcp/tasks.c)
+  target_sources(test_engine_turns PRIVATE ../mcp/tasks.c ../mcp/work.c)
+endif()
+
+if(TARGET test_work)
+  target_sources(test_work PRIVATE ../mcp/work.c)
 endif()

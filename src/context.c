@@ -21,6 +21,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
+#include "work_state.h"
 
 void asngn_prompt_free(asngn_prompt *p) {
   if (p == NULL) return;
@@ -121,7 +122,7 @@ static asngn_err verb_render(asngn_buf *b, const asngn_turn *t) {
  * independently tokenized fragments (which is not generally additive). */
 static asngn_err working_render(asngn_buf *b, const asngn_turn_state *t,
                                 const char *instruction, size_t first,
-                                bool follows_verbatim) {
+                                bool follows_verbatim, const char *contract) {
   asngn_err e;
   size_t i;
 
@@ -132,6 +133,7 @@ static asngn_err working_render(asngn_buf *b, const asngn_turn_state *t,
     if (e == ASNGN_OK) e = asngn_buf_appends(b, t->user_msg);
     if (e == ASNGN_OK) e = asngn_buf_appendc(b, '\n');
   }
+  if (e == ASNGN_OK && contract) e = asngn_buf_appends(b,contract);
   if (e == ASNGN_OK && t != NULL) {
     for (i = first; i < t->work_n && e == ASNGN_OK; i++) {
       e = asngn_buf_appends(b, t->work[i].text);
@@ -243,7 +245,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
                                  const char *base_override,
                                  const char *instruction, int count_slot,
                                  asngn_prompt *out) {
-  asngn_buf sys, usr;
+  asngn_buf sys, usr, contract;
   asngn_err e = ASNGN_OK;
   const char *base = base_override != NULL
                          ? base_override
@@ -256,6 +258,9 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   memset(out, 0, sizeof *out);
   asngn_buf_init(&sys);
   asngn_buf_init(&usr);
+  asngn_buf_init(&contract);
+  e = asngn_work_render(s,&contract);
+  if (e != ASNGN_OK) goto fail;
 
   /* Asper owns every persistent/historical memory zone. */
   if (c->asper_ok && s != NULL && t != NULL) {
@@ -314,7 +319,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
     size_t rendered_tokens = 0;
     for (;;) {
       asngn_buf_init(&work);
-      e = working_render(&work, t, instruction, first, usr.len > 0);
+      e = working_render(&work, t, instruction, first, usr.len > 0, contract.data);
       if (e != ASNGN_OK) break;
       rendered_tokens = zone_tokens(c, count_slot, work.data);
       if (rendered_tokens <= (size_t)c->cfg.working_tokens || t == NULL ||
@@ -347,6 +352,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s,
   free(verb_text);
   asngn_buf_free(&sys);
   asngn_buf_free(&usr);
+  asngn_buf_free(&contract);
   if (out->system_text == NULL || out->user_text == NULL) {
     asngn_prompt_free(out);
     return ASNGN_ERR_NOMEM;
@@ -359,6 +365,7 @@ fail:
   free(verb_text);
   asngn_buf_free(&sys);
   asngn_buf_free(&usr);
+  asngn_buf_free(&contract);
   asngn_prompt_free(out);
   return e;
 }

@@ -17,7 +17,7 @@ ctest --test-dir build --output-on-failure
 The verifier rejects dirty source or mismatched public headers. Its explicit
 `--allow-engine-dirty` switch is only for development and reports `dirty: true`;
 that output is not a release attestation. Public struct changes require an ABI
-revision and a coordinated rebuild. asmodel/Asper ABI 3 expose runtime identifiers
+revision and a coordinated rebuild. asmodel ABI 4 and Asper ABI 3 expose runtime identifiers
 checked by the host. Header hashes detect API drift within the pinned combination;
 they are not a universal binary compatibility proof.
 

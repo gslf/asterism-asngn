@@ -177,6 +177,11 @@ set(ASNGN_SOURCES
   src/json.c
   src/steps.c
   src/verification.c
+  src/work_definition.c
+  src/work_codec.c
+  src/work_store.c
+  src/work_api.c
+  src/work_observe.c
   src/loop.c
   src/safety.c
   src/redact.c
@@ -287,7 +292,7 @@ endif()
 
 # ── asngn-mcp ───────────────────────────────────────────────────────────────
 if(ASNGN_BUILD_MCP)
-  add_executable(asngn-mcp mcp/main.c mcp/tasks.c)
+  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c)
   target_include_directories(asngn-mcp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

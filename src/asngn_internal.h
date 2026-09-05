@@ -473,6 +473,7 @@ struct asngn_session {
   os_rwlock   lock;
   char *active_file, *objective;
   void *code_index;
+  struct asngn_work_store *work;
   /* manifest */
   asngn_time  created_at;
   size_t      turns;        /* committed turn pairs counter          */
@@ -1004,6 +1005,7 @@ typedef struct asngn_turn_state {
   volatile int   cancel;
   int64_t        deadline_mono; /* mono ms                           */
   char           span_root[37];
+  uint64_t       work_revision; /* acceptance definition at admission */
   size_t         log_before, turns_before;
   bool           tx_started, tx_committed, action_mutates;
   /* route */

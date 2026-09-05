@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
+#include "work_state.h"
 #include "xcdn.h"
 
 /* Compact when pending touch records exceed this many. */
@@ -105,9 +106,10 @@ static bool dependencies(asngn_ctx *c, asngn_session *s, char out[65]) {
   uint8_t digest[32];
   asngn_workspace_info w = s->workspace;
   out[0] = 0;
-  /* Until memory exposes a revision token, its mutable context cannot be
-   * proven equivalent. Evidence and tool-plan caches remain independent. */
-  if (c->asper_ok || asngn_workspace_info_refresh(c, &w) != ASNGN_OK) return false;
+  /* Dynamic memory and acceptance state cannot yet certify response reuse.
+   * Evidence and tool-plan caches remain independent. */
+  if (c->asper_ok || (s->work && s->work->state.revision) ||
+      asngn_workspace_info_refresh(c, &w) != ASNGN_OK) return false;
   asngn_sha256_init(&h);
   const char *fields[] = {w.fingerprint, c->cfg.base_prompt, s->objective, s->active_file};
   for (size_t i = 0; i < sizeof fields / sizeof fields[0]; i++) {

@@ -213,6 +213,8 @@ typedef struct {
 
 /* Transaction UUID is allocated at admission; borrowed until task_free. */
 const char *asngn_task_id(const asngn_task *task);
+/* Acceptance revision captured atomically with turn admission; zero if absent. */
+uint64_t asngn_task_work_revision(const asngn_task *task);
 
 /* Interrupted intents remain in the WAL. Actions may have changed external
  * state and are never replayed automatically. Counts reflect the last open. */
@@ -223,6 +225,51 @@ asngn_err asngn_session_recovery_info(asngn_session *s,
  * Set before submit. NULL clears a field; BUSY while a turn is accepted. */
 asngn_err asngn_session_retrieval_context(asngn_session *s,
     const char *active_file, const char *objective);
+
+/* Host-owned acceptance contract. Criteria are topologically ordered: each
+ * depends_on bit refers to an earlier array index. A model cannot submit proof.
+ * Labels describe requirements; goal is a display title. Changing constraints
+ * revokes all proof, changing a criterion revokes it and its dependants. */
+#define ASNGN_WORK_CRITERIA_MAX 16
+typedef struct {
+  char id[33], requirement[257];
+  char command[16];              /* build | test | lint | diagnostics */
+  char path[257];                /* canonical relative directory, or "." */
+  char adapter[16];              /* auto | cmake | cargo | npm | python */
+  uint32_t depends_on;
+} asngn_work_criterion;
+typedef struct {
+  char goal[513], constraints[513];
+  size_t count;                 /* 1..ASNGN_WORK_CRITERIA_MAX */
+  asngn_work_criterion criteria[ASNGN_WORK_CRITERIA_MAX];
+} asngn_work_definition;
+typedef enum {
+  ASNGN_PROOF_NOT_RUN = 0, ASNGN_PROOF_PASSED, ASNGN_PROOF_FAILED,
+  ASNGN_PROOF_INCONCLUSIVE, ASNGN_PROOF_INFRASTRUCTURE_ERROR,
+  ASNGN_PROOF_STALE, ASNGN_PROOF_BLOCKED
+} asngn_proof_status;
+typedef struct {
+  asngn_proof_status status;
+  char action_id[37], snapshot[65], receipt_sha256[65];
+} asngn_work_proof;
+typedef struct {
+  uint64_t revision, sequence;
+  asngn_work_definition definition;
+  asngn_work_proof proofs[ASNGN_WORK_CRITERIA_MAX];
+  int succeeded;                /* all declared criteria passed on current files */
+} asngn_work_state;
+const char *asngn_proof_status_name(asngn_proof_status status);
+/* Optimistic definition update; expected_revision=0 creates the first contract.
+ * BUSY during an accepted turn or if the revision changed. No implicit success
+ * is inferred when no contract exists. Evidence covers the full workspace;
+ * toolchain/environment changes require explicit invalidation by the host. */
+asngn_err asngn_session_work_define(asngn_session *s, uint64_t expected_revision,
+                                    const asngn_work_definition *definition);
+asngn_err asngn_session_work_invalidate(asngn_session *s, uint64_t expected_revision);
+/* Fresh snapshot and dependency validation on every read. NOT_FOUND without a
+ * contract. *out is allocated; release with asngn_free. This is a point-in-time
+ * view of the declared checks, not a guarantee of complete test coverage. */
+asngn_err asngn_session_work_get(asngn_session *s, asngn_work_state **out);
 
 /* REASONING is a short, redacted rationale from a validated action. */
 typedef void (*asngn_stream_fn)(const asngn_stream_event *event, void *ud);

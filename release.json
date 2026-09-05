@@ -5,7 +5,7 @@
       "repository": "gslf/asterism-asngn",
       "revision": "checkout",
       "headers": {
-        "include/asngn.h": "ddb6cb620c14c6440cf8eb4f9631fcd3f090790acc872493102c4bc69d08e539"
+        "include/asngn.h": "d4ff02be1dfa90b931fc656ea3bb23fb9acca3cc889b05f13464bf56f8b829a2"
       }
     },
     "asper": {

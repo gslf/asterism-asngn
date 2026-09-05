@@ -84,6 +84,14 @@ TEST(asynchronous_events_resume_from_cursor) {
   mcp_job *job = NULL;
   jx_value *response = NULL;
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  asngn_work_definition work = {0};
+  strcpy(work.goal,"Fix the regression");
+  work.count = 1;
+  strcpy(work.criteria[0].id,"regression");
+  strcpy(work.criteria[0].requirement,"The regression suite must run");
+  strcpy(work.criteria[0].command,"test");
+  strcpy(work.criteria[0].path,"."); strcpy(work.criteria[0].adapter,"cmake");
+  ASSERT_OK(asngn_session_work_define(f.s,0,&work));
   ASSERT_TRUE(fake_model_push(&f.nano, "CLASS SIMPLE | DETAIL TERSE | MODE DIRECT\n"));
   ASSERT_TRUE(fake_model_push(&f.light, "Hello asynchronously!\n"));
   ASSERT_OK(mcp_job_submit(f.s, "hi", &job));
@@ -98,11 +106,27 @@ TEST(asynchronous_events_resume_from_cursor) {
     jx_free(response); response = NULL;
   }
   ASSERT_TRUE(done && cursor > 0);
+  ASSERT_CONTAINS(f.light.last_user,"Acceptance contract (revision 1)");
+  ASSERT_CONTAINS(f.light.last_user,"The regression suite must run");
   ASSERT_OK(mcp_job_poll(job, (unsigned long long)cursor, &response));
   ASSERT_EQ_INT(jx_array_len(jx_object_get(response, "events")), 0);
+  ASSERT_EQ_STR(jx_string_value(jx_object_get(response,"task_state")),"incomplete");
+  ASSERT_TRUE(mcp_job_uses_session(job,f.s));
+  jx_free(response);
+  ASSERT_OK(asngn_session_work_invalidate(f.s,1));
+  ASSERT_OK(mcp_job_poll(job,(unsigned long long)cursor,&response));
+  ASSERT_EQ_STR(jx_string_value(jx_object_get(response,"task_state")),"superseded");
   jx_free(response);
   ASSERT_ERR(mcp_job_poll(job, (unsigned long long)cursor + 1, &response), ASNGN_ERR_INVALID);
   mcp_job_free(job);
+  char slug[65]; snprintf(slug,sizeof slug,"%s",asngn_session_slug(f.s));
+  asngn_session_close(f.s); f.s = NULL;
+  ASSERT_OK(asngn_session_open(f.c,slug,&f.s));
+  asngn_work_state *reopened = NULL;
+  ASSERT_OK(asngn_session_work_get(f.s,&reopened));
+  ASSERT_EQ_INT(reopened->revision,2);
+  ASSERT_EQ_INT(reopened->succeeded,0);
+  asngn_free(reopened);
   eng_drop(&f);
 }
 

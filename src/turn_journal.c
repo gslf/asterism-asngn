@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "asngn_internal.h"
+#include "work_state.h"
 #include "xcdn.h"
 #include "asper.h"
 
@@ -155,11 +156,16 @@ asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer) {
   {
     asngn_buf cp;
     asngn_buf_init(&cp);
+    asngn_work_state work = {0};
+    if (s->work) work = s->work->state;
+    asngn_work_refresh(&work,s->workspace.fingerprint);
     e = asngn_buf_printf(
         &cp,
-        "goal: %s\nturn_state: committed\ntask_state: unconfirmed\nphase: response\nturn_id: %s\n"
+        "goal: %s\nturn_state: committed\ntask_state: %s\nwork_revision: %llu\nphase: response\nturn_id: %s\n"
         "artifact_written: %s\nverification_attempted: %s\nverification_ok: %s",
-        t->user_msg ? t->user_msg : "", t->span_root,
+        t->user_msg ? t->user_msg : "",
+        work.revision ? (work.succeeded ? "succeeded" : "incomplete") : "unconfirmed",
+        (unsigned long long)work.revision, t->span_root,
         t->artifact_written ? "true" : "false",
         t->verification_attempted ? "true" : "false",
         t->verification_ok ? "true" : "false");

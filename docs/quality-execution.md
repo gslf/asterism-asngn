@@ -14,7 +14,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, I/O fault tests | Incremental snapshots, durable approval recovery, compaction/migration, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Role/block message IR, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
-| 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store | Inverted text index, granular support/contradiction/revocation, dependency validity, retention/export/delete, owner authorization |
+| 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results | Durable resume, approvals, persistent processes, policy-consistent discovery, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, accurate build/accounting documentation | ACP, SDKs, MCP client, signed packages, editor flows and external user trials |
@@ -82,6 +82,12 @@ trials require actual resources. No real-model result has been produced here.
   frame; literal search can still scan the remaining tail. Full-list callers
   allocate the full result. A page validates returned events, not unrelated
   earlier frames. Existing AEV1 logs are not silently migrated.
+- Grounding binds claim hashes to exact event intervals and versioned dependencies.
+  Support validity propagates to derivatives; conflicts, revocations and corrections
+  remove affected memories from retrieval. Runtime observations are renewed after
+  restart. Checked history retains earlier claim text across record compaction.
+  The engine observes the session workspace before memory materialization. See
+  [Asper grounding](../../asterism-asper/docs/knowledge.md) for semantics and limits.
 - Response cache keys include conversation, objective, active file, prompt,
   security profile and current workspace. Response reuse is disabled while Asper
   is active because a verifiable memory revision is not yet available.
@@ -103,7 +109,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 32/32 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 32/32 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 32/32 passed.
-- Standalone Asper: 22/22; astools: 24/24; asmodel: 5/5.
+- Standalone Asper: 23/23; astools: 24/24; asmodel: 5/5.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -130,6 +136,11 @@ trials require actual resources. No real-model result has been produced here.
 - Exact memory tests cover deleted/corrupt offset indices, late cursor pages,
   payload corruption and altered lengths that must not trigger truncation,
   in both memory event frames and the action/consumption WAL.
+- Grounding tests cover bad UTF-8 ranges, stale hashes/revisions, support cycles,
+  partial coverage, changed dependencies, missing source events, contradictory
+  claims, revocations, history cursors, uncertain writes and complete corruption.
+  An engine fixture uses a separate checkout and confirms that a workspace edit
+  removes the stale memory from the next prompt.
 - Acceptance tests cover prerequisite order, failed prerequisites, empty/malformed
   receipts, selective definition changes, persisted revocation, external edits,
   session reopen, I/O failure and MCP revision/status transport. An integrated
@@ -147,10 +158,10 @@ behavior have not been validated by these Linux no-llama runs.
 
 ## Next implementation order
 
-1. Extend output contracts to role/block messages and finish embedding requests before extending
-   provider adapters. Native loader interruption remains backend-dependent.
+1. Complete checked record persistence and compaction, then extend output contracts
+   to role/block messages. Native loader interruption remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
-   then add memory validity/revocation and indexed history.
+   add retention/export/delete and explicit owner authorization to memory.
 3. Add discovery, resumable approvals, controlled processes and editor protocols.
 4. Run the real-model matrix with supplied configuration before admitting learned
    routing, reusable procedures, alternative patches or offline policy promotion.

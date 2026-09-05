@@ -604,6 +604,40 @@ TEST(shared_embedding_pipeline_is_authoritative) {
 }
 
 
+TEST(workspace_changes_invalidate_materialized_memory) {
+  fx f; asngn_session *session = NULL; asngn_turn_state turn = {0}; asngn_prompt prompt;
+  ASSERT_TRUE(fx_setup(&f,NULL));
+  /* Keep the engine's own journal outside the measured repository. */
+  free(f.c->cfg.astools_workspace); f.c->cfg.astools_workspace = asngn_strdup("session");
+  ASSERT_TRUE(f.c->cfg.astools_workspace != NULL); f.c->session_workspaces = true;
+  ASSERT_OK(asngn_session_open(f.c,"knowledge",&session));
+  char *path = os_path_join(session->workspace.canonical_root,"journal.c");
+  ASSERT_TRUE(path != NULL); ASSERT_OK(os_write_file(path,"version-a",9));
+  asngn_workspace_info workspace = session->workspace; ASSERT_OK(asngn_workspace_snapshot(&workspace,NULL));
+  const char *text = "journal_commit failed UNIQUE_GROUNDED_FACT"; char id[37], hash[65]; uint8_t digest[32];
+  asper_source_span source = {.sequence=1}; strcpy(source.scope,"observed");
+  source.source_end = source.claim_end = strlen(text);
+  asper_event_input event = {.scope="observed",.kind=ASPER_EVENT_TOOL_RESULT,.text=text};
+  ASSERT_EQ_INT(asper_event_append(f.c->asper,&event,source.event_id),ASPER_OK);
+  ASSERT_EQ_INT(asper_memory_insert(f.c->asper,ASPER_SECTION_CONTEXT,NULL,text,0,id),ASPER_OK);
+  asngn_sha256(text,strlen(text),digest); asngn_sha256_hex(digest,32,hash);
+  asper_dependency dep = {0}; strcpy(dep.resource,"workspace:");
+  asngn_sha256(workspace.canonical_root,strlen(workspace.canonical_root),digest);
+  asngn_sha256_hex(digest,32,dep.resource+10); strcpy(dep.version,workspace.fingerprint);
+  asper_grounding grounding = {.sources=&source,.sources_n=1,.dependencies=&dep,.dependencies_n=1};
+  ASSERT_EQ_INT(asper_memory_ground(f.c->asper,id,hash,0,&grounding),ASPER_OK);
+  turn.s = session; turn.user_msg = asngn_strdup("journal_commit");
+  int slot = asngn_models_slot_for_role(f.c,ASNGN_ROLE_GENERATOR);
+  ASSERT_OK(asngn_context_assemble(f.c,session,&turn,NULL,"answer",slot,&prompt));
+  ASSERT_TRUE(strstr(prompt.system_text,"UNIQUE_GROUNDED_FACT") != NULL);
+  ASSERT_TRUE(strstr(prompt.system_text,"validity=current") != NULL); asngn_prompt_free(&prompt);
+  ASSERT_OK(os_write_file(path,"version-b",9));
+  ASSERT_OK(asngn_context_assemble(f.c,session,&turn,NULL,"answer",slot,&prompt));
+  ASSERT_TRUE(strstr(prompt.system_text,"UNIQUE_GROUNDED_FACT") == NULL); asngn_prompt_free(&prompt);
+  asngn_turn_state_free(&turn); free(path); asngn_session_close(session); fx_drop(&f);
+}
+
+
 static int fail_projection(void *ud,const char *point) {
   (void)ud;return !strcmp(point,"project_ledger");
 }
@@ -633,6 +667,7 @@ TEST_LIST = {
   TEST_ENTRY(contextual_code_retrieval_refreshes_evidence),
   TEST_ENTRY(code_embeddings_prioritize_candidates_in_one_batch),
   TEST_ENTRY(shared_embedding_pipeline_is_authoritative),
+  TEST_ENTRY(workspace_changes_invalidate_materialized_memory),
 #if !defined(_WIN32)
   TEST_ENTRY(turn_journal_crash_recovery),
 #endif

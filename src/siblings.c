@@ -712,7 +712,7 @@ static int sib_count_tokens(const char *text, void *ud) {
   return asngn_models_count_tokens(counter->c, counter->slot, text);
 }
 
-asngn_err asngn_siblings_context(asngn_ctx *c, const char *scope,
+asngn_err asngn_siblings_context(asngn_ctx *c, asngn_session *session,
                                  const char *base_prompt, const char *query,
                                  size_t history_tokens,
                                  size_t checkpoint_tokens, int count_slot,
@@ -723,16 +723,28 @@ asngn_err asngn_siblings_context(asngn_ctx *c, const char *scope,
   asper_context_pack pack;
   sib_token_counter counter;
   asper_err ae;
-  if (!c || !scope || !base_prompt || !query || !out_system ||
+  if (!c || !session || !base_prompt || !query || !out_system ||
       !out_context) return ASNGN_ERR_INVALID;
   *out_system = NULL;
   *out_context = NULL;
   if (!c->asper_ok || !c->asper) return ASNGN_ERR_UNSUPPORTED;
+  /* Serialize snapshot observation across lanes so a slower earlier scan cannot
+   * overwrite a newer version. Memory keys distinguish separate worktrees. */
+  asngn_ctx *coordinator = c->owner ? c->owner : c;
+  asngn_workspace_info workspace = session->workspace;
+  uint8_t root_hash[32]; char resource[75] = "workspace:";
+  asngn_sha256(workspace.canonical_root,strlen(workspace.canonical_root),root_hash);
+  asngn_sha256_hex(root_hash,32,resource+10);
+  os_mutex_lock(&coordinator->sib_mu);
+  asngn_err snapshot = asngn_workspace_snapshot(&workspace,NULL);
+  ae = asper_memory_observe_dependency(c->asper,resource,snapshot == ASNGN_OK ? workspace.fingerprint : NULL);
+  os_mutex_unlock(&coordinator->sib_mu);
+  if (ae != ASPER_OK) return sib_asper_err(c,ae,"memory_dependency");
   memset(&req, 0, sizeof req);
   memset(&pack, 0, sizeof pack);
   counter.c = c;
   counter.slot = count_slot;
-  req.scope = scope;
+  req.scope = session->slug;
   req.base_system_prompt = base_prompt;
   req.query = query;
   req.history_tokens = history_tokens;

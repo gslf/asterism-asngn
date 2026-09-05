@@ -974,7 +974,7 @@ asngn_err asngn_siblings_object_read(asngn_ctx *c, const char *ref,
 asngn_err asngn_siblings_checkpoint(asngn_ctx *c, const char *scope,
                                     const char *text, char out_id[37]);
 asngn_err asngn_siblings_compact(asngn_ctx *c);
-asngn_err asngn_siblings_context(asngn_ctx *c, const char *scope,
+asngn_err asngn_siblings_context(asngn_ctx *c, asngn_session *session,
                                  const char *base_prompt, const char *query,
                                  size_t history_tokens,
                                  size_t checkpoint_tokens, int count_slot,

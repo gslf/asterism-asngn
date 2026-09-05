@@ -12,7 +12,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests | Incremental snapshots, durable approval recovery, explicit data conversion, cross-process workspace coordination |
-| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Role/block message IR, native sequence batching, real provider conformance and turn-wide memory cancellation |
+| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Native engine decision path, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results | Durable resume, approvals, persistent processes, policy-consistent discovery, platform enforcement matrix, fuzzing/TSan |
@@ -43,14 +43,16 @@ trials require actual resources. No real-model result has been produced here.
   the current embedded wrapper serializes requests to one backend instance.
   This is shared residency, not native multi-sequence decoding. The former
   duplicate engine LRU/load machinery was removed.
-- Output contracts now travel explicitly through asmodel ABI 6. The remote
+- Output contracts now travel explicitly through asmodel ABI 7. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
   GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns
   its curation/review/recall schema and exact output wrapper. Astools exports typed
   command argument schemas through the same registry selector as GBNF/catalog.
   JSON output metadata survives both shared-runtime adapters. Metadata strings
   preserve quotes/Unicode and reject oversized values instead of truncating intent.
-  This completes the output-contract slice, not the multimodal/message IR.
+  Message and native tool contracts now preserve roles and correlation IDs;
+  attachments and an engine-native decision path remain. Embedded text templates
+  reject unsupported blocks instead of silently flattening or switching templates.
 - Embedding batches retain valid leading rows, explicit consumption and cancellation/
   timeout errors. The shared manager owns query/document prefixes for both hosts.
   Canonical cache keys include revision, tokenizer, pooling, dimension, context
@@ -113,11 +115,14 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 32/32 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 32/32 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 32/32 passed.
-- Standalone Asper: 24/24; astools: 24/24; asmodel: 5/5.
+- Standalone Asper: 24/24; astools: 24/24; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
-  all five executables with ASan/UBSan/LeakSanitizer.
+  all seven executables with ASan/UBSan/LeakSanitizer.
+- Message/tool tests exercise full HTTP encodings, streamed arguments, unknown/
+  duplicate/reused IDs, absent required tools and malformed JSON. Failed or
+  incomplete generations cannot expose tool proposals for execution.
 - Generation mock tests retain decoded prefixes after timeout/cancellation,
   distinguish unknown usage, and prove that a later call cannot overwrite an
   earlier receipt. Native adapters compile with the same per-request contract;
@@ -170,7 +175,9 @@ behavior have not been validated by these Linux no-llama runs.
 
 ## Next implementation order
 
-1. Extend output contracts to role/block messages and native tools. Native loader interruption remains backend-dependent.
+1. Connect the native tool contract to policy-consistent engine discovery/decisions;
+   add attachments only with honest modality admission. Native loader interruption
+   remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
 3. Add discovery, resumable approvals, controlled processes and editor protocols.

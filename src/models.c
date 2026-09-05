@@ -180,11 +180,12 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
     p.deadline_ms=deadline-asngn_clock_mono_ms(&c->clock);
     if (p.deadline_ms<=0) return asngn_seterr(c,ASNGN_ERR_TIMEOUT,"deadline expired before inference");
   }
+  asmodel_text_input input; asmodel_input_pair(&input,sys,user);
   char *text = NULL;
   int ti=0, to=0;
   int64_t started=asngn_clock_mono_ms(&c->clock);
   e=asngn_from_model_error(asmodel_generate(c->shared_models,c->models[slot].cfg.id,
-      sys,user,grammar,&p,fn ? generation_token : NULL,&stream,cancel,&text,&ti,&to));
+      &input.input,grammar,&p,fn ? generation_token : NULL,&stream,cancel,&text,&ti,&to));
   if (e == ASNGN_OK && info.json_output) {
     e = asngn_protocol_decode(task, p.output_schema, &text);
     if (e != ASNGN_OK) snprintf(info.error, sizeof info.error,
@@ -209,12 +210,13 @@ int asngn_models_count_tokens(asngn_ctx *c, int slot, const char *text) {
   return n >= 0 ? n : asngn_token_heuristic(text);
 }
 int asngn_models_count_prompt(asngn_ctx *c, int slot, const char *sys, const char *user) {
+  asmodel_text_input input; asmodel_input_pair(&input,sys,user);
   if (c && c->shared_models && slot >= 0 && (size_t)slot < c->models_n) {
-    int n=asmodel_count_prompt_tokens(c->shared_models,c->models[slot].cfg.id,sys,user);
+    int n=asmodel_count_prompt_tokens(c->shared_models,c->models[slot].cfg.id,&input.input);
     if (n>=0) return n;
   }
   asmodel_provider unavailable = {0};
-  return asmodel_provider_measure_prompt(&unavailable,sys,user).admission_tokens;
+  return asmodel_provider_measure_prompt(&unavailable,&input.input).admission_tokens;
 }
 
 /* ---- embedding ---------------------------------------------------------- */

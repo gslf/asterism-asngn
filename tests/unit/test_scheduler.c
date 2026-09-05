@@ -11,13 +11,12 @@ static int count(void *ud, const char *s) {
   (void)ud;
   return (int)strlen(s) / 4 + 1;
 }
-static asngn_err generate(void *ud, const char *sys, const char *usr,
+static asngn_err generate(void *ud, const asmodel_input *input,
                           const char *grammar, const asngn_gen_params *p,
                           asngn_token_fn cb, void *cbud, volatile int *cancel,
                           char **out, int *in, int *gen) {
   barrier *b = ud;
-  (void)sys;
-  (void)usr;
+  (void)input;
   (void)grammar;
   (void)p;
   (void)cb;

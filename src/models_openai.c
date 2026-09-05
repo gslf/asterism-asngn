@@ -13,7 +13,7 @@ static void remote_token(const char *utf8, size_t len, void *ud) {
   if (b->fn) b->fn(utf8, b->ud);
 }
 
-static asngn_err remote_generate(void *ud, const char *sys, const char *user,
+static asngn_err remote_generate(void *ud, const asmodel_input *input,
                                  const char *grammar,
                                  const asngn_gen_params *params,
                                  asngn_token_fn token_fn, void *token_ud,
@@ -29,11 +29,11 @@ static asngn_err remote_generate(void *ud, const char *sys, const char *user,
   p.max_tokens = params->max_tokens;
   p.reasoning = params->reasoning;
   p.reasoning_budget = params->reasoning_budget;
-  p.output_schema = params->output_schema;
+  p.output_schema = params->output_schema; p.tools = params->tools;
   p.require_constraint = params->require_constraint ? 1 : 0;
   p.deadline_ms = params->deadline_ms; p.result_info = params->result_info;
   bridge.fn = token_fn; bridge.ud = token_ud;
-  rc = u->provider.generate(u->provider.userdata, sys, user, grammar, &p,
+  rc = u->provider.generate(u->provider.userdata, input, grammar, &p,
                             token_fn ? remote_token : NULL, &bridge, cancel,
                             out, out_in, out_gen);
   return asngn_from_model_error((asmodel_err)rc);
@@ -52,9 +52,9 @@ static int remote_count(void *ud, const char *text) {
       u->provider.count_tokens(u->provider.userdata, text) : -1;
 }
 
-static int remote_count_prompt(void *ud, const char *sys, const char *user) {
+static int remote_count_prompt(void *ud, const asmodel_input *input) {
   openai_ud *u = (openai_ud *)ud;
-  return asmodel_provider_measure_prompt(&u->provider, sys, user).admission_tokens;
+  return asmodel_provider_measure_prompt(&u->provider, input).admission_tokens;
 }
 
 static void remote_destroy(void *ud) {

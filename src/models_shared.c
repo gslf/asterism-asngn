@@ -43,7 +43,7 @@ static void token(const char *text, void *ud) {
   token_bridge *b = ud;
   if (b->fn) b->fn(text, strlen(text), b->ud);
 }
-static int generate(void *ud, const char *sys, const char *user, const char *grammar,
+static int generate(void *ud, const asmodel_input *input, const char *grammar,
                     const asmodel_generate_params *p, asmodel_token_fn fn, void *fn_ud,
                     volatile int *cancel, char **out, int *in, int *gen) {
   backend *b = ud;
@@ -60,13 +60,19 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
   params.temp = p->temperature; params.top_p = p->top_p;
   params.repeat_penalty = p->repeat_penalty; params.max_tokens = p->max_tokens;
   params.reasoning = p->reasoning; params.reasoning_budget = p->reasoning_budget;
-  params.output_schema = p->output_schema; params.result_info = info;
+  params.output_schema = p->output_schema; params.tools = p->tools; params.result_info = info;
   params.require_constraint = p->require_constraint != 0;
   params.deadline_ms = p->deadline_ms;
-  int prompt = b->iface.count_prompt_tokens ?
-      b->iface.count_prompt_tokens(b->iface.ud, sys, user) :
-      asngn_token_heuristic(sys) + asngn_token_heuristic(user) + 16;
-  e = asngn_operation_begin(b->ctx, b->id, "generate", (int64_t)prompt + p->max_tokens, &op);
+  asmodel_provider counter = {0};
+  counter.userdata = b->iface.ud; counter.count_prompt_tokens = b->iface.count_prompt_tokens;
+  int prompt = asmodel_provider_measure_prompt(&counter,input).admission_tokens;
+  int64_t reserve = (int64_t)prompt + p->max_tokens;
+  if (p->output_schema) reserve += (int64_t)strlen(p->output_schema);
+  if (p->tools) for (size_t i = 0; i < p->tools->count; i++) {
+    const asmodel_tool_schema *schema = &p->tools->schemas[i];
+    reserve += (int64_t)(strlen(schema->name)+strlen(schema->description)+strlen(schema->parameters)+128);
+  }
+  e = asngn_operation_begin(b->ctx, b->id, "generate", reserve, &op);
   if (e != ASNGN_OK) return model_error(e);
   if (p->deadline_ms > 0) params.deadline_ms -= asngn_clock_mono_ms(&b->ctx->clock) - started;
   bool invoked = false;
@@ -74,7 +80,7 @@ static int generate(void *ud, const char *sys, const char *user, const char *gra
   else if (p->deadline_ms > 0 && params.deadline_ms <= 0) e = ASNGN_ERR_TIMEOUT;
   else {
     invoked = true; info->usage_known = 0;
-    e = b->iface.generate(b->iface.ud, sys, user, grammar, &params,
+    e = b->iface.generate(b->iface.ud, input, grammar, &params,
                           fn ? token : NULL, &bridge, cancel, out, &ti, &to);
   }
   if (!invoked) info->usage_known = 1;
@@ -122,9 +128,9 @@ static int count(void *ud, const char *text) {
   backend *b = ud;
   return b->iface.count_tokens ? b->iface.count_tokens(b->iface.ud, text) : -1;
 }
-static int count_prompt(void *ud, const char *sys, const char *user) {
+static int count_prompt(void *ud, const asmodel_input *input) {
   backend *b = ud;
-  return b->iface.count_prompt_tokens ? b->iface.count_prompt_tokens(b->iface.ud, sys, user) : -1;
+  return b->iface.count_prompt_tokens ? b->iface.count_prompt_tokens(b->iface.ud, input) : -1;
 }
 static void destroy(void *ud) {
   backend *b = ud;

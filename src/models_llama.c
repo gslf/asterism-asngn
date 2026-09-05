@@ -243,45 +243,34 @@ static asngn_err mll_emit_piece(const struct llama_vocab *vocab,
   return e;
 }
 
-/* Render system + user through the chat template with the assistant
- * prompt appended, using the negative-return / resize-and-retry
- * convention. Unsupported model templates fall back to chatml (tmpl
- * NULL). *out is malloc'd. */
-static asngn_err mll_apply_template(const char *tmpl,
-                                    const char *system_prompt,
-                                    const char *user_prompt, char **out) {
-  struct llama_chat_message msgs[2];
-  int32_t need, got;
-  char *buf;
-
-  msgs[0].role = "system";
-  msgs[0].content = system_prompt;
-  msgs[1].role = "user";
-  msgs[1].content = user_prompt;
-
-  need = asngn_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
-  if (need < 0 && tmpl != NULL) {
-    tmpl = NULL; /* chatml fallback */
-    need = asngn_llg_chat_apply_template(tmpl, msgs, 2, true, NULL, 0);
+/* Template rendering preserves roles; this C backend accepts text blocks only. */
+static asngn_err mll_apply_template(const char *tmpl, const asmodel_input *input, char **out) {
+  struct llama_chat_message messages[256];
+  char *content[256] = {0};
+  asngn_err e = ASNGN_ERR_UNSUPPORTED;
+  *out = NULL;
+  if (asmodel_input_validate(input) != ASMODEL_OK) return ASNGN_ERR_INVALID;
+  for (size_t i = 0; i < input->count; i++) {
+    asmodel_err result = asmodel_message_text(&input->messages[i],&content[i]);
+    if (result != ASMODEL_OK) { e = result == ASMODEL_ERR_NOMEM ? ASNGN_ERR_NOMEM : ASNGN_ERR_UNSUPPORTED; goto done; }
+    messages[i].role = asmodel_role_name(input->messages[i].role);
+    messages[i].content = content[i];
   }
-  if (need < 0) return ASNGN_ERR_MODEL;
-  buf = (char *)malloc((size_t)need + 1);
-  if (buf == NULL) return ASNGN_ERR_NOMEM;
-  got = asngn_llg_chat_apply_template(tmpl, msgs, 2, true, buf,
-                                      (int32_t)(need + 1));
-  if (got < 0 || got > need) {
-    free(buf);
-    return ASNGN_ERR_MODEL;
-  }
-  buf[got] = '\0';
-  *out = buf;
-  return ASNGN_OK;
+  int32_t need = asngn_llg_chat_apply_template(tmpl,messages,input->count,true,NULL,0);
+  if (need < 0 || need == INT32_MAX) goto done;
+  char *buf = malloc((size_t)need+1);
+  if (!buf) { e = ASNGN_ERR_NOMEM; goto done; }
+  int32_t got = asngn_llg_chat_apply_template(tmpl,messages,input->count,true,buf,need+1);
+  if (got < 0 || got > need) { free(buf); goto done; }
+  buf[got] = 0; *out = buf; e = ASNGN_OK;
+done:
+  for (size_t i = 0; i < input->count; i++) free(content[i]);
+  return e;
 }
 
 /* ---- generation --------------------------------------------------------- */
 
-static asngn_err mll_generate(void *ud, const char *system_prompt,
-                              const char *user_prompt, const char *gbnf,
+static asngn_err mll_generate(void *ud, const asmodel_input *input, const char *gbnf,
                               const asngn_gen_params *p,
                               asngn_token_fn token_cb, void *token_ud,
                               volatile int *cancel, char **out_text,
@@ -296,9 +285,9 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   asngn_err e;
   int32_t i, n_past;
   int produced = 0, limit;
-  int64_t deadline_at = p->deadline_ms > 0
-                            ? os_monotonic_ms() + p->deadline_ms
-                            : 0;
+  int64_t now = os_monotonic_ms();
+  int64_t deadline_at = p->deadline_ms > 0 ?
+      (p->deadline_ms > INT64_MAX-now ? INT64_MAX : now+p->deadline_ms) : 0;
   bool hit_eog = false, constrained = false;
 
   *out_text = NULL;
@@ -311,6 +300,8 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
     e = mll_expired(deadline_at) ? ASNGN_ERR_TIMEOUT : ASNGN_ERR_CANCELLED;
     goto out;
   }
+
+  if (p->tools) { e = ASNGN_ERR_UNSUPPORTED; goto out; }
 
   /* Embedded llama.cpp has no portable per-request thinking switch in its C
    * chat-template API.  A constrained micro-decision is still an absolute
@@ -328,8 +319,7 @@ static asngn_err mll_generate(void *ud, const char *system_prompt,
   }
 
   e = mll_apply_template(u->chat_template,
-                         system_prompt != NULL ? system_prompt : "",
-                         user_prompt != NULL ? user_prompt : "",
+                         input,
                          &prompt);
   if (e != ASNGN_OK) goto out;
 
@@ -533,15 +523,13 @@ static int mll_count_tokens(void *ud, const char *text) {
   return n < 0 ? (int)-n : (int)n;
 }
 
-static int mll_count_prompt_tokens(void *ud, const char *system_prompt,
-                                   const char *user_prompt) {
+static int mll_count_prompt_tokens(void *ud, const asmodel_input *input) {
   mll_ud *u = (mll_ud *)ud;
   char *prompt = NULL;
   llama_token *tok = NULL;
   int32_t n_tok = 0;
   asngn_err e = mll_apply_template(
-      u->chat_template, system_prompt != NULL ? system_prompt : "",
-      user_prompt != NULL ? user_prompt : "", &prompt);
+      u->chat_template,input,&prompt);
   if (e != ASNGN_OK) return -1;
   e = mll_tokenize(u->vocab, prompt, true, true, &tok, &n_tok);
   free(tok);

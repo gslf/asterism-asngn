@@ -348,19 +348,19 @@ typedef struct {
   int reasoning_budget;
   bool require_constraint;
   const char *output_schema;
+  const asmodel_tools *tools;
   asmodel_generation_info *result_info;
   int64_t deadline_ms;   /* maximum duration for this inference; 0 = none */
 } asngn_gen_params;
 
 /* Backend vtable: scripted fakes and llama.cpp sit behind the same
  * interface. generate() applies the model's chat template to the
- * (system, user) pair; gbnf NULL = unconstrained; token_cb may be NULL;
+ * structured message sequence; gbnf NULL = unconstrained; token_cb may be NULL;
  * *cancel is polled at least once per produced token; out_tokens_in /
  * out_tokens_out report provider counts when available; inspect usage_known. */
 typedef struct asngn_model_iface {
   void *ud;
-  asngn_err (*generate)(void *ud, const char *system_prompt,
-                        const char *user_prompt, const char *gbnf,
+  asngn_err (*generate)(void *ud, const asmodel_input *input, const char *gbnf,
                         const asngn_gen_params *p,
                         asngn_token_fn token_cb, void *token_ud,
                         volatile int *cancel,
@@ -369,8 +369,7 @@ typedef struct asngn_model_iface {
   int  (*count_tokens)(void *ud, const char *text); /* < 0 on error */
   /* Chat-template-aware prompt count; optional for injected
    * backends, where the engine uses a conservative fallback. */
-  int  (*count_prompt_tokens)(void *ud, const char *system_prompt,
-                              const char *user_prompt);
+  int  (*count_prompt_tokens)(void *ud, const asmodel_input *input);
   asngn_err (*embed)(void *ud, const char *const *texts, size_t count, int is_query,
                        const asmodel_embed_params *params, float *out); /* count * dim floats,
                          L2-normalized; only on embedding models */

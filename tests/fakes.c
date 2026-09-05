@@ -159,12 +159,14 @@ static int fake_model_count_tokens(void *ud, const char *text) {
   return fake_count(text);
 }
 
-static int fake_model_count_prompt_tokens(void *ud, const char *system_text,
-                                          const char *user_text) {
+static int fake_model_count_prompt_tokens(void *ud, const asmodel_input *input) {
   (void)ud;
   /* Eight tokens model the fixed two-message template and assistant
    * generation marker used by the real backend. */
-  return fake_count(system_text) + fake_count(user_text) + 8;
+  int count = 8;
+  for (size_t i = 0; i < input->count; i++)
+    for (size_t j = 0; j < input->messages[i].count; j++) count += fake_count(input->messages[i].blocks[j].text);
+  return count;
 }
 
 static asngn_err fake_model_embed_one(void *ud, const char *text, int is_query, float *out) {
@@ -192,9 +194,11 @@ static asngn_err fake_model_embed(void *ud, const char *const *texts, size_t cou
   return ASNGN_OK;
 }
 
-static asngn_err fake_model_generate(void *ud, const char *sys, const char *user,
+static asngn_err fake_model_generate(void *ud, const asmodel_input *input,
     const char *gbnf, const asngn_gen_params *p, asngn_token_fn fn, void *fn_ud,
     volatile int *cancel, char **out, int *in, int *gen) {
+  const char *sys = input->messages[0].blocks[0].text;
+  const char *user = input->messages[1].blocks[0].text;
   int ti = 0, to = 0;
   asngn_err e = fake_model_generate_impl(ud,sys,user,gbnf,p,fn,fn_ud,cancel,out,&ti,&to);
   if (in) *in = ti;

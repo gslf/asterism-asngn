@@ -38,7 +38,7 @@
 
 #include "asngn.h"
 #include "asngn_internal.h" /* the one sanctioned internal touch; see above */
-#include "json.h"
+#include "asmodel_json.h"
 #include "tasks.h"
 #include "work.h"
 
@@ -100,9 +100,9 @@ static void emit_line(const char *s) {
 }
 
 /* Serialize + emit + free resp; OOM falls back to the static response. */
-static void send_value(jx_value *resp) {
-  char *s = jx_write(resp, 0);
-  jx_free(resp);
+static void send_value(asmodel_json_value *resp) {
+  char *s = asmodel_json_write(resp, 0);
+  asmodel_json_free(resp);
   if (!s) {
     emit_line(OOM_RESPONSE);
     return;
@@ -112,72 +112,72 @@ static void send_value(jx_value *resp) {
 }
 
 /* want == 0: notification — consume the owned arguments, emit nothing. */
-static int decorate_modern_result(jx_value *result) {
-  jx_value *meta, *info;
+static int decorate_modern_result(asmodel_json_value *result) {
+  asmodel_json_value *meta, *info;
   int ok;
-  if (!result || jx_typeof(result) != JX_OBJECT) return 0;
-  meta = jx_object();
-  info = jx_object();
+  if (!result || asmodel_json_typeof(result) != ASMODEL_JSON_OBJECT) return 0;
+  meta = asmodel_json_object();
+  info = asmodel_json_object();
   ok = meta != NULL && info != NULL;
-  ok &= jx_object_set(info, "name", jx_string("asngn-mcp")) == 0;
-  ok &= jx_object_set(info, "version", jx_string(asngn_version())) == 0;
-  ok &= jx_object_set(meta, "io.modelcontextprotocol/serverInfo", info) == 0;
-  ok &= jx_object_set(result, "resultType", jx_string("complete")) == 0;
-  ok &= jx_object_set(result, "_meta", meta) == 0;
+  ok &= asmodel_json_object_set(info, "name", asmodel_json_string("asngn-mcp")) == 0;
+  ok &= asmodel_json_object_set(info, "version", asmodel_json_string(asngn_version())) == 0;
+  ok &= asmodel_json_object_set(meta, "io.modelcontextprotocol/serverInfo", info) == 0;
+  ok &= asmodel_json_object_set(result, "resultType", asmodel_json_string("complete")) == 0;
+  ok &= asmodel_json_object_set(result, "_meta", meta) == 0;
   return ok;
 }
 
-static void send_result(int want, jx_value *id, jx_value *result) {
-  jx_value *resp;
+static void send_result(int want, asmodel_json_value *id, asmodel_json_value *result) {
+  asmodel_json_value *resp;
   int ok;
   if (!want) {
-    jx_free(id);
-    jx_free(result);
+    asmodel_json_free(id);
+    asmodel_json_free(result);
     return;
   }
   if (mcp_modern_response && !decorate_modern_result(result)) {
-    jx_free(id);
-    jx_free(result);
+    asmodel_json_free(id);
+    asmodel_json_free(result);
     emit_line(OOM_RESPONSE);
     return;
   }
-  resp = jx_object();
+  resp = asmodel_json_object();
   ok = (resp != NULL);
-  ok &= jx_object_set(resp, "jsonrpc", jx_string("2.0")) == 0;
-  ok &= jx_object_set(resp, "id", id ? id : jx_null()) == 0;
-  ok &= jx_object_set(resp, "result", result) == 0;
+  ok &= asmodel_json_object_set(resp, "jsonrpc", asmodel_json_string("2.0")) == 0;
+  ok &= asmodel_json_object_set(resp, "id", id ? id : asmodel_json_null()) == 0;
+  ok &= asmodel_json_object_set(resp, "result", result) == 0;
   if (!ok) {
-    jx_free(resp);
+    asmodel_json_free(resp);
     emit_line(OOM_RESPONSE);
     return;
   }
   send_value(resp);
 }
 
-static void send_error(int want, jx_value *id, int code, const char *message,
+static void send_error(int want, asmodel_json_value *id, int code, const char *message,
                        const char *asngn_name) {
-  jx_value *err, *resp;
+  asmodel_json_value *err, *resp;
   int ok;
   if (!want) {
-    jx_free(id);
+    asmodel_json_free(id);
     return;
   }
-  err = jx_object();
+  err = asmodel_json_object();
   ok = (err != NULL);
-  ok &= jx_object_set(err, "code", jx_int(code)) == 0;
-  ok &= jx_object_set(err, "message", jx_string(message)) == 0;
+  ok &= asmodel_json_object_set(err, "code", asmodel_json_int(code)) == 0;
+  ok &= asmodel_json_object_set(err, "message", asmodel_json_string(message)) == 0;
   if (asngn_name) {
-    jx_value *data = jx_object();
-    ok &= jx_object_set(data, "asngn", jx_string(asngn_name)) == 0;
-    ok &= jx_object_set(err, "data", data) == 0;
+    asmodel_json_value *data = asmodel_json_object();
+    ok &= asmodel_json_object_set(data, "asngn", asmodel_json_string(asngn_name)) == 0;
+    ok &= asmodel_json_object_set(err, "data", data) == 0;
   }
-  resp = jx_object();
+  resp = asmodel_json_object();
   ok &= (resp != NULL);
-  ok &= jx_object_set(resp, "jsonrpc", jx_string("2.0")) == 0;
-  ok &= jx_object_set(resp, "id", id ? id : jx_null()) == 0;
-  ok &= jx_object_set(resp, "error", err) == 0;
+  ok &= asmodel_json_object_set(resp, "jsonrpc", asmodel_json_string("2.0")) == 0;
+  ok &= asmodel_json_object_set(resp, "id", id ? id : asmodel_json_null()) == 0;
+  ok &= asmodel_json_object_set(resp, "error", err) == 0;
   if (!ok) {
-    jx_free(resp);
+    asmodel_json_free(resp);
     emit_line(OOM_RESPONSE);
     return;
   }
@@ -185,36 +185,36 @@ static void send_error(int want, jx_value *id, int code, const char *message,
 }
 
 /* Wrap a tool payload in the MCP content envelope and send it. */
-static void send_tool_result(int want, jx_value *id, jx_value *payload,
+static void send_tool_result(int want, asmodel_json_value *id, asmodel_json_value *payload,
                              int is_error) {
   char *txt;
-  jx_value *item, *content, *res;
+  asmodel_json_value *item, *content, *res;
   int ok;
   if (!want) {
-    jx_free(id);
-    jx_free(payload);
+    asmodel_json_free(id);
+    asmodel_json_free(payload);
     return;
   }
-  txt = jx_write(payload, 0);
-  jx_free(payload);
+  txt = asmodel_json_write(payload, 0);
+  asmodel_json_free(payload);
   if (!txt) {
-    jx_free(id);
+    asmodel_json_free(id);
     emit_line(OOM_RESPONSE);
     return;
   }
-  item = jx_object();
+  item = asmodel_json_object();
   ok = (item != NULL);
-  ok &= jx_object_set(item, "type", jx_string("text")) == 0;
-  ok &= jx_object_set(item, "text", jx_string(txt)) == 0;
+  ok &= asmodel_json_object_set(item, "type", asmodel_json_string("text")) == 0;
+  ok &= asmodel_json_object_set(item, "text", asmodel_json_string(txt)) == 0;
   free(txt);
-  content = jx_array();
-  ok &= jx_array_push(content, item) == 0;
-  res = jx_object();
-  ok &= jx_object_set(res, "content", content) == 0;
-  ok &= jx_object_set(res, "isError", jx_bool(is_error)) == 0;
+  content = asmodel_json_array();
+  ok &= asmodel_json_array_push(content, item) == 0;
+  res = asmodel_json_object();
+  ok &= asmodel_json_object_set(res, "content", content) == 0;
+  ok &= asmodel_json_object_set(res, "isError", asmodel_json_bool(is_error)) == 0;
   if (!ok) {
-    jx_free(res);
-    jx_free(id);
+    asmodel_json_free(res);
+    asmodel_json_free(id);
     emit_line(OOM_RESPONSE);
     return;
   }
@@ -227,42 +227,42 @@ static void send_tool_result(int want, jx_value *id, jx_value *payload,
  * an embedded NUL is wrong-typed (it would be silently truncated by C
  * string consumers); *msg then carries the specific reason. args may be
  * NULL ("arguments" omitted). */
-static int arg_str(const jx_value *args, const char *key, const char **out,
+static int arg_str(const asmodel_json_value *args, const char *key, const char **out,
                    const char **msg) {
-  const jx_value *v = jx_object_get(args, key);
+  const asmodel_json_value *v = asmodel_json_object_get(args, key);
   if (!v) return 0;
-  if (jx_typeof(v) != JX_STRING) return -1;
-  if (jx_string_length(v) != strlen(jx_string_value(v))) {
+  if (asmodel_json_typeof(v) != ASMODEL_JSON_STRING) return -1;
+  if (asmodel_json_string_length(v) != strlen(asmodel_json_string_value(v))) {
     *msg = "string must not contain NUL";
     return -1;
   }
-  *out = jx_string_value(v);
+  *out = asmodel_json_string_value(v);
   return 1;
 }
 
-static int arg_int(const jx_value *args, const char *key, long long *out) {
-  const jx_value *v = jx_object_get(args, key);
+static int arg_int(const asmodel_json_value *args, const char *key, long long *out) {
+  const asmodel_json_value *v = asmodel_json_object_get(args, key);
   double d;
   if (!v) return 0;
-  if (jx_typeof(v) != JX_NUMBER) return -1;
-  if (jx_is_int(v)) {
-    *out = jx_int_value(v);
+  if (asmodel_json_typeof(v) != ASMODEL_JSON_NUMBER) return -1;
+  if (asmodel_json_is_int(v)) {
+    *out = asmodel_json_int_value(v);
     return 1;
   }
   /* Schema-valid integral spellings (5.0, 1e2): accept when the double
    * is finite, integral, and exactly representable as long long. */
-  d = jx_double_value(v);
+  d = asmodel_json_double_value(v);
   if (!isfinite(d) || d != floor(d) || d < -0x1p63 || d >= 0x1p63)
     return -1;
   *out = (long long)d;
   return 1;
 }
 
-static int arg_bool(const jx_value *args, const char *key, int *out) {
-  const jx_value *v = jx_object_get(args, key);
+static int arg_bool(const asmodel_json_value *args, const char *key, int *out) {
+  const asmodel_json_value *v = asmodel_json_object_get(args, key);
   if (!v) return 0;
-  if (jx_typeof(v) != JX_BOOL) return -1;
-  *out = jx_bool_value(v);
+  if (asmodel_json_typeof(v) != ASMODEL_JSON_BOOL) return -1;
+  *out = asmodel_json_bool_value(v);
   return 1;
 }
 
@@ -270,14 +270,14 @@ static int arg_bool(const jx_value *args, const char *key, int *out) {
 
 /* Doubles from engine counters; non-finite degrades to null, never to a
  * writer failure. */
-static jx_value *jx_finite(double d) {
-  return isfinite(d) ? jx_double(d) : jx_null();
+static asmodel_json_value *asmodel_json_finite(double d) {
+  return isfinite(d) ? asmodel_json_double(d) : asmodel_json_null();
 }
 
-static jx_value *ok_payload(void) {
-  jx_value *o = jx_object();
-  if (jx_object_set(o, "ok", jx_bool(1)) != 0) {
-    jx_free(o);
+static asmodel_json_value *ok_payload(void) {
+  asmodel_json_value *o = asmodel_json_object();
+  if (asmodel_json_object_set(o, "ok", asmodel_json_bool(1)) != 0) {
+    asmodel_json_free(o);
     return NULL;
   }
   return o;
@@ -297,35 +297,35 @@ enum { TOOL_OK = 0, TOOL_FAIL, TOOL_PARAM, TOOL_OOM };
     return TOOL_PARAM;                                                       \
   } while (0)
 
-typedef int (*tool_fn)(server_state *st, const jx_value *args,
-                       jx_value **out, const char **msg);
+typedef int (*tool_fn)(server_state *st, const asmodel_json_value *args,
+                       asmodel_json_value **out, const char **msg);
 
 /* {"error": <name>, "message": <text>} with isError:true. */
-static int fail_payload(jx_value **out, const char *name,
+static int fail_payload(asmodel_json_value **out, const char *name,
                         const char *message) {
-  jx_value *o = jx_object();
-  jx_value *m;
+  asmodel_json_value *o = asmodel_json_object();
+  asmodel_json_value *m;
   int ok = (o != NULL);
-  ok &= jx_object_set(o, "error", jx_string(name)) == 0;
-  m = jx_string(message ? message : "");
-  if (!m) m = jx_string(""); /* message not valid UTF-8: drop it */
-  ok &= jx_object_set(o, "message", m) == 0;
+  ok &= asmodel_json_object_set(o, "error", asmodel_json_string(name)) == 0;
+  m = asmodel_json_string(message ? message : "");
+  if (!m) m = asmodel_json_string(""); /* message not valid UTF-8: drop it */
+  ok &= asmodel_json_object_set(o, "message", m) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_FAIL;
 }
 
-static int engine_fail(server_state *st, asngn_err e, jx_value **out) {
+static int engine_fail(server_state *st, asngn_err e, asmodel_json_value **out) {
   return fail_payload(out, asngn_err_name(e), asngn_last_error(st->ctx));
 }
 
 /* Resolve a slug (NULL = "main") to an open session: reuse a registered
  * handle or open on demand and register it. */
 static int state_session(server_state *st, const char *slug,
-                         asngn_session **out_s, jx_value **out) {
+                         asngn_session **out_s, asmodel_json_value **out) {
   asngn_session *s = NULL;
   asngn_err e;
   size_t i;
@@ -347,8 +347,8 @@ static int state_session(server_state *st, const char *slug,
   return TOOL_OK;
 }
 
-static int tool_session_work(server_state *st, const jx_value *args,
-                             jx_value **out, const char **msg) {
+static int tool_session_work(server_state *st, const asmodel_json_value *args,
+                             asmodel_json_value **out, const char **msg) {
   const char *slug = NULL;
   asngn_session *s = NULL;
   if (arg_str(args,"session",&slug,msg) < 0) BADP("session must be a string");
@@ -358,8 +358,8 @@ static int tool_session_work(server_state *st, const jx_value *args,
   return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
 }
 
-static int tool_agent_submit(server_state *st, const jx_value *args,
-                              jx_value **out, const char **msg) {
+static int tool_agent_submit(server_state *st, const asmodel_json_value *args,
+                              asmodel_json_value **out, const char **msg) {
   const char *message = NULL, *session = NULL;
   asngn_session *s = NULL;
   size_t slot = 0;
@@ -373,47 +373,47 @@ static int tool_agent_submit(server_state *st, const jx_value *args,
   if (rc != TOOL_OK) return rc;
   e = mcp_job_submit(s, message, &st->jobs[slot]);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  *out = jx_object();
-  if (!*out || jx_object_set(*out, "task_id", jx_string(mcp_job_id(st->jobs[slot]))) != 0) {
-    jx_free(*out); *out = NULL; return TOOL_OOM;
+  *out = asmodel_json_object();
+  if (!*out || asmodel_json_object_set(*out, "task_id", asmodel_json_string(mcp_job_id(st->jobs[slot]))) != 0) {
+    asmodel_json_free(*out); *out = NULL; return TOOL_OOM;
   }
   return TOOL_OK;
 }
 
-static int job_request(server_state *st, const jx_value *args, jx_value **out,
+static int job_request(server_state *st, const asmodel_json_value *args, asmodel_json_value **out,
                         const char **msg, int cancel, int release) {
   const char *id = NULL;
   unsigned long long cursor = 0;
   asngn_err e;
   if (arg_str(args, "task_id", &id, msg) != 1) BADP("task_id must be a string");
-  const jx_value *v = jx_object_get(args, "cursor");
+  const asmodel_json_value *v = asmodel_json_object_get(args, "cursor");
   if (v) {
-    if (!jx_is_int(v) || jx_int_value(v) < 0) BADP("cursor must be nonnegative");
-    cursor = (unsigned long long)jx_int_value(v);
+    if (!asmodel_json_is_int(v) || asmodel_json_int_value(v) < 0) BADP("cursor must be nonnegative");
+    cursor = (unsigned long long)asmodel_json_int_value(v);
   }
   for (size_t i = 0; i < 32; i++) if (st->jobs[i] && !strcmp(id, mcp_job_id(st->jobs[i]))) {
     if (cancel) (void)mcp_job_cancel(st->jobs[i]);
     e = mcp_job_poll(st->jobs[i], cursor, out);
     if (e != ASNGN_OK) return engine_fail(st, e, out);
-    if (release && jx_bool_value(jx_object_get(*out, "done"))) {
+    if (release && asmodel_json_bool_value(asmodel_json_object_get(*out, "done"))) {
       mcp_job_free(st->jobs[i]); st->jobs[i] = NULL;
     }
     return TOOL_OK;
   }
   return engine_fail(st, ASNGN_ERR_NOT_FOUND, out);
 }
-static int tool_agent_poll(server_state *s, const jx_value *a, jx_value **o, const char **m) {
+static int tool_agent_poll(server_state *s, const asmodel_json_value *a, asmodel_json_value **o, const char **m) {
   return job_request(s, a, o, m, 0, 0);
 }
-static int tool_agent_cancel(server_state *s, const jx_value *a, jx_value **o, const char **m) {
+static int tool_agent_cancel(server_state *s, const asmodel_json_value *a, asmodel_json_value **o, const char **m) {
   return job_request(s, a, o, m, 1, 0);
 }
-static int tool_agent_release(server_state *s, const jx_value *a, jx_value **o, const char **m) {
+static int tool_agent_release(server_state *s, const asmodel_json_value *a, asmodel_json_value **o, const char **m) {
   return job_request(s, a, o, m, 0, 1);
 }
 
-static int tool_agent_ask(server_state *st, const jx_value *args,
-                          jx_value **out, const char **msg) {
+static int tool_agent_ask(server_state *st, const asmodel_json_value *args,
+                          asmodel_json_value **out, const char **msg) {
   const char *message = NULL, *session = NULL, *detail = NULL;
   const char *active_file=NULL,*objective=NULL;
   int no_tools = 0, rc, ok;
@@ -422,7 +422,7 @@ static int tool_agent_ask(server_state *st, const jx_value *args,
   asngn_task *t = NULL;
   asngn_turn_result r;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
 
   if (arg_str(args, "message", &message, msg) != 1)
     BADP("agent_ask: \"message\" must be a string");
@@ -465,35 +465,35 @@ static int tool_agent_ask(server_state *st, const jx_value *args,
     return engine_fail(st, e, out);
   }
 
-  o = jx_object();
+  o = asmodel_json_object();
   ok = (o != NULL);
-  ok &= jx_object_set(o, "answer", jx_string(r.answer ? r.answer : "")) == 0;
-  ok &= jx_object_set(o, "turn", jx_int((long long)r.turn)) == 0;
-  ok &= jx_object_set(o, "class", jx_string(r.klass)) == 0;
-  ok &= jx_object_set(o, "detail", jx_string(r.detail)) == 0;
-  ok &= jx_object_set(o, "tier", jx_string(r.tier)) == 0;
-  ok &= jx_object_set(o, "cache", jx_string(r.cache)) == 0;
-  ok &= jx_object_set(o, "capped", jx_bool(r.capped)) == 0;
-  ok &= jx_object_set(o, "clarify", jx_bool(r.clarify)) == 0;
-  ok &= jx_object_set(o, "tokens_prompt",
-                      jx_int((long long)r.tokens_prompt)) == 0;
-  ok &= jx_object_set(o, "tokens_gen",
-                      jx_int((long long)r.tokens_gen)) == 0;
-  ok &= jx_object_set(o, "tokens_saved",
-                      jx_int((long long)r.tokens_saved)) == 0;
-  ok &= jx_object_set(o, "duration_ms",
-                      jx_int((long long)r.duration_ms)) == 0;
+  ok &= asmodel_json_object_set(o, "answer", asmodel_json_string(r.answer ? r.answer : "")) == 0;
+  ok &= asmodel_json_object_set(o, "turn", asmodel_json_int((long long)r.turn)) == 0;
+  ok &= asmodel_json_object_set(o, "class", asmodel_json_string(r.klass)) == 0;
+  ok &= asmodel_json_object_set(o, "detail", asmodel_json_string(r.detail)) == 0;
+  ok &= asmodel_json_object_set(o, "tier", asmodel_json_string(r.tier)) == 0;
+  ok &= asmodel_json_object_set(o, "cache", asmodel_json_string(r.cache)) == 0;
+  ok &= asmodel_json_object_set(o, "capped", asmodel_json_bool(r.capped)) == 0;
+  ok &= asmodel_json_object_set(o, "clarify", asmodel_json_bool(r.clarify)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_prompt",
+                      asmodel_json_int((long long)r.tokens_prompt)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_gen",
+                      asmodel_json_int((long long)r.tokens_gen)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_saved",
+                      asmodel_json_int((long long)r.tokens_saved)) == 0;
+  ok &= asmodel_json_object_set(o, "duration_ms",
+                      asmodel_json_int((long long)r.duration_ms)) == 0;
   asngn_turn_result_free(&r);
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_agent_feedback(server_state *st, const jx_value *args,
-                               jx_value **out, const char **msg) {
+static int tool_agent_feedback(server_state *st, const asmodel_json_value *args,
+                               asmodel_json_value **out, const char **msg) {
   const char *session = NULL;
   long long turn = 0, signal = 0;
   asngn_session *s = NULL;
@@ -515,40 +515,40 @@ static int tool_agent_feedback(server_state *st, const jx_value *args,
   return *out ? TOOL_OK : TOOL_OOM;
 }
 
-static int tool_session_list(server_state *st, const jx_value *args,
-                             jx_value **out, const char **msg) {
+static int tool_session_list(server_state *st, const asmodel_json_value *args,
+                             asmodel_json_value **out, const char **msg) {
   char **slugs = NULL;
   size_t n = 0, i;
   asngn_err e;
-  jx_value *arr, *o;
+  asmodel_json_value *arr, *o;
   int ok;
   (void)args;
   (void)msg;
 
   e = asngn_session_list(st->ctx, &slugs, &n);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  arr = jx_array();
+  arr = asmodel_json_array();
   ok = (arr != NULL);
   for (i = 0; i < n; i++) {
-    if (jx_array_push(arr, jx_string(slugs[i])) != 0) ok = 0;
+    if (asmodel_json_array_push(arr, asmodel_json_string(slugs[i])) != 0) ok = 0;
   }
   asngn_strings_free(slugs, n);
-  o = jx_object();
-  ok &= jx_object_set(o, "sessions", arr) == 0;
+  o = asmodel_json_object();
+  ok &= asmodel_json_object_set(o, "sessions", arr) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_session_delete(server_state *st, const jx_value *args,
-                               jx_value **out, const char **msg) {
+static int tool_session_delete(server_state *st, const asmodel_json_value *args,
+                               asmodel_json_value **out, const char **msg) {
   const char *slug = NULL;
   size_t i;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
 
   if (arg_str(args, "slug", &slug, msg) < 0 || slug == NULL)
     BADP("session_delete: \"slug\" is required");
@@ -567,21 +567,21 @@ static int tool_session_delete(server_state *st, const jx_value *args,
   }
   e = asngn_session_delete(st->ctx, slug);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  o = jx_object();
-  if (jx_object_set(o, "deleted", jx_string(slug)) != 0) {
-    jx_free(o);
+  o = asmodel_json_object();
+  if (asmodel_json_object_set(o, "deleted", asmodel_json_string(slug)) != 0) {
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_session_new(server_state *st, const jx_value *args,
-                            jx_value **out, const char **msg) {
+static int tool_session_new(server_state *st, const asmodel_json_value *args,
+                            asmodel_json_value **out, const char **msg) {
   const char *slug = NULL;
   asngn_session *s = NULL;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
   int rc;
 
   if (arg_str(args, "slug", &slug, msg) < 0)
@@ -597,9 +597,9 @@ static int tool_session_new(server_state *st, const jx_value *args,
     if (e != ASNGN_OK) return engine_fail(st, e, out);
     st->sessions[st->sessions_n++] = s;
   }
-  o = jx_object();
-  if (jx_object_set(o, "slug", jx_string(asngn_session_slug(s))) != 0) {
-    jx_free(o);
+  o = asmodel_json_object();
+  if (asmodel_json_object_set(o, "slug", asmodel_json_string(asngn_session_slug(s))) != 0) {
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
@@ -627,14 +627,14 @@ static int parse_security_profile(const char *value,
   return 1;
 }
 
-static int tool_session_mode(server_state *st, const jx_value *args,
-                             jx_value **out, const char **msg) {
+static int tool_session_mode(server_state *st, const asmodel_json_value *args,
+                             asmodel_json_value **out, const char **msg) {
   const char *session = NULL, *mode_value = NULL, *profile_value = NULL;
   asngn_usage_mode mode;
   asngn_security_profile profile;
   asngn_session *s = NULL;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
   int rc, ok;
 
   if (arg_str(args, "session", &session, msg) < 0)
@@ -658,26 +658,26 @@ static int tool_session_mode(server_state *st, const jx_value *args,
   }
   e = asngn_session_get_mode(s, &mode, &profile);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  o = jx_object();
+  o = asmodel_json_object();
   ok = o != NULL;
-  ok &= jx_object_set(o, "mode", jx_string(asngn_usage_mode_name(mode))) == 0;
-  ok &= jx_object_set(o, "security_profile",
-                      jx_string(asngn_security_profile_name(profile))) == 0;
+  ok &= asmodel_json_object_set(o, "mode", asmodel_json_string(asngn_usage_mode_name(mode))) == 0;
+  ok &= asmodel_json_object_set(o, "security_profile",
+                      asmodel_json_string(asngn_security_profile_name(profile))) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_session_stats(server_state *st, const jx_value *args,
-                              jx_value **out, const char **msg) {
+static int tool_session_stats(server_state *st, const asmodel_json_value *args,
+                              asmodel_json_value **out, const char **msg) {
   const char *session = NULL;
   asngn_session *s = NULL;
   asngn_session_stats stt;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
   int rc, ok;
 
   if (arg_str(args, "session", &session, msg) != 1)
@@ -689,54 +689,54 @@ static int tool_session_stats(server_state *st, const jx_value *args,
   e = asngn_session_get_stats(s, &stt);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
 
-  o = jx_object();
+  o = asmodel_json_object();
   ok = (o != NULL);
-  ok &= jx_object_set(o, "turns", jx_int((long long)stt.turns)) == 0;
-  ok &= jx_object_set(o, "tokens_prompt",
-                      jx_int((long long)stt.tokens_prompt)) == 0;
-  ok &= jx_object_set(o, "tokens_gen",
-                      jx_int((long long)stt.tokens_gen)) == 0;
-  ok &= jx_object_set(o, "tokens_saved",
-                      jx_int((long long)stt.tokens_saved)) == 0;
-  ok &= jx_object_set(o, "cache_hits",
-                      jx_int((long long)stt.cache_hits)) == 0;
-  ok &= jx_object_set(o, "cache_adapts",
-                      jx_int((long long)stt.cache_adapts)) == 0;
-  ok &= jx_object_set(o, "cache_misses",
-                      jx_int((long long)stt.cache_misses)) == 0;
-  ok &= jx_object_set(o, "clarifies",
-                      jx_int((long long)stt.clarifies)) == 0;
-  ok &= jx_object_set(o, "capped", jx_int((long long)stt.capped)) == 0;
-  ok &= jx_object_set(o, "escalations",
-                      jx_int((long long)stt.escalations)) == 0;
-  ok &= jx_object_set(o, "qpt_rolling", jx_finite(stt.qpt_rolling)) == 0;
-  ok &= jx_object_set(o, "world_epoch",
-                      jx_int((long long)stt.world_epoch)) == 0;
-  ok &= jx_object_set(o, "spent_tokens", jx_int(stt.spent_tokens)) == 0;
+  ok &= asmodel_json_object_set(o, "turns", asmodel_json_int((long long)stt.turns)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_prompt",
+                      asmodel_json_int((long long)stt.tokens_prompt)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_gen",
+                      asmodel_json_int((long long)stt.tokens_gen)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_saved",
+                      asmodel_json_int((long long)stt.tokens_saved)) == 0;
+  ok &= asmodel_json_object_set(o, "cache_hits",
+                      asmodel_json_int((long long)stt.cache_hits)) == 0;
+  ok &= asmodel_json_object_set(o, "cache_adapts",
+                      asmodel_json_int((long long)stt.cache_adapts)) == 0;
+  ok &= asmodel_json_object_set(o, "cache_misses",
+                      asmodel_json_int((long long)stt.cache_misses)) == 0;
+  ok &= asmodel_json_object_set(o, "clarifies",
+                      asmodel_json_int((long long)stt.clarifies)) == 0;
+  ok &= asmodel_json_object_set(o, "capped", asmodel_json_int((long long)stt.capped)) == 0;
+  ok &= asmodel_json_object_set(o, "escalations",
+                      asmodel_json_int((long long)stt.escalations)) == 0;
+  ok &= asmodel_json_object_set(o, "qpt_rolling", asmodel_json_finite(stt.qpt_rolling)) == 0;
+  ok &= asmodel_json_object_set(o, "world_epoch",
+                      asmodel_json_int((long long)stt.world_epoch)) == 0;
+  ok &= asmodel_json_object_set(o, "spent_tokens", asmodel_json_int(stt.spent_tokens)) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_project_select(server_state *st, const jx_value *args,
-                               jx_value **out, const char **msg) {
-  const jx_value *sv = jx_object_get(args, "slug");
+static int tool_project_select(server_state *st, const asmodel_json_value *args,
+                               asmodel_json_value **out, const char **msg) {
+  const asmodel_json_value *sv = asmodel_json_object_get(args, "slug");
   const char *slug = NULL, *session = NULL;
   asngn_session *s = NULL;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
   int rc, ok;
 
   if (!sv)
     BADP("project_select: \"slug\" is required (string or null)");
-  if (jx_typeof(sv) == JX_STRING) {
-    if (jx_string_length(sv) != strlen(jx_string_value(sv)))
+  if (asmodel_json_typeof(sv) == ASMODEL_JSON_STRING) {
+    if (asmodel_json_string_length(sv) != strlen(asmodel_json_string_value(sv)))
       BADP("string must not contain NUL");
-    slug = jx_string_value(sv);
-  } else if (jx_typeof(sv) != JX_NULL) {
+    slug = asmodel_json_string_value(sv);
+  } else if (asmodel_json_typeof(sv) != ASMODEL_JSON_NULL) {
     BADP("project_select: \"slug\" must be a string or null");
   }
   if (arg_str(args, "session", &session, msg) < 0)
@@ -747,23 +747,23 @@ static int tool_project_select(server_state *st, const jx_value *args,
   e = asngn_session_project(s, slug);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
 
-  o = jx_object();
+  o = asmodel_json_object();
   ok = (o != NULL);
-  ok &= jx_object_set(o, "ok", jx_bool(1)) == 0;
-  ok &= jx_object_set(o, "active", slug ? jx_string(slug) : jx_null()) == 0;
+  ok &= asmodel_json_object_set(o, "ok", asmodel_json_bool(1)) == 0;
+  ok &= asmodel_json_object_set(o, "active", slug ? asmodel_json_string(slug) : asmodel_json_null()) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_cache_stats(server_state *st, const jx_value *args,
-                            jx_value **out, const char **msg) {
+static int tool_cache_stats(server_state *st, const asmodel_json_value *args,
+                            asmodel_json_value **out, const char **msg) {
   asngn_stats stt;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
   int ok;
   (void)args;
   (void)msg;
@@ -771,25 +771,25 @@ static int tool_cache_stats(server_state *st, const jx_value *args,
   memset(&stt, 0, sizeof stt);
   e = asngn_get_stats(st->ctx, &stt);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  o = jx_object();
+  o = asmodel_json_object();
   ok = (o != NULL);
-  ok &= jx_object_set(o, "hits", jx_int((long long)stt.cache_hits)) == 0;
-  ok &= jx_object_set(o, "adapts",
-                      jx_int((long long)stt.cache_adapts)) == 0;
-  ok &= jx_object_set(o, "misses",
-                      jx_int((long long)stt.cache_misses)) == 0;
-  ok &= jx_object_set(o, "tool_cache_hits",
-                      jx_int((long long)stt.tool_cache_hits)) == 0;
+  ok &= asmodel_json_object_set(o, "hits", asmodel_json_int((long long)stt.cache_hits)) == 0;
+  ok &= asmodel_json_object_set(o, "adapts",
+                      asmodel_json_int((long long)stt.cache_adapts)) == 0;
+  ok &= asmodel_json_object_set(o, "misses",
+                      asmodel_json_int((long long)stt.cache_misses)) == 0;
+  ok &= asmodel_json_object_set(o, "tool_cache_hits",
+                      asmodel_json_int((long long)stt.tool_cache_hits)) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_cache_clear(server_state *st, const jx_value *args,
-                            jx_value **out, const char **msg) {
+static int tool_cache_clear(server_state *st, const asmodel_json_value *args,
+                            asmodel_json_value **out, const char **msg) {
   const char *scope = NULL;
   asngn_err e;
   int rc;
@@ -804,13 +804,13 @@ static int tool_cache_clear(server_state *st, const jx_value *args,
   return *out ? TOOL_OK : TOOL_OOM;
 }
 
-static int tool_telemetry_tail(server_state *st, const jx_value *args,
-                               jx_value **out, const char **msg) {
+static int tool_telemetry_tail(server_state *st, const asmodel_json_value *args,
+                               asmodel_json_value **out, const char **msg) {
   long long n = 50; /* default when absent */
   char **lines = NULL;
   size_t ln = 0, i;
   asngn_err e;
-  jx_value *arr, *o;
+  asmodel_json_value *arr, *o;
   int rc, ok;
 
   rc = arg_int(args, "n", &n);
@@ -819,27 +819,27 @@ static int tool_telemetry_tail(server_state *st, const jx_value *args,
 
   e = asngn_telemetry_tail(st->ctx, (size_t)n, &lines, &ln);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  arr = jx_array();
+  arr = asmodel_json_array();
   ok = (arr != NULL);
   for (i = 0; i < ln; i++) {
-    if (jx_array_push(arr, jx_string(lines[i])) != 0) ok = 0;
+    if (asmodel_json_array_push(arr, asmodel_json_string(lines[i])) != 0) ok = 0;
   }
   asngn_strings_free(lines, ln);
-  o = jx_object();
-  ok &= jx_object_set(o, "events", arr) == 0;
+  o = asmodel_json_object();
+  ok &= asmodel_json_object_set(o, "events", arr) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
   return TOOL_OK;
 }
 
-static int tool_engine_stats(server_state *st, const jx_value *args,
-                             jx_value **out, const char **msg) {
+static int tool_engine_stats(server_state *st, const asmodel_json_value *args,
+                             asmodel_json_value **out, const char **msg) {
   asngn_stats stt;
   asngn_err e;
-  jx_value *o;
+  asmodel_json_value *o;
   int ok;
   (void)args;
   (void)msg;
@@ -847,34 +847,34 @@ static int tool_engine_stats(server_state *st, const jx_value *args,
   memset(&stt, 0, sizeof stt);
   e = asngn_get_stats(st->ctx, &stt);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  o = jx_object();
+  o = asmodel_json_object();
   ok = (o != NULL);
-  ok &= jx_object_set(o, "turns", jx_int((long long)stt.turns)) == 0;
-  ok &= jx_object_set(o, "cache_hits",
-                      jx_int((long long)stt.cache_hits)) == 0;
-  ok &= jx_object_set(o, "cache_adapts",
-                      jx_int((long long)stt.cache_adapts)) == 0;
-  ok &= jx_object_set(o, "cache_misses",
-                      jx_int((long long)stt.cache_misses)) == 0;
-  ok &= jx_object_set(o, "tool_calls",
-                      jx_int((long long)stt.tool_calls)) == 0;
-  ok &= jx_object_set(o, "tool_cache_hits",
-                      jx_int((long long)stt.tool_cache_hits)) == 0;
-  ok &= jx_object_set(o, "escalations",
-                      jx_int((long long)stt.escalations)) == 0;
-  ok &= jx_object_set(o, "guard_trips",
-                      jx_int((long long)stt.guard_trips)) == 0;
-  ok &= jx_object_set(o, "tokens_prompt",
-                      jx_int((long long)stt.tokens_prompt)) == 0;
-  ok &= jx_object_set(o, "tokens_gen",
-                      jx_int((long long)stt.tokens_gen)) == 0;
-  ok &= jx_object_set(o, "tokens_saved",
-                      jx_int((long long)stt.tokens_saved)) == 0;
-  ok &= jx_object_set(o, "qpt_rolling", jx_finite(stt.qpt_rolling)) == 0;
-  ok &= jx_object_set(o, "last_turn_at", jx_int(stt.last_turn_at)) == 0;
-  ok &= jx_object_set(o, "last_sweep_at", jx_int(stt.last_sweep_at)) == 0;
+  ok &= asmodel_json_object_set(o, "turns", asmodel_json_int((long long)stt.turns)) == 0;
+  ok &= asmodel_json_object_set(o, "cache_hits",
+                      asmodel_json_int((long long)stt.cache_hits)) == 0;
+  ok &= asmodel_json_object_set(o, "cache_adapts",
+                      asmodel_json_int((long long)stt.cache_adapts)) == 0;
+  ok &= asmodel_json_object_set(o, "cache_misses",
+                      asmodel_json_int((long long)stt.cache_misses)) == 0;
+  ok &= asmodel_json_object_set(o, "tool_calls",
+                      asmodel_json_int((long long)stt.tool_calls)) == 0;
+  ok &= asmodel_json_object_set(o, "tool_cache_hits",
+                      asmodel_json_int((long long)stt.tool_cache_hits)) == 0;
+  ok &= asmodel_json_object_set(o, "escalations",
+                      asmodel_json_int((long long)stt.escalations)) == 0;
+  ok &= asmodel_json_object_set(o, "guard_trips",
+                      asmodel_json_int((long long)stt.guard_trips)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_prompt",
+                      asmodel_json_int((long long)stt.tokens_prompt)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_gen",
+                      asmodel_json_int((long long)stt.tokens_gen)) == 0;
+  ok &= asmodel_json_object_set(o, "tokens_saved",
+                      asmodel_json_int((long long)stt.tokens_saved)) == 0;
+  ok &= asmodel_json_object_set(o, "qpt_rolling", asmodel_json_finite(stt.qpt_rolling)) == 0;
+  ok &= asmodel_json_object_set(o, "last_turn_at", asmodel_json_int(stt.last_turn_at)) == 0;
+  ok &= asmodel_json_object_set(o, "last_sweep_at", asmodel_json_int(stt.last_sweep_at)) == 0;
   if (!ok) {
-    jx_free(o);
+    asmodel_json_free(o);
     return TOOL_OOM;
   }
   *out = o;
@@ -883,26 +883,26 @@ static int tool_engine_stats(server_state *st, const jx_value *args,
 
 /* ═══════════════════════ tool table ════════════════════════════ */
 
-static int tool_workspace_info(server_state *st, const jx_value *args,
-                               jx_value **out, const char **msg) {
+static int tool_workspace_info(server_state *st, const asmodel_json_value *args,
+                               asmodel_json_value **out, const char **msg) {
   asngn_workspace_info w;
-  jx_value *o;
+  asmodel_json_value *o;
   int ok;
   asngn_err e;
   (void)args; (void)msg;
   memset(&w, 0, sizeof w);
   e = asngn_workspace_get(st->ctx, &w);
   if (e != ASNGN_OK) return engine_fail(st, e, out);
-  o = jx_object(); ok = o != NULL;
-  ok &= jx_object_set(o, "canonical_root", jx_string(w.canonical_root)) == 0;
-  ok &= jx_object_set(o, "repository_root", jx_string(w.repository_root)) == 0;
-  ok &= jx_object_set(o, "head", jx_string(w.head)) == 0;
-  ok &= jx_object_set(o, "branch", jx_string(w.branch)) == 0;
-  ok &= jx_object_set(o, "project_id", jx_string(w.project_id)) == 0;
-  ok &= jx_object_set(o, "ignore_rules", jx_string(w.ignore_rules)) == 0;
-  ok &= jx_object_set(o, "build_adapter", jx_string(w.build_adapter)) == 0;
-  ok &= jx_object_set(o, "fingerprint", jx_string(w.fingerprint)) == 0;
-  if (!ok) { jx_free(o); return TOOL_OOM; }
+  o = asmodel_json_object(); ok = o != NULL;
+  ok &= asmodel_json_object_set(o, "canonical_root", asmodel_json_string(w.canonical_root)) == 0;
+  ok &= asmodel_json_object_set(o, "repository_root", asmodel_json_string(w.repository_root)) == 0;
+  ok &= asmodel_json_object_set(o, "head", asmodel_json_string(w.head)) == 0;
+  ok &= asmodel_json_object_set(o, "branch", asmodel_json_string(w.branch)) == 0;
+  ok &= asmodel_json_object_set(o, "project_id", asmodel_json_string(w.project_id)) == 0;
+  ok &= asmodel_json_object_set(o, "ignore_rules", asmodel_json_string(w.ignore_rules)) == 0;
+  ok &= asmodel_json_object_set(o, "build_adapter", asmodel_json_string(w.build_adapter)) == 0;
+  ok &= asmodel_json_object_set(o, "fingerprint", asmodel_json_string(w.fingerprint)) == 0;
+  if (!ok) { asmodel_json_free(o); return TOOL_OOM; }
   *out = o; return TOOL_OK;
 }
 
@@ -1027,98 +1027,98 @@ static const tool_def TOOLS[] = {
 
 /* ═══════════════════════ method handlers ═══════════════════════ */
 
-static jx_value *initialize_result(void) {
-  jx_value *res = jx_object();
-  jx_value *caps, *si;
+static asmodel_json_value *initialize_result(void) {
+  asmodel_json_value *res = asmodel_json_object();
+  asmodel_json_value *caps, *si;
   int ok = (res != NULL);
-  ok &= jx_object_set(res, "protocolVersion", jx_string(MCP_LEGACY_VERSION)) == 0;
-  caps = jx_object();
-  ok &= jx_object_set(caps, "tools", jx_object()) == 0;
-  ok &= jx_object_set(res, "capabilities", caps) == 0;
-  si = jx_object();
-  ok &= jx_object_set(si, "name", jx_string("asngn-mcp")) == 0;
-  ok &= jx_object_set(si, "version", jx_string(asngn_version())) == 0;
-  ok &= jx_object_set(res, "serverInfo", si) == 0;
+  ok &= asmodel_json_object_set(res, "protocolVersion", asmodel_json_string(MCP_LEGACY_VERSION)) == 0;
+  caps = asmodel_json_object();
+  ok &= asmodel_json_object_set(caps, "tools", asmodel_json_object()) == 0;
+  ok &= asmodel_json_object_set(res, "capabilities", caps) == 0;
+  si = asmodel_json_object();
+  ok &= asmodel_json_object_set(si, "name", asmodel_json_string("asngn-mcp")) == 0;
+  ok &= asmodel_json_object_set(si, "version", asmodel_json_string(asngn_version())) == 0;
+  ok &= asmodel_json_object_set(res, "serverInfo", si) == 0;
   if (!ok) {
-    jx_free(res);
+    asmodel_json_free(res);
     return NULL;
   }
   return res;
 }
 
-static jx_value *discover_result(void) {
-  jx_value *res = jx_object();
-  jx_value *versions = jx_array();
-  jx_value *caps = jx_object();
+static asmodel_json_value *discover_result(void) {
+  asmodel_json_value *res = asmodel_json_object();
+  asmodel_json_value *versions = asmodel_json_array();
+  asmodel_json_value *caps = asmodel_json_object();
   int ok = res != NULL && versions != NULL && caps != NULL;
-  ok &= jx_array_push(versions, jx_string(MCP_MODERN_VERSION)) == 0;
-  ok &= jx_array_push(versions, jx_string(MCP_LEGACY_VERSION)) == 0;
-  ok &= jx_object_set(caps, "tools", jx_object()) == 0;
-  ok &= jx_object_set(res, "supportedVersions", versions) == 0;
-  ok &= jx_object_set(res, "capabilities", caps) == 0;
-  ok &= jx_object_set(res, "instructions",
-                      jx_string("Local Asterism agent tools.")) == 0;
-  ok &= jx_object_set(res, "ttlMs", jx_int(3600000)) == 0;
-  ok &= jx_object_set(res, "cacheScope", jx_string("private")) == 0;
+  ok &= asmodel_json_array_push(versions, asmodel_json_string(MCP_MODERN_VERSION)) == 0;
+  ok &= asmodel_json_array_push(versions, asmodel_json_string(MCP_LEGACY_VERSION)) == 0;
+  ok &= asmodel_json_object_set(caps, "tools", asmodel_json_object()) == 0;
+  ok &= asmodel_json_object_set(res, "supportedVersions", versions) == 0;
+  ok &= asmodel_json_object_set(res, "capabilities", caps) == 0;
+  ok &= asmodel_json_object_set(res, "instructions",
+                      asmodel_json_string("Local Asterism agent tools.")) == 0;
+  ok &= asmodel_json_object_set(res, "ttlMs", asmodel_json_int(3600000)) == 0;
+  ok &= asmodel_json_object_set(res, "cacheScope", asmodel_json_string("private")) == 0;
   if (!ok) {
-    jx_free(res);
+    asmodel_json_free(res);
     return NULL;
   }
   return res;
 }
 
-static void handle_tools_list(int want, jx_value *rid) {
-  jx_value *arr = jx_array();
-  jx_value *res;
+static void handle_tools_list(int want, asmodel_json_value *rid) {
+  asmodel_json_value *arr = asmodel_json_array();
+  asmodel_json_value *res;
   int ok = (arr != NULL);
   size_t i;
   for (i = 0; ok && i < TOOLS_N; i++) {
-    jx_value *sch = NULL, *t;
+    asmodel_json_value *sch = NULL, *t;
     int tok;
-    if (jx_parse(TOOLS[i].schema, strlen(TOOLS[i].schema), &sch) != 0) {
+    if (asmodel_json_parse(TOOLS[i].schema, strlen(TOOLS[i].schema), &sch) != 0) {
       ok = 0;
       break;
     }
-    t = jx_object();
+    t = asmodel_json_object();
     tok = (t != NULL);
-    tok &= jx_object_set(t, "name", jx_string(TOOLS[i].name)) == 0;
-    tok &= jx_object_set(t, "description", jx_string(TOOLS[i].desc)) == 0;
-    tok &= jx_object_set(t, "inputSchema", sch) == 0;
+    tok &= asmodel_json_object_set(t, "name", asmodel_json_string(TOOLS[i].name)) == 0;
+    tok &= asmodel_json_object_set(t, "description", asmodel_json_string(TOOLS[i].desc)) == 0;
+    tok &= asmodel_json_object_set(t, "inputSchema", sch) == 0;
     if (!tok) {
-      jx_free(t);
+      asmodel_json_free(t);
       ok = 0;
       break;
     }
-    if (jx_array_push(arr, t) != 0) {
+    if (asmodel_json_array_push(arr, t) != 0) {
       ok = 0;
       break;
     }
   }
   if (!ok) {
-    jx_free(arr);
+    asmodel_json_free(arr);
     send_error(want, rid, -32603, "out of memory", NULL);
     return;
   }
-  res = jx_object();
-  if (jx_object_set(res, "tools", arr) != 0) {
-    jx_free(res);
+  res = asmodel_json_object();
+  if (asmodel_json_object_set(res, "tools", arr) != 0) {
+    asmodel_json_free(res);
     send_error(want, rid, -32603, "out of memory", NULL);
     return;
   }
   send_result(want, rid, res);
 }
 
-static void handle_tools_call(server_state *st, int want, jx_value *rid,
-                              const jx_value *params) {
+static void handle_tools_call(server_state *st, int want, asmodel_json_value *rid,
+                              const asmodel_json_value *params) {
   const char *name = NULL;
-  const jx_value *args;
+  const asmodel_json_value *args;
   const tool_def *tool = NULL;
-  jx_value *payload = NULL;
+  asmodel_json_value *payload = NULL;
   const char *pmsg = NULL;
   size_t i;
   int rc;
 
-  if (!params || jx_typeof(params) != JX_OBJECT) {
+  if (!params || asmodel_json_typeof(params) != ASMODEL_JSON_OBJECT) {
     send_error(want, rid, -32602, "params must be an object", NULL);
     return;
   }
@@ -1127,8 +1127,8 @@ static void handle_tools_call(server_state *st, int want, jx_value *rid,
                pmsg ? pmsg : "params.name must be a string", NULL);
     return;
   }
-  args = jx_object_get(params, "arguments");
-  if (args && jx_typeof(args) != JX_OBJECT) {
+  args = asmodel_json_object_get(params, "arguments");
+  if (args && asmodel_json_typeof(args) != ASMODEL_JSON_OBJECT) {
     send_error(want, rid, -32602, "params.arguments must be an object", NULL);
     return;
   }
@@ -1162,43 +1162,43 @@ static void handle_tools_call(server_state *st, int want, jx_value *rid,
   }
 }
 
-static void handle_request(server_state *st, jx_value *req) {
-  const jx_value *idv, *ver, *methv, *protocolv = NULL;
+static void handle_request(server_state *st, asmodel_json_value *req) {
+  const asmodel_json_value *idv, *ver, *methv, *protocolv = NULL;
   const char *method;
-  jx_value *rid;
+  asmodel_json_value *rid;
   int has_id;
 
-  if (jx_typeof(req) == JX_ARRAY) {
+  if (asmodel_json_typeof(req) == ASMODEL_JSON_ARRAY) {
     send_error(1, NULL, -32600, "batch requests are not supported", NULL);
     return;
   }
-  if (jx_typeof(req) != JX_OBJECT) {
+  if (asmodel_json_typeof(req) != ASMODEL_JSON_OBJECT) {
     send_error(1, NULL, -32600, "request must be a JSON object", NULL);
     return;
   }
-  idv = jx_object_get(req, "id");
+  idv = asmodel_json_object_get(req, "id");
   has_id = (idv != NULL);
-  ver = jx_object_get(req, "jsonrpc");
-  methv = jx_object_get(req, "method");
-  if (!ver || jx_typeof(ver) != JX_STRING ||
-      strcmp(jx_string_value(ver), "2.0") != 0 || !methv ||
-      jx_typeof(methv) != JX_STRING) {
-    send_error(has_id, jx_clone(idv), -32600,
+  ver = asmodel_json_object_get(req, "jsonrpc");
+  methv = asmodel_json_object_get(req, "method");
+  if (!ver || asmodel_json_typeof(ver) != ASMODEL_JSON_STRING ||
+      strcmp(asmodel_json_string_value(ver), "2.0") != 0 || !methv ||
+      asmodel_json_typeof(methv) != ASMODEL_JSON_STRING) {
+    send_error(has_id, asmodel_json_clone(idv), -32600,
                "invalid JSON-RPC 2.0 request", NULL);
     return;
   }
-  method = jx_string_value(methv);
+  method = asmodel_json_string_value(methv);
   {
-    const jx_value *params = jx_object_get(req, "params");
-    const jx_value *meta = params && jx_typeof(params) == JX_OBJECT
-                               ? jx_object_get(params, "_meta")
+    const asmodel_json_value *params = asmodel_json_object_get(req, "params");
+    const asmodel_json_value *meta = params && asmodel_json_typeof(params) == ASMODEL_JSON_OBJECT
+                               ? asmodel_json_object_get(params, "_meta")
                                : NULL;
-    protocolv = meta && jx_typeof(meta) == JX_OBJECT
-                    ? jx_object_get(meta,
+    protocolv = meta && asmodel_json_typeof(meta) == ASMODEL_JSON_OBJECT
+                    ? asmodel_json_object_get(meta,
                         "io.modelcontextprotocol/protocolVersion")
                     : NULL;
-    mcp_modern_response = protocolv && jx_typeof(protocolv) == JX_STRING &&
-                          strcmp(jx_string_value(protocolv),
+    mcp_modern_response = protocolv && asmodel_json_typeof(protocolv) == ASMODEL_JSON_STRING &&
+                          strcmp(asmodel_json_string_value(protocolv),
                                  MCP_MODERN_VERSION) == 0;
   }
   /* "notifications/..." methods are ignored only as true notifications
@@ -1206,30 +1206,30 @@ static void handle_request(server_state *st, jx_value *req) {
    * through to the normal dispatch (=> -32601 when unknown). */
   if (!has_id && strncmp(method, "notifications/", 14) == 0) return;
 
-  rid = jx_clone(idv); /* NULL (=> null id) when absent or on OOM */
+  rid = asmodel_json_clone(idv); /* NULL (=> null id) when absent or on OOM */
   if (protocolv && !mcp_modern_response &&
       strcmp(method, "server/discover") != 0) {
     send_error(has_id, rid, -32022, "unsupported MCP protocol version", NULL);
     return;
   }
   if (strcmp(method, "initialize") == 0) {
-    const jx_value *params = jx_object_get(req, "params");
-    const jx_value *pv = params && jx_typeof(params) == JX_OBJECT
-                             ? jx_object_get(params, "protocolVersion")
+    const asmodel_json_value *params = asmodel_json_object_get(req, "params");
+    const asmodel_json_value *pv = params && asmodel_json_typeof(params) == ASMODEL_JSON_OBJECT
+                             ? asmodel_json_object_get(params, "protocolVersion")
                              : NULL;
     mcp_modern_response = 0;
-    if (pv && (jx_typeof(pv) != JX_STRING ||
-               strcmp(jx_string_value(pv), MCP_LEGACY_VERSION) != 0)) {
+    if (pv && (asmodel_json_typeof(pv) != ASMODEL_JSON_STRING ||
+               strcmp(asmodel_json_string_value(pv), MCP_LEGACY_VERSION) != 0)) {
       send_error(has_id, rid, -32022, "unsupported MCP protocol version", NULL);
       return;
     }
-    jx_value *res = initialize_result();
+    asmodel_json_value *res = initialize_result();
     if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
     else send_result(has_id, rid, res);
     return;
   }
   if (strcmp(method, "server/discover") == 0) {
-    jx_value *res;
+    asmodel_json_value *res;
     mcp_modern_response = 1;
     res = discover_result();
     if (!res) send_error(has_id, rid, -32603, "out of memory", NULL);
@@ -1237,7 +1237,7 @@ static void handle_request(server_state *st, jx_value *req) {
     return;
   }
   if (strcmp(method, "ping") == 0) {
-    send_result(has_id, rid, jx_object());
+    send_result(has_id, rid, asmodel_json_object());
     return;
   }
   if (strcmp(method, "tools/list") == 0) {
@@ -1245,7 +1245,7 @@ static void handle_request(server_state *st, jx_value *req) {
     return;
   }
   if (strcmp(method, "tools/call") == 0) {
-    handle_tools_call(st, has_id, rid, jx_object_get(req, "params"));
+    handle_tools_call(st, has_id, rid, asmodel_json_object_get(req, "params"));
     return;
   }
   send_error(has_id, rid, -32601, "method not found", NULL);
@@ -1388,12 +1388,12 @@ int main(int argc, char **argv) {
       continue;
     }
     {
-      jx_value *req = NULL;
-      if (jx_parse(line, llen, &req) != 0) {
+      asmodel_json_value *req = NULL;
+      if (asmodel_json_parse(line, llen, &req) != 0) {
         send_error(1, NULL, -32700, "parse error", NULL);
       } else {
         handle_request(&st, req);
-        jx_free(req);
+        asmodel_json_free(req);
       }
     }
     free(line);

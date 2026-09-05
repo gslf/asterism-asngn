@@ -82,7 +82,7 @@ static void probe_log(int level, const char *msg, void *ud) {
 TEST(asynchronous_events_resume_from_cursor) {
   eng_fx f;
   mcp_job *job = NULL;
-  jx_value *response = NULL;
+  asmodel_json_value *response = NULL;
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
   asngn_work_definition work = {0};
   strcpy(work.goal,"Fix the regression");
@@ -100,23 +100,23 @@ TEST(asynchronous_events_resume_from_cursor) {
   bool done = false;
   for (int i = 0; i < 500 && !done; i++) {
     ASSERT_OK(mcp_job_poll(job, (unsigned long long)cursor, &response));
-    done = jx_bool_value(jx_object_get(response, "done")) != 0;
-    cursor = jx_int_value(jx_object_get(response, "next_cursor"));
-    if (done) ASSERT_EQ_STR(jx_string_value(jx_object_get(response, "answer")), "Hello asynchronously!\n");
-    jx_free(response); response = NULL;
+    done = asmodel_json_bool_value(asmodel_json_object_get(response, "done")) != 0;
+    cursor = asmodel_json_int_value(asmodel_json_object_get(response, "next_cursor"));
+    if (done) ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(response, "answer")), "Hello asynchronously!\n");
+    asmodel_json_free(response); response = NULL;
   }
   ASSERT_TRUE(done && cursor > 0);
   ASSERT_CONTAINS(f.light.last_user,"Acceptance contract (revision 1)");
   ASSERT_CONTAINS(f.light.last_user,"The regression suite must run");
   ASSERT_OK(mcp_job_poll(job, (unsigned long long)cursor, &response));
-  ASSERT_EQ_INT(jx_array_len(jx_object_get(response, "events")), 0);
-  ASSERT_EQ_STR(jx_string_value(jx_object_get(response,"task_state")),"incomplete");
+  ASSERT_EQ_INT(asmodel_json_array_len(asmodel_json_object_get(response, "events")), 0);
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(response,"task_state")),"incomplete");
   ASSERT_TRUE(mcp_job_uses_session(job,f.s));
-  jx_free(response);
+  asmodel_json_free(response);
   ASSERT_OK(asngn_session_work_invalidate(f.s,1));
   ASSERT_OK(mcp_job_poll(job,(unsigned long long)cursor,&response));
-  ASSERT_EQ_STR(jx_string_value(jx_object_get(response,"task_state")),"superseded");
-  jx_free(response);
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(response,"task_state")),"superseded");
+  asmodel_json_free(response);
   ASSERT_ERR(mcp_job_poll(job, (unsigned long long)cursor + 1, &response), ASNGN_ERR_INVALID);
   mcp_job_free(job);
   char slug[65]; snprintf(slug,sizeof slug,"%s",asngn_session_slug(f.s));

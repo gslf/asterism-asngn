@@ -17,9 +17,10 @@
     },
     "asmodel": {
       "repository": "gslf/asterism-asmodel",
-      "revision": "d680fdb709929eedf87adbe036da1827025440e0",
+      "revision": "1b44508b84ab3e4f5b101a3fccfa78aa37b7c4ac",
       "headers": {
-        "include/asmodel.h": "782672f9b943f3572edffe9b0e4ed11d6994992b5125cac2058ca11ef65ba545"
+        "include/asmodel.h": "782672f9b943f3572edffe9b0e4ed11d6994992b5125cac2058ca11ef65ba545",
+        "include/asmodel_json.h": "2c52a56edc9c558065681a0a181582999bd15c71b457f0b908de531023ba8294"
       }
     },
     "astools": {

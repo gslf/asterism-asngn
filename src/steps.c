@@ -21,7 +21,7 @@
  */
 
 #include "asngn_internal.h"
-#include "json.h"
+#include "asmodel_json.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -67,7 +67,7 @@ static bool span_eq(const char *p, size_t n, const char *lit) {
 static asngn_err parse_quoted(asngn_ctx *c, const char **p, const char *end,
                               const char *what, size_t cap, char **out) {
   const char *start = *p, *q = start;
-  jx_value *v = NULL;
+  asmodel_json_value *v = NULL;
   bool escaped = false;
   if (q >= end || *q++ != '"') goto invalid;
   while (q < end) {
@@ -75,17 +75,17 @@ static asngn_err parse_quoted(asngn_ctx *c, const char **p, const char *end,
     if (escaped) { escaped = false; continue; }
     if (ch == '\\') { escaped = true; continue; }
     if (ch == '"') {
-      if (jx_parse(start, (size_t)(q-start), &v)) goto invalid;
-      const char *text = jx_string_value(v);
-      size_t n = jx_string_length(v);
+      if (asmodel_json_parse(start, (size_t)(q-start), &v)) goto invalid;
+      const char *text = asmodel_json_string_value(v);
+      size_t n = asmodel_json_string_length(v);
       if (!text || !n || n > cap || strlen(text) != n) goto invalid;
       *out = asngn_strdup(text); *p = q;
-      jx_free(v);
+      asmodel_json_free(v);
       return *out ? ASNGN_OK : ASNGN_ERR_NOMEM;
     }
   }
 invalid:
-  jx_free(v);
+  asmodel_json_free(v);
   return asngn_seterr(c, ASNGN_ERR_PROTOCOL, "step: invalid or oversized %s string", what);
 }
 

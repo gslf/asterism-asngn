@@ -174,7 +174,6 @@ set(ASNGN_SOURCES
   src/grammar.c
   src/protocol_schema.c
   src/protocol_value.c
-  src/json.c
   src/steps.c
   src/verification.c
   src/work_definition.c

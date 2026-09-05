@@ -94,7 +94,11 @@ trials require actual resources. No real-model result has been produced here.
 
 - Integrated no-llama suite: 32/32 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 32/32 passed.
-- Standalone Asper: 22/22; astools: 24/24; asmodel: 3/3.
+- Standalone Asper: 22/22; astools: 24/24; asmodel: 4/4.
+- The shared strict JSON codec replaces protocol substring parsing. Provider
+  tests reject misplaced usage counters, duplicate keys, invalid vector indices,
+  non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
+  all four executables with ASan/UBSan/LeakSanitizer.
 - Explicit-schema mock tests pass without recognized grammar text; unsupported
   constraints and requests exceeding schema-inclusive admission fail before HTTP.
 - An integrated JSON-provider fixture crosses the shared manager, decodes a real

@@ -134,28 +134,28 @@ TEST(incomplete_receipts_and_io_failure) {
 }
 TEST(host_contract_transport) {
   fixture f; ASSERT_TRUE(open_fixture(&f));
-  jx_value *schema = NULL, *args = NULL, *out = NULL;
-  ASSERT_EQ_INT(jx_parse(MCP_WORK_SCHEMA,strlen(MCP_WORK_SCHEMA),&schema),0);
-  jx_free(schema);
+  asmodel_json_value *schema = NULL, *args = NULL, *out = NULL;
+  ASSERT_EQ_INT(asmodel_json_parse(MCP_WORK_SCHEMA,strlen(MCP_WORK_SCHEMA),&schema),0);
+  asmodel_json_free(schema);
   const char *input = "{\"mode\":\"define\",\"expected_revision\":0,\"definition\":{"
       "\"goal\":\"Verifica Unicode è valida\",\"constraints\":\"\",\"criteria\":[{"
       "\"id\":\"regression\",\"requirement\":\"Regression passes\",\"command\":\"test\","
       "\"adapter\":\"cmake\",\"path\":\".\",\"depends_on\":0}]}}";
-  ASSERT_EQ_INT(jx_parse(input,strlen(input),&args),0);
+  ASSERT_EQ_INT(asmodel_json_parse(input,strlen(input),&args),0);
   ASSERT_OK(mcp_work_request(&f.s,args,&out));
-  ASSERT_EQ_STR(jx_string_value(jx_object_get(out,"task_state")),"incomplete");
-  jx_free(out); out = NULL;
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(out,"task_state")),"incomplete");
+  asmodel_json_free(out); out = NULL;
   ASSERT_ERR(mcp_work_request(&f.s,args,&out),ASNGN_ERR_BUSY);
-  ASSERT_EQ_INT(jx_object_set(args,"proof",jx_string("passed")),0);
+  ASSERT_EQ_INT(asmodel_json_object_set(args,"proof",asmodel_json_string("passed")),0);
   ASSERT_ERR(mcp_work_request(&f.s,args,&out),ASNGN_ERR_INVALID);
-  jx_free(args);
+  asmodel_json_free(args);
   ASSERT_OK(observe(&f,"test","passed",3));
-  out = jx_object(); ASSERT_OK(mcp_work_status(&f.s,1,out));
-  ASSERT_EQ_STR(jx_string_value(jx_object_get(out,"task_state")),"succeeded");
+  out = asmodel_json_object(); ASSERT_OK(mcp_work_status(&f.s,1,out));
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(out,"task_state")),"succeeded");
   ASSERT_OK(asngn_session_work_invalidate(&f.s,1));
   ASSERT_OK(mcp_work_status(&f.s,1,out));
-  ASSERT_EQ_STR(jx_string_value(jx_object_get(out,"task_state")),"superseded");
-  jx_free(out); close_fixture(&f);
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(out,"task_state")),"superseded");
+  asmodel_json_free(out); close_fixture(&f);
 }
 TEST_LIST = {TEST_ENTRY(host_contract_transport), TEST_ENTRY(acceptance_dependencies_and_recovery),
   TEST_ENTRY(revision_and_external_changes), TEST_ENTRY(incomplete_receipts_and_io_failure)};

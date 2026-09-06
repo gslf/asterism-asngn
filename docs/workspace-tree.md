@@ -82,25 +82,62 @@ or fingerprint. Windows metadata behavior has not been executed in this run.
 
 ## Retrieval evidence
 
-Retrieval keeps its separate content budget: at most 1,024 chunks, about 2 KiB
-each, from files of at most 256 KiB. Oversized/non-code files contribute metadata
-only. The active file is admitted first and rechecked when encountered by the
-walker. Each selected chunk carries the whole-file hash, chunk hash, line range
-and byte range. These are observed versions, not semantic symbol identities.
+Retrieval retains at most 1,024 chunks of about 2 KiB each from files of at most
+256 KiB. Its streaming selector continues walking after that resident corpus is
+full. It considers at most 64 MiB of successfully captured content per scan,
+including the initial active-file read and its recheck. Oversized/non-code files
+contribute metadata only. Files that exceed the remaining content allowance are
+skipped, while bounded metadata enumeration continues. A probe of an oversized
+active file can read one byte beyond its per-file cap to detect the overflow.
 
-`retrieval_scan` telemetry reports visited entries/files, ignored and excluded
-objects, chunk count and the traversal result. `complete` describes traversal;
-it does not mean every file was indexed or every relevant piece was retrieved.
-A capped corpus can be used as partial evidence. I/O errors, observed conflicts
-and cancellation are propagated instead of silently presenting a stable index.
-Retrieved source is enclosed using the common untrusted-data renderer.
+The active file is admitted first and its chunks are pinned. Every other file
+contributes at most eight candidates to a bounded global heap. Candidates match
+case-sensitive whole identifiers and path terms from the current retrieval query;
+repeated occurrences do not increase the score. At most 64 distinct terms of
+2..191 UTF-8 bytes are considered. The score is distinct path/content term coverage,
+plus twice the path coverage and 64 for a literal full-path mention. Ties prefer
+ordered paths and earlier byte ranges. These are interpretable, **uncalibrated**
+admission rules, separate from the final hybrid ranker and its six-result budget.
+They do not provide semantic symbol resolution, language normalization or a
+measured role-coverage guarantee.
+
+This keeps an early large file from occupying the whole corpus and permits later
+matching files or late matching ranges to displace weaker evidence. Only retained
+candidates allocate text/path copies. Heap admission costs logarithmic time in the
+resident corpus; the per-file shortlist has eight entries. Source scanning can
+cost more than the previous early exit; the byte budget, cancellation and remaining
+turn deadline bound this work. No end-to-end latency improvement is claimed.
+
+Each selected chunk carries the whole-file hash, chunk hash, line range and byte
+range. The active source is rechecked even for a non-code extension; changed,
+binary, removed or unobserved active content cannot leave a stable admitted view.
+A metadata-limited traversal that could not recheck it returns `BUSY`. These are
+observed versions, not atomic snapshots or semantic symbol identities.
+
+Schema-2 `retrieval_scan` telemetry reports visited entries/files, captured bytes,
+read operations, candidate/retained/pinned counts, skipped large/binary/budget
+files and query-term truncation. `traversal_complete` describes the walker;
+`complete` additionally requires no eligible evidence to be dropped. A completed
+walk can therefore return `LIMIT` and usable partial evidence. I/O errors,
+observed conflicts and cancellation still reject the new index. Neither field
+means all evidence needed by a task was retrieved. Source remains untrusted data.
+
+Six retrieval cases cover shared ignores and source versions, active admission,
+a late file after the former 1,024-chunk cutoff, global capacity with late Unicode
+matches and exact ranges, stale active bytes/cancellation/deadline, and a 64 MiB
+content limit with the active recheck both before and after budget exhaustion.
+The late-file case fails against `6974045` and passes with streaming admission.
+The integrated embedding fixture now adds nine early 240 KiB files and still
+includes the late matching document in its single bounded embedding batch.
+An empty eligible corpus now performs no query or document embedding call.
+This is a controlled recall regression, not a real-repository task benchmark.
 
 ## Evidence and remaining work
 
-Eleven filesystem cases pass on Linux with sanitizers, covering flat/nested
+Nine filesystem cases pass on Linux with sanitizers, covering flat/nested
 quotas, cancellation, changed files/directories, renamed ancestors, external
-aliases and a FIFO, content/rename/delete fingerprints, shared ignores, source
-versions and active-file admission before the corpus cap.
+aliases and a FIFO, and content/rename/delete fingerprints. Retrieval cases now
+run in their own executable.
 
 A separate production-limit reproduction used the same 33 sparse files of 8 MiB
 against both implementations. Commit `d45c3fb` accepted 264 MiB and produced a

@@ -114,7 +114,7 @@ asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
   t->s->code_index = ix;
   docs = calloc(ix->n ? ix->n : 1, sizeof *docs);
   if (!docs) return ASNGN_ERR_NOMEM;
-  if (ix->dim > 0 && !asngn_code_stopped(c, t)) {
+  if (ix->n && ix->dim > 0 && !asngn_code_stopped(c, t)) {
     qv = calloc((size_t)ix->dim, sizeof *qv);
     if (qv && asngn_models_embed(c, t->retrieval_query, qv) != ASNGN_OK) {
       free(qv);

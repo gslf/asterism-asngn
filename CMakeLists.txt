@@ -183,6 +183,8 @@ set(ASNGN_SOURCES
   src/context_history.c
   src/retrieval.c
   src/retrieval_index.c
+  src/retrieval_select.c
+  src/retrieval_terms.c
   src/digest.c
   src/excerpt.c
   src/blob.c

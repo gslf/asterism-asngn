@@ -51,6 +51,7 @@ typedef struct {
   char *last_schema;
   size_t embedding_batch_n;
   int embedding_batches;
+  int embedding_queries;
   char embedded_documents[32][128];
   size_t input_messages;
   asmodel_role input_roles[8];

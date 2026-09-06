@@ -13,6 +13,7 @@ set(ASNGN_TEST_PROGRAMS
   test_redact
   test_verification
   test_workspace_tree
+  test_retrieval
   test_workspace_git
   test_work
   test_steps

@@ -4,9 +4,13 @@
 #include "asngn_internal.h"
 #define CODE_MAX 1024
 #define CODE_CHUNK 2048
+#define CODE_FILE_BYTES 262144
+#define CODE_SCAN_BYTES (64u * 1024u * 1024u)
+#define CODE_FILE_CHUNKS 8
 typedef struct {
   char *path, *text;
   size_t line, end_line, offset;
+  unsigned admission_score;
   uint8_t hash[32], file_hash[32];
   float *vec;
 } chunk;

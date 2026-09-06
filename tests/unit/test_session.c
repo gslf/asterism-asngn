@@ -556,9 +556,31 @@ TEST(contextual_code_retrieval_refreshes_evidence) {
 }
 
 
+TEST(empty_repository_does_not_spend_embedding_calls) {
+  fx f; asngn_session *session = NULL; asngn_turn_state t = {0};
+  ASSERT_TRUE(fx_setup(&f,NULL)); ASSERT_OK(asngn_session_open(f.c,"empty-index",&session));
+  t.s = session; t.user_msg = asngn_strdup("Find the missing implementation");
+  ASSERT_OK(asngn_retrieval_query(session,&t,&t.retrieval_query));
+  int queries = f.embed.embedding_queries, batches = f.embed.embedding_batches;
+  ASSERT_OK(asngn_code_retrieve(f.c,&t));
+  ASSERT_EQ_INT(t.work_n,0);
+  ASSERT_EQ_INT(f.embed.embedding_queries,queries);
+  ASSERT_EQ_INT(f.embed.embedding_batches,batches);
+  asngn_turn_state_free(&t); asngn_session_close(session); fx_drop(&f);
+}
+
 TEST(code_embeddings_prioritize_candidates_in_one_batch) {
   fx f; asngn_session *session = NULL; asngn_turn_state t;
   ASSERT_TRUE(fx_setup(&f,NULL)); ASSERT_OK(asngn_session_open(f.c,"batch",&session));
+  /* Early files exceed the old corpus cap before the late candidate is visited. */
+  char *filler = malloc(240001); ASSERT_TRUE(filler != NULL);
+  memset(filler, 'x', 240000); filler[240000] = 0;
+  for (int i = 0; i < 9; i++) {
+    char name[32]; snprintf(name,sizeof name,"a%02d.c",i);
+    char *path = os_path_join(session->workspace.canonical_root,name);
+    ASSERT_TRUE(path != NULL); ASSERT_OK(os_write_file(path,filler,240000)); free(path);
+  }
+  free(filler);
   for (int i = 0; i < 48; i++) {
     char name[32], body[128]; snprintf(name,sizeof name,"file%02d.c",i);
     snprintf(body,sizeof body,"int routine_%d(void) { return %s; }\n",i,
@@ -665,6 +687,7 @@ TEST(uncertain_commit_blocks_until_reopen) {
 TEST_LIST = {
   TEST_ENTRY(uncertain_commit_blocks_until_reopen),
   TEST_ENTRY(contextual_code_retrieval_refreshes_evidence),
+  TEST_ENTRY(empty_repository_does_not_spend_embedding_calls),
   TEST_ENTRY(code_embeddings_prioritize_candidates_in_one_batch),
   TEST_ENTRY(shared_embedding_pipeline_is_authoritative),
   TEST_ENTRY(workspace_changes_invalidate_materialized_memory),

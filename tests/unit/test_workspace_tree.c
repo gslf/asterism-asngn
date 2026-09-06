@@ -1,7 +1,6 @@
 /* Real filesystem limits, aliases and edits during descriptor-based traversal. */
 #include "asngn_test.h"
 #include "workspace_tree.h"
-#include "retrieval.h"
 
 typedef struct {
   char root[256], outside[256];
@@ -226,77 +225,6 @@ TEST(snapshot_tracks_content_rename_and_deletion) {
   free(two);
   drop(&f);
 }
-TEST(retrieval_has_source_versions_and_shared_ignore_policy) {
-  fixture f;
-  ASSERT_TRUE(setup(&f));
-  ASSERT_OK(put(f.root, ".github/workflows/ci.yml", "name: workflow\n"));
-  ASSERT_OK(put(f.root, "build/active.c", "excluded even when active\n"));
-  ASSERT_OK(put(f.root, "main.c", "αβγ\nline2\n"));
-  asngn_ctx *c = calloc(1, sizeof *c);
-  ASSERT_TRUE(c);
-  os_mutex_init(&c->tele_mu);
-  asngn_session session = {.active_file = "build/active.c"};
-  snprintf(session.workspace.canonical_root, sizeof session.workspace.canonical_root, "%s", f.root);
-  asngn_turn_state turn = {.s = &session};
-  code_index *ix = calloc(1, sizeof *ix);
-  ASSERT_TRUE(ix);
-  ix->v = calloc(CODE_MAX, sizeof *ix->v);
-  ASSERT_TRUE(ix->v);
-  ASSERT_OK(asngn_code_scan(c, &turn, ix));
-  ASSERT_EQ_INT(ix->n, 2);
-  ASSERT_EQ_STR(ix->v[0].path, ".github/workflows/ci.yml");
-  ASSERT_EQ_STR(ix->v[1].path, "main.c");
-  ASSERT_EQ_INT(ix->v[1].line, 1);
-  ASSERT_EQ_INT(ix->v[1].end_line, 2);
-  uint8_t hash[32];
-  asngn_sha256("αβγ\nline2\n", strlen("αβγ\nline2\n"), hash);
-  ASSERT_TRUE(!memcmp(hash, ix->v[1].file_hash, 32));
-  asngn_code_index_free(ix);
-  os_mutex_destroy(&c->tele_mu);
-  free(c);
-  drop(&f);
-}
-TEST(active_file_precedes_the_corpus_cap) {
-  fixture f;
-  ASSERT_TRUE(setup(&f));
-  char *body = malloc(240001);
-  ASSERT_TRUE(body);
-  memset(body, 'x', 240000);
-  body[240000] = 0;
-  for (int i = 0; i < 9; i++) {
-    char name[32];
-    snprintf(name, sizeof name, "a%02d.c", i);
-    ASSERT_OK(put(f.root, name, body));
-  }
-  free(body);
-  ASSERT_OK(put(f.root, "zz.c", "ACTIVE_FILE\n"));
-  asngn_ctx *c = calloc(1, sizeof *c);
-  ASSERT_TRUE(c);
-  os_mutex_init(&c->tele_mu);
-  c->cfg.tele_ring = 8;
-  ASSERT_OK(asngn_tele_init(c));
-  asngn_session session = {.active_file = "zz.c"};
-  snprintf(session.workspace.canonical_root, sizeof session.workspace.canonical_root, "%s", f.root);
-  asngn_turn_state turn = {.s = &session};
-  code_index *ix = calloc(1, sizeof *ix);
-  ASSERT_TRUE(ix);
-  ix->v = calloc(CODE_MAX, sizeof *ix->v);
-  ASSERT_TRUE(ix->v);
-  ASSERT_ERR(asngn_code_scan(c, &turn, ix), ASNGN_ERR_LIMIT);
-  ASSERT_EQ_INT(ix->n, CODE_MAX);
-  ASSERT_EQ_STR(ix->v[0].path, "zz.c");
-  char **events = NULL;
-  size_t count = 0;
-  ASSERT_OK(asngn_tele_tail(c, 1, &events, &count));
-  ASSERT_EQ_INT(count, 1);
-  ASSERT_TRUE(strstr(events[0], "complete:false") != NULL);
-  asngn_strings_free(events, count);
-  asngn_code_index_free(ix);
-  asngn_tele_shutdown(c);
-  os_mutex_destroy(&c->tele_mu);
-  free(c);
-  drop(&f);
-}
 TEST_LIST = {TEST_ENTRY(shared_ignores_keep_configuration_and_dependencies),
              TEST_ENTRY(flat_entry_limit_applies_during_enumeration),
              TEST_ENTRY(byte_limits_apply_before_file_callbacks),
@@ -307,7 +235,5 @@ TEST_LIST = {TEST_ENTRY(shared_ignores_keep_configuration_and_dependencies),
              TEST_ENTRY(aliases_and_special_files_never_reach_the_reader),
              TEST_ENTRY(replaced_ancestor_cannot_redirect_an_open_directory),
 #endif
-             TEST_ENTRY(snapshot_tracks_content_rename_and_deletion),
-             TEST_ENTRY(retrieval_has_source_versions_and_shared_ignore_policy),
-             TEST_ENTRY(active_file_precedes_the_corpus_cap)};
+             TEST_ENTRY(snapshot_tracks_content_rename_and_deletion)};
 RUN_ALL_TESTS()

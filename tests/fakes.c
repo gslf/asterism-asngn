@@ -232,7 +232,7 @@ static asngn_err fake_model_embed(void *ud, const char *const *texts, size_t cou
     fm->embedding_batches++; fm->embedding_batch_n = count;
     for (size_t i = 0; i < count && i < 32; i++)
       snprintf(fm->embedded_documents[i],128,"%s",texts[i]);
-  }
+  } else fm->embedding_queries++;
   if (params->result_info) memset(params->result_info,0,sizeof *params->result_info);
   for (size_t i = 0; i < count; i++) {
     if (params->cancel && *params->cancel) return ASNGN_ERR_CANCELLED;

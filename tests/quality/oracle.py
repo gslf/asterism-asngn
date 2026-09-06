@@ -2,27 +2,6 @@
 from pathlib import Path
 import shutil
 from checks import Check
-from command import Result, run
-
-
-def isolated(command: list[str], root: Path) -> Result:
-    """Linux evaluator: only toolchains, fixture, scratch and build output exist."""
-    if not shutil.which('bwrap'):
-        return Result(command, error='sandbox_unavailable')
-    build = root / 'build'
-    build.mkdir(exist_ok=True)
-    argv = ['bwrap', '--unshare-all', '--die-with-parent', '--new-session']
-    for path in ('/usr', '/bin', '/lib', '/lib64'):
-        if Path(path).exists():
-            argv += ['--ro-bind', path, path]
-    argv += ['--proc', '/proc', '--dev', '/dev', '--tmpfs', '/tmp',
-             '--dir', '/etc', '--ro-bind', str(root), '/workspace',
-             '--bind', str(build), '/workspace/build', '--chdir', '/workspace',
-             '--clearenv', '--setenv', 'PATH', '/usr/bin:/bin',
-             '--setenv', 'HOME', '/tmp', '--setenv', 'LC_ALL', 'C', '--']
-    # Resolve evaluator-owned executables; never inherit a user startup module.
-    command = ['/usr/bin/python3' if c == 'python3' else c for c in command]
-    return run(argv + command, root)
 
 
 def protected_checks(task: dict, root: Path) -> list[Check]:

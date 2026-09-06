@@ -3,7 +3,8 @@
 from __future__ import annotations
 import argparse, hashlib, json, os, re, shutil, stat, tempfile, time, uuid
 from pathlib import Path
-from oracle import protected_checks, isolated
+from oracle import protected_checks
+from sandbox import isolated
 from command import OUTPUT_LIMIT, run
 from metrics import interval, percentile
 

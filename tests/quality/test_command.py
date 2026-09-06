@@ -28,6 +28,18 @@ class CommandTests(unittest.TestCase):
         self.assertIsNone(result.returncode)
         self.assertEqual(result.error, 'startup_error')
 
+    def test_explicit_status_descriptor_reaches_only_the_requested_process(self):
+        with tempfile.TemporaryFile() as status:
+            fd = status.fileno()
+            result = self.python(f'import os; os.write({fd}, b"receipt")', pass_fds=(fd,))
+            self.assertTrue(result.ok, result)
+            status.seek(0)
+            self.assertEqual(status.read(), b'receipt')
+            result = self.python(f'import os; os.write({fd}, b"not inherited")')
+            self.assertNotEqual(result.returncode, 0)
+            status.seek(0)
+            self.assertEqual(status.read(), b'receipt')
+
     def test_deadline_includes_process_with_closed_stdout(self):
         result = self.python('import os, time; os.close(1); os.close(2); time.sleep(60)', timeout=.15)
         self.assertEqual(result.error, 'deadline')

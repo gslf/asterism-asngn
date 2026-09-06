@@ -24,7 +24,8 @@ class Result:
         return self.returncode == 0 and self.error is None
 
 
-def run(command, cwd, timeout=180, *, output_limit=OUTPUT_LIMIT, measure=False):
+def run(command, cwd, timeout=180, *, output_limit=OUTPUT_LIMIT, measure=False,
+        pass_fds=()):
     """Retain at most output_limit bytes, including stderr, until one deadline.
 
     The process group is closed even when its leader exits first. Production
@@ -41,7 +42,7 @@ def run(command, cwd, timeout=180, *, output_limit=OUTPUT_LIMIT, measure=False):
     try:
         proc = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
-                                start_new_session=True, bufsize=0)
+                                start_new_session=True, bufsize=0, pass_fds=pass_fds)
     except OSError as error:
         result.error, result.stdout = 'startup_error', str(error)
         return result

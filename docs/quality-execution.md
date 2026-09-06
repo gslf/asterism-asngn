@@ -42,6 +42,8 @@ trials require actual resources. No real-model result has been produced here.
   requires invocation-bound positive completion with expected test counts: an
   early zero exit, empty collection or skipped suite cannot certify a repair.
   Commands/output/patch capture are bounded; dependent checks stop on failure.
+  Bubblewrap's private lifecycle channel must also confirm successful exec and
+  the observed exit status; setup errors cannot count as failing candidate tests.
   Public smoke tasks are always labelled `dev`, never `holdout`. These receipts
   do not make arbitrary in-process test code unable to forge its own output.
 - asmodel owns backend residency and locks. Session lanes borrow the same manager;
@@ -189,9 +191,15 @@ LeakSanitizer, HTTP-wire/SDK live and bubblewrap acceptance checks therefore
 remain open; do not inherit their earlier passes as validation of new changes.
 The current restricted run passes 45 executables in both native CPU and ASan/UBSan
 builds. Three HTTP live tests were excluded. The remaining oracle executable
-passes 19 of its 20 cases; its production-sandbox case cannot create a netlink
+passes 25 of its 26 cases; its production-sandbox case cannot create a netlink
 socket under the outer sandbox. No acceptance check was weakened to hide that
 infrastructure failure. There are now 49 integrated executables.
+The additional six cases validate the private bubblewrap status channel, malformed
+or missing terminal records, actual failed startup, descriptor inheritance and
+I/O errors. Failed startup now retains its output/exit code but is explicitly
+`infrastructure_error`; it previously appeared to be a failing candidate command.
+This change has not yet passed successful production isolation outside the outer
+sandbox. The earlier complete oracle run remains evidence for the earlier code.
 
 Four trace unit cases cover role/correlation metadata, omitted-item hashing,
 framed boundaries, output constraints and invalid structures. Native integration

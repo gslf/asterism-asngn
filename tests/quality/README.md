@@ -38,6 +38,16 @@ resistance to every such attack, nor do public cases establish generalization.
 Reports identify the evaluator source and admitted patch by SHA-256; each check
 retains its actual exit status, completion counts, rejection reason and output.
 
+The sandbox monitor writes lifecycle JSON to a private, unlinked descriptor that
+is closed in the payload before exec. Acceptance requires its terminal exit record
+to match the observed process status. Setup/exec failure, incomplete or malformed
+monitor state is `infrastructure_error`, even when the process exits zero or
+stdout resembles a receipt. A child PID alone does not establish execution.
+Deadlines and output limits retain their original error. This uses bubblewrap's
+[`--json-status-fd` contract](https://github.com/containers/bubblewrap/blob/v0.11.2/bubblewrap.c);
+an installation without that option cannot produce a successful verification.
+The monitor proves execution lifecycle, not the correctness of a test assertion.
+
 POSIX commands, agent output and patch capture retain at most 4 MiB each. A single
 deadline covers execution and pipe collection; limits, missing executables and
 truncated output fail closed. The verifier's PID namespace and process-group

@@ -208,10 +208,46 @@ TEST(event_sink_callback) {
   os_mutex_destroy(&st.mu);
 }
 
+TEST(large_traces_bound_ring_and_flush_whole_events) {
+  fx f;
+  ASSERT_TRUE(
+      fx_setup(&f, "telemetry: {ring:4096, path:\"telemetry/trace.xcdn\", rotate_kb:16384},"));
+  asngn_buf payload = {0};
+  ASSERT_OK(asngn_buf_appends(&payload, "{value:\""));
+  for (size_t i = 0; i < 32768; i++)
+    ASSERT_OK(asngn_buf_appendc(&payload, 'x'));
+  ASSERT_OK(asngn_buf_appends(&payload, "\"}"));
+  for (size_t i = 0; i < 300; i++) {
+    asngn_tele_emit(f.c, "large", NULL, NULL, NULL, i + 1, payload.data);
+    ASSERT_TRUE(f.c->tele_batch.len <= ASNGN_TELE_BATCH_BYTES);
+    ASSERT_TRUE(f.c->ring.bytes <= ASNGN_TELE_RING_BYTES);
+  }
+  ASSERT_TRUE(f.c->ring.n < 300);
+  char **tail = NULL;
+  size_t n = 0;
+  ASSERT_OK(asngn_tele_tail(f.c, 1, &tail, &n));
+  ASSERT_EQ_INT(n, 1);
+  ASSERT_TRUE(strstr(tail[0], "turn: 300") != NULL);
+  asngn_strings_free(tail, n);
+  asngn_tele_flush(f.c);
+  char path[400];
+  snprintf(path, sizeof path, "%s/telemetry/trace.xcdn", f.root);
+  char *text = asngn_test_read_file(path, NULL);
+  ASSERT_TRUE(text);
+  size_t lines = 0;
+  for (const char *p = text; *p; p++)
+    if (*p == '\n') lines++;
+  ASSERT_EQ_INT(lines, 300);
+  free(text);
+  asngn_buf_free(&payload);
+  fx_drop(&f);
+}
+
 TEST_LIST = {
-  TEST_ENTRY(ring_overwrites_oldest),
-  TEST_ENTRY(file_sink_flush),
-  TEST_ENTRY(event_sink_callback),
+    TEST_ENTRY(ring_overwrites_oldest),
+    TEST_ENTRY(file_sink_flush),
+    TEST_ENTRY(event_sink_callback),
+    TEST_ENTRY(large_traces_bound_ring_and_flush_whole_events),
 };
 
 RUN_ALL_TESTS()

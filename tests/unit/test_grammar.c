@@ -86,15 +86,26 @@ TEST(steps_recall_alternative) {
 TEST(steps_blob_handles) {
   char *g = NULL;
   ASSERT_OK(asngn_grammar_steps(NULL, false, false, true, false, 3, NULL, &g));
-  ASSERT_EQ_STR(g,
-      "root      ::= step \"\\n\"\n"
-      "step      ::= open | think | clarify | answer\n"
-      "open      ::= \"{action: \\\"open\\\", why: \\\"\" meta \"\\\", "
-      "input: \\\"\" handle \"\\\"}\"\n"
-      G_THINK G_CLARIFY G_ANSWER
-      "handle    ::= \"B1\" | \"B2\" | \"B3\"\n"
-      G_TAIL);
-  ASSERT_TRUE(strstr(g, "handle    ::= \"B1\" | \"B2\" | \"B3\"\n") != NULL);
+  ASSERT_TRUE(strstr(g, "step      ::= open | think | clarify | answer") != NULL);
+  ASSERT_TRUE(strstr(g, "blob      ::= \"1\" | \"2\" | \"3\"") != NULL);
+  ASSERT_TRUE(strstr(g, "offset    ::= \"0\" | [1-9] [0-9]{0,9}") != NULL);
+#ifdef ASNGN_TEST_LLAMA
+  extern int asngn_test_gbnf_accepts(const char *, const char *);
+  ASSERT_EQ_INT(
+      asngn_test_gbnf_accepts(
+          g, "{action: \"open\", why: \"inspect\", input: {\"blob\": 3, \"offset\": 80000}}\n"),
+      1);
+  ASSERT_EQ_INT(
+      asngn_test_gbnf_accepts(
+          g, "{action: \"open\", why: \"inspect\", input: {\"blob\": 1, \"offset\": 0}}\n"),
+      1);
+  ASSERT_EQ_INT(
+      asngn_test_gbnf_accepts(
+          g, "{action: \"open\", why: \"inspect\", input: {\"blob\": 4, \"offset\": 0}}\n"),
+      0);
+  ASSERT_EQ_INT(asngn_test_gbnf_accepts(g, "{action: \"open\", why: \"inspect\", input: \"B1\"}\n"),
+                0);
+#endif
   free(g);
 }
 
@@ -182,9 +193,12 @@ TEST(json_schema_respects_available_actions_and_handles) {
   ASSERT_EQ_INT(asmodel_json_array_len(variants), 3);
   const asmodel_json_value *open = asmodel_json_array_at(variants, 0);
   const asmodel_json_value *properties = asmodel_json_object_get(open, "properties");
-  const asmodel_json_value *handles = asmodel_json_object_get(asmodel_json_object_get(properties, "input"), "enum");
+  const asmodel_json_value *range =
+      asmodel_json_object_get(asmodel_json_object_get(properties, "input"), "properties");
+  const asmodel_json_value *handles =
+      asmodel_json_object_get(asmodel_json_object_get(range, "blob"), "enum");
   ASSERT_EQ_INT(asmodel_json_array_len(handles), 2);
-  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_array_at(handles, 1)), "B2");
+  ASSERT_EQ_INT(asmodel_json_int_value(asmodel_json_array_at(handles, 1)), 2);
   ASSERT_TRUE(strstr(schema, "call") == NULL && strstr(schema, "think") == NULL);
   char *unavailable = asngn_strdup("{\"action\":\"call\",\"why\":\"w\",\"tool\":\"fs.read\","
       "\"arguments\":{},\"success\":\"s\",\"fallback\":\"f\"}");

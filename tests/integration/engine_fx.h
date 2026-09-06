@@ -111,7 +111,7 @@ static int eng_setup_tool(eng_fx *f, const char *tool_id,
   return eng_setup_tool_mode(f, tool_id, behavior, extra, 0);
 }
 
-static int eng_setup(eng_fx *f, const char *behavior, const char *extra) {
+static inline int eng_setup(eng_fx *f, const char *behavior, const char *extra) {
   return eng_setup_tool(f, "fake", behavior, extra);
 }
 

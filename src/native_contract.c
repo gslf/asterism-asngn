@@ -1,6 +1,7 @@
 /* Provider-safe names and strict engine control arguments; no authority from metadata. */
 #include "asmodel_json.h"
 #include "native.h"
+#include "blob.h"
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
@@ -54,9 +55,10 @@ asngn_err asngn_native_contract_build(asngn_ctx *c, asngn_turn_state *t, bool ca
             "\"maxLength\":2048}},\"required\":[\"input\"],\"additionalProperties\":false}");
   if (t->s->blobs_n)
     control(out, ASNGN_STEP_OPEN, "asterism_open",
-            "Expand a previously observed blob by its number.",
-            "{\"type\":\"object\",\"properties\":{\"blob\":{\"type\":\"integer\",\"minimum\":1}},"
-            "\"required\":[\"blob\"],\"additionalProperties\":false}");
+            "Read a redacted evidence blob at an explicit byte offset.",
+            "{\"type\":\"object\",\"properties\":{\"blob\":{\"type\":\"integer\",\"minimum\":1},"
+            "\"offset\":{\"type\":\"integer\",\"minimum\":0,\"maximum\":4294967295}},"
+            "\"required\":[\"blob\",\"offset\"],\"additionalProperties\":false}");
   control(out, ASNGN_STEP_CLARIFY, "asterism_clarify",
           "Ask the user for missing information needed to proceed.",
           "{\"type\":\"object\",\"properties\":{\"input\":{\"type\":\"string\",\"minLength\":1,"
@@ -78,15 +80,11 @@ static asngn_err control_args(const char *args, asngn_turn_state *t, asngn_step 
     if (!fields) e = ASNGN_OK;
     goto out;
   }
-  if (fields != 1) goto out;
   if (step->kind == ASNGN_STEP_OPEN) {
-    asmodel_json_value *v = asmodel_json_object_get(obj, "blob");
-    long long n = asmodel_json_int_value(v);
-    if (asmodel_json_is_int(v) && n > 0 && n <= INT_MAX && (size_t)n <= t->s->blobs_n) {
-      step->blob_n = (int)n;
-      e = ASNGN_OK;
-    }
+    e = asngn_blob_parse(obj, step);
+    if (e == ASNGN_OK && (size_t)step->blob_n > t->s->blobs_n) e = ASNGN_ERR_PROTOCOL;
   } else {
+    if (fields != 1) goto out;
     asmodel_json_value *v = asmodel_json_object_get(obj, "input");
     const char *s = asmodel_json_string_value(v);
     size_t n = asmodel_json_string_length(v);

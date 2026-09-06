@@ -21,6 +21,7 @@
  */
 
 #include "asngn_internal.h"
+#include "blob.h"
 #include "asmodel_json.h"
 
 #include <stdlib.h>
@@ -150,24 +151,21 @@ static asngn_err parse_call_value(asngn_ctx *c, const char **p,
   return ASNGN_OK;
 }
 
-/* "B<n>", n >= 1, nothing else in the payload. */
-static asngn_err parse_handle(asngn_ctx *c, const char *s, int *out_n) {
-  long n = 0;
-  int digits = 0;
-  if (s != NULL && *s == 'B') {
-    s++;
-    while (*s >= '0' && *s <= '9') {
-      if (digits < 9) n = n * 10 + (*s - '0');
-      digits++;
-      s++;
-    }
-    if (digits >= 1 && digits <= 9 && *s == '\0' && n >= 1) {
-      *out_n = (int)n;
-      return ASNGN_OK;
-    }
+static asngn_err parse_open_value(const char **p, const char *end, asngn_step *out) {
+  /* Valid range objects contain two integers, so their first closing brace ends them. */
+  if (*p >= end || **p != '{') return ASNGN_ERR_PROTOCOL;
+  const char *last = memchr(*p, '}', (size_t)(end - *p));
+  if (!last) return ASNGN_ERR_PROTOCOL;
+  asmodel_json_value *input = NULL;
+  if (asmodel_json_parse(*p, (size_t)(last - *p + 1), &input)) return ASNGN_ERR_PROTOCOL;
+  asngn_err e = asngn_blob_parse(input, out);
+  asmodel_json_free(input);
+  if (e == ASNGN_OK) {
+    out->text = asngn_strndup(*p, (size_t)(last - *p + 1));
+    if (!out->text) e = ASNGN_ERR_NOMEM;
+    *p = last + 1;
   }
-  return asngn_seterr(c, ASNGN_ERR_PROTOCOL,
-                      "step: open input needs a handle B<n> with n >= 1");
+  return e;
 }
 
 static bool action_kind(const char *name, asngn_step_kind *out) {
@@ -267,6 +265,8 @@ asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out) {
       if (out->kind == ASNGN_STEP_CALL) {
         e = parse_call_value(c, &p, end, out);
         have_call_input = (e == ASNGN_OK);
+      } else if (out->kind == ASNGN_STEP_OPEN) {
+        e = parse_open_value(&p, end, out);
       } else {
         e = parse_quoted(c, &p, end, "input", ASNGN_STEP_TEXT_MAX,
                          &out->text);
@@ -311,10 +311,6 @@ asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out) {
                        "step: %s needs exactly {action, why, input}",
                        asngn_step_name(out->kind));
       goto fail;
-    }
-    if (out->kind == ASNGN_STEP_OPEN) {
-      e = parse_handle(c, out->text, &out->blob_n);
-      if (e != ASNGN_OK) goto fail;
     }
     break;
   case ASNGN_STEP_RECALL:

@@ -469,7 +469,6 @@ typedef struct {
   char   *label;     /* "fs.read" etc., owned                       */
   char    object_ref[72]; /* authoritative Asper sha256 reference    */
   size_t  size;      /* full text size in bytes                     */
-  size_t  slice_off; /* next OPEN offset                            */
 } asngn_blob;
 
 struct asngn_session {
@@ -587,7 +586,12 @@ size_t    asngn_ledger_total_tokens(const asngn_ledger_entry *e);
 typedef struct {
   char **items;   /* serialized #asngn_event values, owned          */
   size_t cap, n, head;
+  size_t bytes;   /* retained payload bytes, including terminators */
 } asngn_tele_ring;
+
+#define ASNGN_TELE_EVENT_BYTES (64u * 1024u)
+#define ASNGN_TELE_RING_BYTES (8u * 1024u * 1024u)
+#define ASNGN_TELE_BATCH_BYTES (256u * 1024u)
 
 asngn_err asngn_tele_init(asngn_ctx *c);
 void      asngn_tele_shutdown(asngn_ctx *c);
@@ -605,6 +609,7 @@ void      asngn_tele_flush(asngn_ctx *c); /* file sink batch + rotation  */
 typedef struct {
   char  *system_text;  /* zones 1-4: system+memory+catalog+summary   */
   char  *user_text;    /* zones 5-6: verbatim+working+instruction    */
+  char  *selection_json; /* bounded private selection trace, owned */
   size_t tok_system, tok_memory, tok_catalog, tok_summary, tok_verbatim,
          tok_working;
 } asngn_prompt;
@@ -643,11 +648,6 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
                             const char *text, size_t len,
                             size_t *saved_tokens, size_t *aux_tokens,
                             char **out);
-/* Next OPEN slice of blob b, at most max_chars; NULL when exhausted. */
-asngn_err asngn_digest_open_slice(asngn_ctx *c, asngn_session *s,
-                                  asngn_blob *b, size_t max_chars,
-                                  char **out);
-
 /* ── embedding cache (embedcache.c) ───────────────────────────────────── */
 /* cache/embeddings.bin — magic "ASNG", little-endian, layout identical to
  * Asper's: u32 version=1, u32 dim, u64 count, 32 B model hash, then per
@@ -873,6 +873,7 @@ typedef struct {
   char *call_cmd;  /* CALL: command, owned                           */
   char *call_args; /* CALL: args object text, owned                  */
   int   blob_n;    /* OPEN: 1-based handle number                    */
+  size_t blob_offset; /* explicit byte offset in the redacted object */
 } asngn_step;
 
 void asngn_step_free(asngn_step *st);

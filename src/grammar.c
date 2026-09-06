@@ -161,10 +161,9 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
                           "\\\"\" meta \"\\\", input: \\\"\" text "
                           "\"\\\"}\"\n");
   if (e == ASNGN_OK && open_on)
-    e = asngn_buf_appends(&b,
-                          "open      ::= \"{action: \\\"open\\\", why: "
-                          "\\\"\" meta \"\\\", input: \\\"\" handle "
-                          "\"\\\"}\"\n");
+    e = asngn_buf_appends(&b, "open      ::= \"{action: \\\"open\\\", why: "
+                              "\\\"\" meta \"\\\", input: {\\\"blob\\\": \" blob "
+                              "\", \\\"offset\\\": \" offset \"}}\"\n");
   if (e == ASNGN_OK && with_think)
     e = asngn_buf_appends(&b,
                           "think     ::= \"{action: \\\"think\\\", input: "
@@ -176,12 +175,13 @@ asngn_err asngn_grammar_steps(asngn_ctx *c, bool with_call, bool with_recall,
                           "\"\\\"}\"\n"
                           "answer    ::= \"{action: \\\"answer\\\"}\"\n");
   if (e == ASNGN_OK && open_on) {
-    e = asngn_buf_appends(&b, "handle    ::= ");
+    e = asngn_buf_appends(&b, "blob      ::= ");
     for (i = 1; e == ASNGN_OK && i <= blobs_n; i++) {
       if (i > 1) e = asngn_buf_appends(&b, " | ");
-      if (e == ASNGN_OK) e = asngn_buf_printf(&b, "\"B%zu\"", i);
+      if (e == ASNGN_OK) e = asngn_buf_printf(&b, "\"%zu\"", i);
     }
     if (e == ASNGN_OK) e = asngn_buf_appendc(&b, '\n');
+    if (e == ASNGN_OK) e = asngn_buf_appends(&b, "offset    ::= \"0\" | [1-9] [0-9]{0,9}\n");
   }
   if (e == ASNGN_OK)
     e = asngn_buf_printf(&b, "text      ::= tchar{1,%d}\n"

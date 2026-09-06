@@ -13,6 +13,17 @@
 
 #include "asngn_internal.h"
 #include "fakes.h"
+#include "context.h"
+
+static const asmodel_json_value *trace_reason(const asmodel_json_value *trace, const char *reason) {
+  const asmodel_json_value *items = asmodel_json_object_get(trace, "items");
+  for (size_t i = 0; i < asmodel_json_array_len(items); i++) {
+    const asmodel_json_value *v = asmodel_json_array_at(items, i);
+    const char *r = asmodel_json_string_value(asmodel_json_object_get(v, "reason"));
+    if (r && !strcmp(r, reason)) return v;
+  }
+  return NULL;
+}
 
 /* ── shared fixture ───────────────────────────────────────────────────── */
 
@@ -187,6 +198,8 @@ TEST(assemble_deterministic) {
   ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p2));
   ASSERT_EQ_STR(p1.system_text, p2.system_text);
   ASSERT_EQ_STR(p1.user_text, p2.user_text);
+  ASSERT_EQ_STR(p1.selection_json, p2.selection_json);
+  ASSERT_TRUE(strstr(p1.selection_json, "first question") == NULL);
   ASSERT_EQ_INT((long long)p1.tok_verbatim, (long long)p2.tok_verbatim);
   asngn_prompt_free(&p2);
 
@@ -208,6 +221,7 @@ TEST(assemble_deterministic) {
   ASSERT_OK(asngn_work_push(f.c, &t, "operational note"));
   ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p2));
   ASSERT_TRUE(strcmp(p1.user_text, p2.user_text) != 0);
+  ASSERT_TRUE(strcmp(p1.selection_json, p2.selection_json) != 0);
   ASSERT_TRUE(strstr(p2.user_text, "operational note") != NULL);
   ASSERT_TRUE(strstr(p1.user_text, "operational note") == NULL);
   ASSERT_TRUE(p2.tok_working > p1.tok_working);
@@ -347,6 +361,24 @@ TEST(working_budget_counts_mandatory_prompt) {
   ASSERT_TRUE(strstr(p.user_text, "keep\n") != NULL);
   ASSERT_TRUE(strstr(p.user_text, "user: q\n") != NULL);
   ASSERT_TRUE(strstr(p.user_text, "INSTR\n") != NULL);
+  asmodel_json_value *trace = NULL;
+  ASSERT_EQ_INT(asmodel_json_parse(p.selection_json, strlen(p.selection_json), &trace), 0);
+  const asmodel_json_value *trimmed = trace_reason(trace, "working_budget");
+  const asmodel_json_value *kept = trace_reason(trace, "recent_suffix");
+  ASSERT_TRUE(trimmed && kept);
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(trimmed, "decision")),
+                "excluded");
+  ASSERT_EQ_STR(asmodel_json_string_value(asmodel_json_object_get(kept, "decision")), "included");
+  ASSERT_TRUE(trace_reason(trace, "current_message") && trace_reason(trace, "acceptance_contract"));
+  uint8_t sha[32];
+  char hex[65];
+  asngn_sha256(p.user_text, strlen(p.user_text), sha);
+  asngn_sha256_hex(sha, sizeof sha, hex);
+  ASSERT_EQ_STR(asmodel_json_string_value(
+                    asmodel_json_object_get(asmodel_json_object_get(trace, "user"), "sha256")),
+                hex);
+  ASSERT_TRUE(strstr(p.selection_json, "old optional evidence") == NULL);
+  asmodel_json_free(trace);
 
   asngn_prompt_free(&p);
   fx_probe_dispose(&t);
@@ -383,13 +415,42 @@ TEST(global_budget_reports_zones) {
   fx_drop(&f);
 }
 
+TEST(selection_trace_is_bounded_without_claiming_full_detail) {
+  fx f;
+  asngn_session *s = NULL;
+  asngn_turn_state t;
+  asngn_prompt p = {0};
+  int slot;
+  ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
+  ASSERT_OK(asngn_session_open(f.c, "trace-bound", &s));
+  fx_probe_state(&f, s, "current", &t, &slot);
+  for (size_t i = 0; i < ASNGN_CONTEXT_TRACE_ITEMS + 9; i++)
+    ASSERT_OK(asngn_work_push(f.c, &t, "private evidence must not appear in telemetry"));
+  ASSERT_OK(asngn_context_assemble(f.c, s, &t, NULL, "INSTR", slot, &p));
+  asmodel_json_value *trace = NULL;
+  ASSERT_EQ_INT(asmodel_json_parse(p.selection_json, strlen(p.selection_json), &trace), 0);
+  ASSERT_EQ_INT(asmodel_json_array_len(asmodel_json_object_get(trace, "items")),
+                ASNGN_CONTEXT_TRACE_ITEMS);
+  ASSERT_EQ_INT(asmodel_json_int_value(asmodel_json_object_get(trace, "items_total")),
+                t.work_n + 5);
+  ASSERT_EQ_INT(asmodel_json_int_value(asmodel_json_object_get(trace, "items_omitted")), 14);
+  ASSERT_TRUE(strstr(p.selection_json, "private evidence") == NULL);
+  ASSERT_TRUE(strlen(p.selection_json) < 65536);
+  asmodel_json_free(trace);
+  asngn_prompt_free(&p);
+  fx_probe_dispose(&t);
+  asngn_session_close(s);
+  fx_drop(&f);
+}
+
 TEST_LIST = {
-  TEST_ENTRY(empty_session_golden),
-  TEST_ENTRY(assemble_deterministic),
-  TEST_ENTRY(verbatim_budget_pin_first),
-  TEST_ENTRY(verbatim_skips_oversized_recent_turn),
-  TEST_ENTRY(working_budget_counts_mandatory_prompt),
-  TEST_ENTRY(global_budget_reports_zones),
+    TEST_ENTRY(empty_session_golden),
+    TEST_ENTRY(assemble_deterministic),
+    TEST_ENTRY(verbatim_budget_pin_first),
+    TEST_ENTRY(verbatim_skips_oversized_recent_turn),
+    TEST_ENTRY(working_budget_counts_mandatory_prompt),
+    TEST_ENTRY(global_budget_reports_zones),
+    TEST_ENTRY(selection_trace_is_bounded_without_claiming_full_detail),
 };
 
 RUN_ALL_TESTS()

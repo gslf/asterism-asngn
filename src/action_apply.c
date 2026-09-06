@@ -1,5 +1,6 @@
 /* Execute a validated decision through the common runtime gates. */
 #include "execution.h"
+#include "blob.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -183,13 +184,18 @@ asngn_err asngn_action_apply(asngn_ctx *c, asngn_turn_state *t, asngn_step *st, 
       free_tok = (size_t)c->cfg.working_tokens > used ? (size_t)c->cfg.working_tokens - used : 0;
       if (free_tok < 64) free_tok = 64; /* always make some progress */
       free_chars = free_tok * 4;
-      if (asngn_digest_open_slice(c, s, b, free_chars, &slice) == ASNGN_OK && slice != NULL) {
+      asngn_err read = asngn_blob_read(c, b, st->blob_offset, free_chars, &slice);
+      if (read == ASNGN_OK && slice != NULL) {
         t->futile_row = 0;
         asngn_work_data(c, t, slice);
         free(slice);
       } else {
         t->futile_row++;
-        asngn_work_push(c, t, "[notice] blob exhausted");
+        asngn_work_push(
+            c, t,
+            read == ASNGN_OK
+                ? "[notice] end of blob"
+                : "[notice] evidence range unavailable: check its byte offset and UTF-8 boundary");
       }
     }
     break;

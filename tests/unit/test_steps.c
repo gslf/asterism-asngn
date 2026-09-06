@@ -54,10 +54,11 @@ TEST(open_handle) {
   asngn_step st;
   ASSERT_TRUE(c != NULL);
   ASSERT_OK(asngn_step_parse(
-      c, "{action: \"open\", why: \"reread the blob\", input: \"B3\"}",
+      c, "{action: \"open\", why: \"reread the blob\", input: {\"blob\":3,\"offset\":4096}}",
       &st));
   ASSERT_EQ_INT(st.kind, ASNGN_STEP_OPEN);
   ASSERT_EQ_INT(st.blob_n, 3);
+  ASSERT_EQ_INT(st.blob_offset, 4096);
   ASSERT_EQ_STR(st.why, "reread the blob");
   asngn_step_free(&st);
   bare_ctx_free(c);
@@ -262,7 +263,7 @@ TEST(malformed_objects_are_protocol_errors) {
                  c, "{action: \"open\", why: \"w\", input: \"Bx\"}", &st),
              ASNGN_ERR_PROTOCOL);
   ASSERT_ERR(asngn_step_parse(
-                 c, "{action: \"open\", why: \"w\", input: \"B0\"}", &st),
+                 c, "{action: \"open\", why: \"w\", input: {\"blob\":0,\"offset\":0}}", &st),
              ASNGN_ERR_PROTOCOL);
   ASSERT_ERR(asngn_step_parse(
                  c,

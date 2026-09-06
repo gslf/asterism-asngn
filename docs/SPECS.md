@@ -148,10 +148,12 @@ A compiler, search or file tool can return more text than the next model call ca
 use. asngn digests such a result into a short view and stores the complete bytes
 as a content-addressed Asper object.
 
-The model receives the digest plus a stable handle such as `OPEN B1`. It can
-request an exact range only when the missing detail becomes relevant. This is
-progressive disclosure for evidence: the full result is retained, but prompt
-space is spent on the part currently needed.
+The model receives a short view and an object hash, with diagnostic byte ranges.
+The `open` input `{"blob":1,"offset":80000}` can jump directly to a late range
+without advancing a hidden cursor. Offsets refer to the stored redacted bytes.
+Compiler/test recognizers retain first and recent diagnostic windows; they do
+not certify success. See [evidence and context](evidence-context.md) for selection
+traces, size limits and diagnostic coverage limits.
 
 ## 9. Model routing
 

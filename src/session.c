@@ -448,7 +448,6 @@ asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
   b->label = asngn_strdup(label);
   if (object_ref[0]) memcpy(b->object_ref, object_ref, sizeof b->object_ref);
   b->size = len;
-  b->slice_off = 0;
   if (b->id == NULL || b->label == NULL) {
     free(b->id);
     free(b->label);

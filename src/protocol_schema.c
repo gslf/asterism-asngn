@@ -1,5 +1,6 @@
 /* Application output contracts. Providers receive schemas, never protocol names. */
 #include "asngn_internal.h"
+#include "blob.h"
 #include "astools.h"
 #include "asmodel_json.h"
 #include <stdlib.h>
@@ -35,15 +36,8 @@ static asmodel_json_value *variant(const char *action, const char *tool,
     bad |= field(props, req, draft ? "path" : "arguments",
                  draft ? string_schema(512, NULL) : asmodel_json_clone(args));
   } else if (input) {
-    asmodel_json_value *s = string_schema(ASNGN_STEP_TEXT_MAX, NULL);
-    if (!strcmp(action, "open")) {
-      asmodel_json_value *handles = asmodel_json_array();
-      for (size_t i = 1; i <= blobs; i++) {
-        char handle[32]; snprintf(handle, sizeof handle, "B%zu", i);
-        bad |= asmodel_json_array_push(handles, asmodel_json_string(handle));
-      }
-      bad |= asmodel_json_object_set(s, "enum", handles);
-    }
+    asmodel_json_value *s = !strcmp(action, "open") ? asngn_blob_schema(blobs)
+                                                    : string_schema(ASNGN_STEP_TEXT_MAX, NULL);
     bad |= field(props, req, "input", s);
   }
   if (recovery) {

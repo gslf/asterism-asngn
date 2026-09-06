@@ -18,7 +18,8 @@ and unknown `data` fields (forward compatibility).
 | `step`        | `action` (call \| discover \| recall \| open \| think \| clarify \| answer), `why` — the model's declared rationale (redacted, flattened, truncated) |
 | `recall`      | (empty) — the recall step ran                          |
 | `fold`        | `mode` ("compressor" \| "extractive")                  |
-| `digest`      | `label` (tool.command or "recall"), `bytes` (full size)|
+| `evidence_selection` | `schema`, `policy`, `source` (object hash), `source_bytes`, `selected_bytes`, `diagnostic_markers`, `excerpt_budget_bytes`, `compressor_used`, `spans` (`start`, `end`, `reason`) |
+| `context_selection` | `schema`, `policy`, `scope`, `model`, `phase`, `observed_snapshot`, `memory_owner`, `count_basis`, budgets, `zone_tokens` (attribution quality unknown), prompt hashes, fragment decisions and `items_omitted`; no source text |
 | `judge`       | `score` (0–10), `tokens`                               |
 | `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated), `arguments_sha256`, `package_sha256`, `snapshot` — inspect full redacted arguments via `asngn_approval_get`, answer via `asngn_confirm` |
 | `authorization` | `granted`, `profile` — a profile denied an action; the turn may continue and report the required grant |
@@ -27,9 +28,11 @@ and unknown `data` fields (forward compatibility).
 | `turn_end`    | `ok`, `cancelled`, `error` (stable `asngn_err` name, empty on success). Exactly one is emitted for every submitted turn, including phase failures. |
 | `error`       | `message`                                              |
 
-Sinks: an in-memory ring of `telemetry.ring` events (always on;
+Sinks: an in-memory ring of at most `telemetry.ring` events and 8 MiB of payload (always on;
 the TUI and `asngn_set_event_sink` read it) and, with `telemetry.path`
-set, an append stream `telemetry/telemetry.xcdn` flushed once per turn
-with size-based rotation. A telemetry failure never fails the turn that
-emitted it. The per-turn economic summary is the ledger —
-telemetry holds the *how*, the ledger holds the *bill*.
+set, an append stream `telemetry/telemetry.xcdn` flushed each turn and before
+a batch exceeds 256 KiB, with size-based rotation. Events larger than 64 KiB
+are dropped. A telemetry failure never fails the turn that emitted it.
+See [selection trace semantics](evidence-context.md). Consumption reservations
+and settlements are durable operation records; conversation commits and
+best-effort telemetry do not replace that accounting.

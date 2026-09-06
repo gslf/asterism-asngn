@@ -51,8 +51,8 @@ asngn_err asngn_step_instruction(asngn_ctx *c, asngn_turn_state *t, bool call_ok
   if (e == ASNGN_OK && t->s->blobs_n > 0)
     e = asngn_buf_printf(&b,
                          "{action: \"open\", why: \"<short reason>\", "
-                         "input: \"B<1-%zu>\"}  # reopen a digested "
-                         "result\n",
+                         "input: {\"blob\": <1-%zu>, \"offset\": <byte-offset>}}  # read evidence "
+                         "at an exact offset\n",
                          t->s->blobs_n);
   if (e == ASNGN_OK && think_ok)
     e = asngn_buf_appends(&b, "{action: \"think\", input: \"<one-line "

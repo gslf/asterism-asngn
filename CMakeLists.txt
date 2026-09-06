@@ -164,8 +164,13 @@ set(ASNGN_SOURCES
   src/models_openai.c
   src/models_shared.c
   src/context.c
+  src/context_trace.c
+  src/context_budget.c
+  src/context_history.c
   src/retrieval.c
   src/digest.c
+  src/excerpt.c
+  src/blob.c
   src/embedcache.c
   src/cache.c
   src/toolcache.c

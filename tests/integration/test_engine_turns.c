@@ -864,7 +864,7 @@ TEST(digestion) {
 
   /* the second decision pass saw the digested line, not the raw result */
   ASSERT_CONTAINS(f.light.last_user, "[B1");
-  ASSERT_CONTAINS(f.light.last_user, "digested]");
+  ASSERT_CONTAINS(f.light.last_user, "digested; sha256:");
   ASSERT_CONTAINS(f.light.last_user, "digest of the result");
   ASSERT_NOT_CONTAINS(f.light.last_user, "xxxxxxxxxxxxxxxx");
 

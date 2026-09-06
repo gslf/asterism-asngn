@@ -30,6 +30,7 @@ set(ASNGN_TEST_PROGRAMS
   test_tool_selection
   test_native_actions
   test_approvals
+  test_evidence
 )
 
 foreach(test_name ${ASNGN_TEST_PROGRAMS})
@@ -67,6 +68,12 @@ foreach(test_name ${ASNGN_TEST_PROGRAMS})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()
 
+if(ASNGN_WITH_LLAMA AND TARGET test_grammar)
+  target_sources(test_grammar PRIVATE grammar_validate.cpp)
+  target_include_directories(test_grammar PRIVATE ${ASNGN_ASPER_DIR}/deps/llama.cpp/src)
+  target_compile_definitions(test_grammar PRIVATE ASNGN_TEST_LLAMA)
+endif()
+
 if(TARGET test_config)
   target_compile_definitions(test_config PRIVATE
     "ASNGN_TEST_SOURCE_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/..\"")
@@ -101,7 +108,7 @@ target_link_libraries(asngn_fake_tool PRIVATE xcdn)
 
 # The engine integration tests use the fixture writers (fixtures.c) and
 # invoke the fake tool by absolute path.
-foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals)
+foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals test_evidence)
   if(TARGET ${t})
     target_sources(${t} PRIVATE fixtures.c)
     target_compile_definitions(${t} PRIVATE

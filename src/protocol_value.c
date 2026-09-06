@@ -1,5 +1,6 @@
 /* Decode provider JSON at the application boundary. Runtime code stays generic. */
 #include "asngn_internal.h"
+#include "blob.h"
 #include "asmodel_json.h"
 #include <stdlib.h>
 #include <string.h>
@@ -55,12 +56,18 @@ static int admitted(const asmodel_json_value *o, const char *schema) {
       if (!tool || !expected || strcmp(tool,expected)) continue;
       if ((asmodel_json_object_get(props,"path") != NULL) != (asmodel_json_object_get(o,"path") != NULL)) continue;
     } else if (!strcmp(action,"open")) {
-      const asmodel_json_value *handles = asmodel_json_object_get(asmodel_json_object_get(props,"input"),"enum");
-      const char *input = string(o,"input");
-      for (size_t j = 0; input && j < asmodel_json_array_len(handles); j++) {
-        const char *h = asmodel_json_string_value(asmodel_json_array_at(handles,j));
-        if (h && !strcmp(input,h)) { ok = 1; break; }
-      }
+      const asmodel_json_value *input = asmodel_json_object_get(o, "input");
+      const asmodel_json_value *input_props =
+          asmodel_json_object_get(asmodel_json_object_get(props, "input"), "properties");
+      const asmodel_json_value *handles =
+          asmodel_json_object_get(asmodel_json_object_get(input_props, "blob"), "enum");
+      asngn_step range = {0};
+      if (asngn_blob_parse(input, &range) == ASNGN_OK)
+        for (size_t j = 0; j < asmodel_json_array_len(handles); j++)
+          if (asmodel_json_int_value(asmodel_json_array_at(handles, j)) == range.blob_n) {
+            ok = 1;
+            break;
+          }
       continue;
     }
     ok = 1;
@@ -99,6 +106,14 @@ static int step(asngn_buf *b, const asmodel_json_value *o) {
         int bad = !text || asngn_buf_appends(b, text) != ASNGN_OK;
         free(text); if (bad) return -1;
       }
+    } else if (!strcmp(action, "open")) {
+      const asmodel_json_value *input = asmodel_json_object_get(o, "input");
+      asngn_step range = {0};
+      if (asngn_blob_parse(input, &range) != ASNGN_OK) return -1;
+      char *text = asmodel_json_write(input, 0);
+      int bad = !text || asngn_buf_appends(b, text) != ASNGN_OK;
+      free(text);
+      if (bad) return -1;
     } else if (quoted(b, o, "input")) return -1;
   }
   if (recovery) {

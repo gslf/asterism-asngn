@@ -19,6 +19,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+static int tele_flush_locked(asngn_ctx *c);
+static void tele_warn(asngn_ctx *c, int flags);
+
 /* ── path resolution ──────────────────────────────────────────────────── */
 
 static bool tele_path_is_abs(const char *p) {
@@ -68,6 +71,7 @@ asngn_err asngn_tele_init(asngn_ctx *c) {
   c->ring.cap = cap;
   c->ring.n = 0;
   c->ring.head = 0;
+  c->ring.bytes = 0;
 
   asngn_buf_init(&c->tele_batch);
   c->tele_fp = NULL;
@@ -124,6 +128,7 @@ void asngn_tele_shutdown(asngn_ctx *c) {
   c->ring.cap = 0;
   c->ring.n = 0;
   c->ring.head = 0;
+  c->ring.bytes = 0;
   asngn_buf_free(&c->tele_batch);
   os_mutex_unlock(&c->tele_mu);
 }
@@ -152,6 +157,7 @@ void asngn_tele_emit(asngn_ctx *c, const char *kind, const char *span,
   bool ok;
   asngn_event_fn cb;
   void *cb_ud;
+  int flush_error = 0;
 
   if (!c || !kind) return;
 
@@ -193,6 +199,10 @@ void asngn_tele_emit(asngn_ctx *c, const char *kind, const char *span,
     return;
   }
   len = b.len;
+  if (len + 1 > ASNGN_TELE_EVENT_BYTES) {
+    asngn_buf_free(&b);
+    return;
+  }
   line = asngn_buf_detach(&b);
   if (!line) return;
 
@@ -201,7 +211,9 @@ void asngn_tele_emit(asngn_ctx *c, const char *kind, const char *span,
     char *copy = asngn_strdup(line);
     if (copy) { /* overwrite-oldest */
       size_t slot;
-      if (c->ring.n == c->ring.cap) {
+      while (c->ring.n &&
+             (c->ring.n == c->ring.cap || c->ring.bytes + len + 1 > ASNGN_TELE_RING_BYTES)) {
+        c->ring.bytes -= strlen(c->ring.items[c->ring.head]) + 1;
         free(c->ring.items[c->ring.head]);
         c->ring.items[c->ring.head] = NULL;
         c->ring.head = (c->ring.head + 1) % c->ring.cap;
@@ -210,7 +222,11 @@ void asngn_tele_emit(asngn_ctx *c, const char *kind, const char *span,
       slot = (c->ring.head + c->ring.n) % c->ring.cap;
       c->ring.items[slot] = copy;
       c->ring.n++;
+      c->ring.bytes += len + 1;
     }
+  }
+  if (c->tele_fp) {
+    if (c->tele_batch.len + len + 1 > ASNGN_TELE_BATCH_BYTES) flush_error = tele_flush_locked(c);
   }
   if (c->tele_fp) {
     size_t old = c->tele_batch.len;
@@ -224,6 +240,7 @@ void asngn_tele_emit(asngn_ctx *c, const char *kind, const char *span,
   cb = c->event_cb;
   cb_ud = c->event_ud;
   os_mutex_unlock(&c->tele_mu);
+  tele_warn(c, flush_error);
 
   /* Callback outside tele_mu (tele_mu is a leaf). */
   if (cb) cb(line, cb_ud);
@@ -323,36 +340,38 @@ static void tele_rotate_locked(asngn_ctx *c) {
   free(path);
 }
 
-void asngn_tele_flush(asngn_ctx *c) {
-  if (c && c->owner) c=c->owner;
-  bool warn_rotate = false, warn_write = false;
-  if (!c) return;
-
-  os_mutex_lock(&c->tele_mu);
+static int tele_flush_locked(asngn_ctx *c) {
+  int flags = 0;
   if (c->tele_fp && c->tele_batch.len > 0) {
     size_t len = c->tele_batch.len;
     if (c->cfg.tele_rotate_kb > 0 &&
         c->tele_size + len > (size_t)c->cfg.tele_rotate_kb * 1024u)
       tele_rotate_locked(c);
     if (c->tele_fp) {
-      if (fwrite(c->tele_batch.data, 1, len, c->tele_fp) == len) {
-        fflush(c->tele_fp);
+      if (fwrite(c->tele_batch.data, 1, len, c->tele_fp) == len && fflush(c->tele_fp) == 0) {
         c->tele_size += len;
       } else {
-        warn_write = true;
+        flags |= 2;
       }
     } else {
-      warn_rotate = true; /* rotation lost the sink; batch is dropped */
+      flags |= 1; /* rotation lost the sink; batch is dropped */
     }
     c->tele_batch.len = 0;
     if (c->tele_batch.data) c->tele_batch.data[0] = '\0';
   }
-  os_mutex_unlock(&c->tele_mu);
-
+  return flags;
+}
+static void tele_warn(asngn_ctx *c, int flags) {
   /* WARNs outside tele_mu — a telemetry failure never fails the turn. */
-  if (warn_rotate)
-    asngn_log(c, ASNGN_LOG_WARN, "telemetry",
-              "rotation failed; file sink disabled");
-  if (warn_write)
-    asngn_log(c, ASNGN_LOG_WARN, "telemetry", "batch write failed");
+  if (flags & 1) asngn_log(c, ASNGN_LOG_WARN, "telemetry", "rotation failed; file sink disabled");
+  if (flags & 2) asngn_log(c, ASNGN_LOG_WARN, "telemetry", "batch write failed");
+}
+
+void asngn_tele_flush(asngn_ctx *c) {
+  if (c && c->owner) c = c->owner;
+  if (!c) return;
+  os_mutex_lock(&c->tele_mu);
+  int flags = tele_flush_locked(c);
+  os_mutex_unlock(&c->tele_mu);
+  tele_warn(c, flags);
 }

@@ -264,6 +264,7 @@ typedef struct {
                  s_adapt, s_judge;
   /* routing */
   asngn_classifier_mode classifier;
+  bool native_actions; /* explicit operator choice; requires native tool support */
   int max_escalations;
   /* detail */
   asngn_detail detail_default; /* AUTO = classifier decides */
@@ -1214,6 +1215,7 @@ struct asngn_ctx {
    * whose token stream stops making progress. call_cancel is the flag
    * handed to the backend; the turn-level cancel also raises it. */
   volatile int  call_cancel;
+  bool          call_stalled; /* guarded by q_mu; set only by stall_tick */
   volatile int  call_active;
   volatile int64_t call_last_ms;
   volatile int64_t call_started_ms;

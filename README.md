@@ -355,6 +355,11 @@ To confirm the GPU is actually in use, watch VRAM while a turn runs
 (`nvidia-smi` on NVIDIA, Activity Monitor's GPU history on macOS): loading
 the 7B model should claim several GB.
 
+The optional [native action protocol](docs/native-actions.md) sends selected tools
+as native function schemas and retains correlated results. Enable it explicitly
+for a verified provider configuration; the embedded backend currently uses the
+constrained controller.
+
 ## Bigger context and longer answers
 
 The defaults use a professional 32k profile: enough room for substantial

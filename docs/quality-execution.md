@@ -12,7 +12,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests | Incremental snapshots, durable approval recovery, explicit data conversion, cross-process workspace coordination |
-| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Native engine decision path, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
+| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Direct native final responses, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues | Durable resume, approvals, persistent processes, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
@@ -47,8 +47,12 @@ trials require actual resources. No real-model result has been produced here.
   ingestion/commit, while action application, tools, confirmations, drafts and
   responses share explicit private boundaries. Structured generation preserves
   roles/tool-result blocks through the watchdog and reserves schema costs before
-  dispatch. The active decision policy still uses constrained steps; selecting a
-  native action protocol is the next integration gate.
+  dispatch. An explicit native action policy uses the generator and the same
+  execution gates; correlated current-turn tool results retain native roles.
+  Whole-batch preflight rejects invalid arguments, mixed mutations and budgets
+  before the first effect. Native inline payloads avoid the draft pass; the
+  configured classification and response phases remain. See
+  [native actions](native-actions.md) for bounds and unmeasured costs.
 - Output contracts now travel explicitly through asmodel ABI 7. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
   GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns
@@ -57,7 +61,7 @@ trials require actual resources. No real-model result has been produced here.
   JSON output metadata survives both shared-runtime adapters. Metadata strings
   preserve quotes/Unicode and reject oversized values instead of truncating intent.
   Message and native tool contracts now preserve roles and correlation IDs;
-  attachments and an engine-native decision path remain. Embedded text templates
+  attachments and a response path without a separate generation remain. Embedded text templates
   reject unsupported blocks instead of silently flattening or switching templates.
 - Embedding batches retain valid leading rows, explicit consumption and cancellation/
   timeout errors. The shared manager owns query/document prefixes for both hosts.
@@ -127,14 +131,17 @@ trials require actual resources. No real-model result has been produced here.
 ## Validation at this checkpoint
 
 - Native CPU build against the pinned llama.cpp submodule compiles the actual
-  adapters and passes 33/33 fake-based tests; no weights were loaded.
-- Integrated no-llama suite: 33/33 CTest executables passed.
-- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 33/33 passed.
+  adapters and passes 35/35 fake-based tests; no weights were loaded.
+- Integrated no-llama suite: 35/35 CTest executables passed.
+- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 35/35 passed.
 - Standalone Asper: 24/24; astools: 25/25; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
   all seven executables with ASan/UBSan/LeakSanitizer.
+- The native controller also passes a full MCP/HTTP/tool-process integration for
+  Chat Completions and Responses with scripted peers. Provider cancellation remains
+  cancellation unless the watchdog actually observed a stall.
 - Message/tool tests exercise full HTTP encodings, streamed arguments, unknown/
   duplicate/reused IDs, absent required tools and malformed JSON. Failed or
   incomplete generations cannot expose tool proposals for execution.
@@ -190,9 +197,9 @@ behavior have not been validated by these Linux no-llama runs.
 
 ## Next implementation order
 
-1. Connect the native tool contract to policy-consistent engine discovery/decisions;
-   add attachments only with honest modality admission. Native loader interruption
-   remains backend-dependent.
+1. Extend the native contract with attachments only with honest modality admission;
+   evaluate direct final responses without weakening completion gates. Native
+   loader interruption remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
 3. Add resumable approvals, controlled processes and editor protocols.

@@ -25,6 +25,9 @@ prompt, including formatting and instructions; this byte budget is not an exact
 token count. Ranking is a bounded metadata heuristic, with no measured multilingual
 or task-success guarantee. A specific name/query can recover an omitted command.
 
+The optional [native action protocol](native-actions.md) exports this same
+selection as function schemas, with at most 59 tools plus runtime controls.
+
 The host filters disabled runtimes, statically impossible permissions and commands
 excluded by the read-only profile. Argument-specific path checks remain mandatory.
 Before confirmation or a cached result, Astools validates the selected package,

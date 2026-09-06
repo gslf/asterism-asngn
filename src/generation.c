@@ -19,8 +19,7 @@ static void watch_token_cb(const char *piece, void *ud) {
   if (w->inner != NULL) w->inner(piece, w->inner_ud);
 }
 
-/* Returns the backend verdict; distinguishes user-cancel from stall via
- * t->cancel. */
+/* Preserve provider cancellations unless the runtime observed a stall. */
 asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asngn_task_kind task,
                                const asmodel_input *input, const char *gbnf, const char *schema,
                                const asmodel_tools *tools, int max_tokens, asngn_token_fn cb,
@@ -29,6 +28,7 @@ asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asng
   if (out_in) *out_in = 0;
   if (out_out) *out_out = 0;
   if (tools) asmodel_tool_calls_clear(tools->output);
+  if (!c || !t || !out_text) return ASNGN_ERR_INVALID;
   watch_ud w;
   asngn_err e;
   int64_t now = asngn_clock_mono_ms(&c->clock);
@@ -41,6 +41,7 @@ asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asng
    * already ended (stall_tick holds the same mutex) */
   os_mutex_lock(&c->q_mu);
   c->call_cancel = t->cancel ? 1 : 0;
+  c->call_stalled = false;
   c->call_started_ms = now;
   c->call_last_ms = now;
   c->call_turn = t;
@@ -50,10 +51,11 @@ asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asng
                                   t->deadline_mono, watch_token_cb, &w, &c->call_cancel, out_text,
                                   out_in, out_out);
   os_mutex_lock(&c->q_mu);
+  bool stalled = c->call_stalled;
   c->call_active = 0;
   c->call_turn = NULL;
   os_mutex_unlock(&c->q_mu);
-  if (e == ASNGN_ERR_CANCELLED && !t->cancel) {
+  if (e == ASNGN_ERR_CANCELLED && stalled && !t->cancel) {
     /* the watchdog, not the user: report as a stall */
     asngn_tele_emit(c, "guard", NULL, NULL, t->s->slug, t->led.turn, "{guard: \"stall\"}");
     os_rwlock_wrlock(&c->lock);

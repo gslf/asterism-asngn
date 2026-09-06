@@ -37,6 +37,7 @@ asngn_err asngn_call_execute(asngn_ctx *c, asngn_turn_state *t, const char *line
 asngn_err asngn_step_instruction(asngn_ctx *c, asngn_turn_state *t, bool call_ok, bool call_muted,
                                  bool think_ok, bool think_muted, char **out);
 asngn_err asngn_actions_run(asngn_ctx *c, asngn_turn_state *t);
+asngn_err asngn_native_run(asngn_ctx *c, asngn_turn_state *t);
 bool asngn_response_has_tool_protocol(asngn_ctx *c, const char *text);
 asngn_err asngn_answer_run(asngn_ctx *c, asngn_turn_state *t, size_t *aux_tokens);
 asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asngn_task_kind task,

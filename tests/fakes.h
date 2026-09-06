@@ -54,6 +54,9 @@ typedef struct {
   char embedded_documents[32][128];
   size_t input_messages;
   asmodel_role input_roles[8];
+  char *last_native_results;
+  int native_calls;
+  asngn_err native_error; /* force an error after proposing calls */
   int calls;          /* generate() invocations                 */
   int max_tokens_seen[32]; /* generation cap for each call       */
   asmodel_reasoning_mode reasoning_seen[32];
@@ -65,6 +68,8 @@ void fake_model_init(fake_model *fm);
 void fake_model_dispose(fake_model *fm);
 /* Queue one scripted reply (copied). 1 = ok, 0 = out of memory. */
 int fake_model_push(fake_model *fm, const char *reply);
+/* JSON array of {id,name,arguments}; tool labels resolve against this request's schemas. */
+int fake_model_push_native(fake_model *fm, const char *calls_json);
 /* Queue a deterministic backend error for one generation call. */
 int fake_model_push_error(fake_model *fm, asngn_err error);
 /* Queue an output-limit result that still owns the supplied partial text. */

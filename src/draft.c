@@ -361,6 +361,8 @@ asngn_err asngn_expand_write_draft(asngn_ctx *c, asngn_turn_state *t, const char
   bool in_str = false, esc = false;
 
   *out = NULL;
+  /* Native proposals already contain their complete payload. */
+  if (c->cfg.native_actions) return ASNGN_OK;
   if (!asngn_tool_ref_is(ref, "fs") || strcmp(cmd, "write") != 0) return ASNGN_OK;
   if (args == NULL) return ASNGN_OK;
 

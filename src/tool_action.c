@@ -63,7 +63,8 @@ asngn_err asngn_call_execute(asngn_ctx *c, asngn_turn_state *t, const char *line
    * post-expansion call hash would consider every repeat different. Track the
    * stable intent before expansion, but scope it to the workspace state: a
    * failed write is blocked only until some other action changes its inputs. */
-  if (strcmp(ref, "fs") == 0 && strcmp(cmd, "write") == 0 && strstr(args, "@asngn:draft") != NULL) {
+  if (!c->cfg.native_actions && strcmp(ref, "fs") == 0 && strcmp(cmd, "write") == 0 &&
+      strstr(args, "@asngn:draft") != NULL) {
     asngn_buf ib;
     uint8_t workspace_hash[32];
     size_t i;

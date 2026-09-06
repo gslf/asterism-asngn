@@ -261,6 +261,7 @@ static const cfg_key CFG_KEYS[] = {
 
   { "routing", "classifier",      K_ENUM, OFF(classifier), 0,
     CLASSIFIER_MAP },
+  { "routing", "native_actions", K_BOOL, OFF(native_actions), 0, NULL },
   { "routing", "max_escalations", K_I64, 0, 0, NULL }, /* custom: int>=0 */
 
   { "detail", "default",       K_ENUM, OFF(detail_default), 0, DETAIL_MAP },

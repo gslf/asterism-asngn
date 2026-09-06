@@ -2,6 +2,7 @@
 
 #include "asngn_internal.h"
 #include "fakes.h"
+#include "asmodel_json.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -62,6 +63,7 @@ void fake_model_dispose(fake_model *fm) {
   free(fm->last_user);
   free(fm->last_schema); fm->last_schema = NULL;
   free(fm->last_grammar);
+  free(fm->last_native_results);
   memset(fm, 0, sizeof *fm);
 }
 
@@ -86,6 +88,53 @@ int fake_model_push_error(fake_model *fm, asngn_err error) {
   char marker[48];
   snprintf(marker, sizeof marker, "@asngn:test-error:%d", (int)error);
   return fake_model_push(fm, marker);
+}
+
+int fake_model_push_native(fake_model *fm, const char *calls_json) {
+  asngn_buf b; asngn_buf_init(&b);
+  int ok = asngn_buf_printf(&b, "@asngn:test-native:%s", calls_json) == ASNGN_OK &&
+      fake_model_push(fm, b.data);
+  asngn_buf_free(&b); return ok;
+}
+
+static asngn_err native_reply(fake_model *fm, const asmodel_input *input,
+    const asngn_gen_params *params, char **text) {
+  static const char prefix[] = "@asngn:test-native:";
+  if (!params->tools || !*text || strncmp(*text, prefix, sizeof prefix - 1)) return ASNGN_OK;
+  fm->native_calls++;
+  asngn_buf seen; asngn_buf_init(&seen);
+  for (size_t i = 0; i < input->count; i++) for (size_t j = 0; j < input->messages[i].count; j++) {
+    const asmodel_block *v = &input->messages[i].blocks[j];
+    if (v->kind == ASMODEL_BLOCK_TOOL_RESULT)
+      (void)asngn_buf_printf(&seen, "%s:%s\n", v->id, v->text);
+  }
+  free(fm->last_native_results); fm->last_native_results = asngn_buf_detach(&seen);
+  asngn_buf_free(&seen);
+  asmodel_json_value *array = NULL;
+  const char *json = *text + sizeof prefix - 1;
+  if (asmodel_json_parse(json, strlen(json), &array)) return ASNGN_ERR_MODEL;
+  size_t n = asmodel_json_array_len(array);
+  asngn_err e = ASNGN_OK;
+  if (!n || n > 32) e = ASNGN_ERR_MODEL;
+  for (size_t i = 0; e == ASNGN_OK && i < n; i++) {
+    asmodel_json_value *v = asmodel_json_array_at(array, i);
+    const char *id = asmodel_json_string_value(asmodel_json_object_get(v, "id"));
+    const char *name = asmodel_json_string_value(asmodel_json_object_get(v, "name"));
+    const char *args = asmodel_json_string_value(asmodel_json_object_get(v, "arguments"));
+    if (!id || !name || !args) { e = ASNGN_ERR_MODEL; break; }
+    for (size_t j = 0; j < params->tools->count; j++) {
+      const asmodel_tool_schema *schema = &params->tools->schemas[j];
+      if (!strncmp(schema->description, name, strlen(name)) && schema->description[strlen(name)] == ':') {
+        name = schema->name; break;
+      }
+    }
+    asmodel_tool_call *out = &params->tools->output->calls[params->tools->output->count++];
+    out->id = asngn_strdup(id); out->name = asngn_strdup(name); out->arguments = asngn_strdup(args);
+    if (!out->id || !out->name || !out->arguments) e = ASNGN_ERR_NOMEM;
+  }
+  asmodel_json_free(array);
+  free(*text); *text = asngn_strdup("");
+  return e == ASNGN_OK ? fm->native_error : e;
 }
 
 int fake_model_push_partial_limit(fake_model *fm, const char *partial) {
@@ -204,6 +253,7 @@ static asngn_err fake_model_generate(void *ud, const asmodel_input *input,
   const char *user = input->messages[1].blocks[0].text;
   int ti = 0, to = 0;
   asngn_err e = fake_model_generate_impl(ud,sys,user,gbnf,p,fn,fn_ud,cancel,out,&ti,&to);
+  if (e == ASNGN_OK) e = native_reply(fm,input,p,out);
   if (in) *in = ti;
   if (gen) *gen = to;
   if (p->result_info) {
@@ -213,6 +263,8 @@ static asngn_err fake_model_generate(void *ud, const asmodel_input *input,
     info->json_output = ((fake_model *)ud)->json_output && p->output_schema;
     info->finish_reason = e == ASNGN_OK ? ASMODEL_FINISH_STOP : e == ASNGN_ERR_LIMIT ?
         ASMODEL_FINISH_LENGTH : e == ASNGN_ERR_CANCELLED ? ASMODEL_FINISH_CANCELLED : ASMODEL_FINISH_ERROR;
+    if (e == ASNGN_OK && p->tools && p->tools->output->count)
+      info->finish_reason = ASMODEL_FINISH_TOOL_CALLS;
   }
   return e;
 }

@@ -4,6 +4,7 @@
 #include <string.h>
 
 asngn_err asngn_actions_run(asngn_ctx *c, asngn_turn_state *t) {
+  if (c->cfg.native_actions) return asngn_native_run(c, t);
   asngn_session *s = t->s;
   int plan_slot = asngn_models_slot_for_role(c, ASNGN_ROLE_PLANNER);
   /* Routine tool lookup can use the cheap planner.  Coding orchestration

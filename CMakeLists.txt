@@ -191,6 +191,9 @@ set(ASNGN_SOURCES
   src/tool_action.c
   src/action_instruction.c
   src/action_loop.c
+  src/native_contract.c
+  src/native_history.c
+  src/native_loop.c
   src/action_apply.c
   src/answer.c
   src/tools.c

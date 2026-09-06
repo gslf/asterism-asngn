@@ -141,6 +141,7 @@ static void stall_tick(asngn_ctx *c) {
       if (last <= started) limit *= 2; /* still evaluating the prompt */
       silence = now - (last > started ? last : started);
       if (silence > limit) {
+        c->call_stalled = true;
         c->call_cancel = 1;
         stalled = true;
       }

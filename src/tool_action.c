@@ -376,6 +376,7 @@ asngn_err asngn_call_execute(asngn_ctx *c, asngn_turn_state *t, const char *line
     if (asngn_verification_command(ref, cmd, expanded_args) &&
         asngn_workspace_refresh(c) == ASNGN_OK)
       memcpy(proof_base, c->workspace.fingerprint, sizeof proof_base);
+    asngn_action_event(t, ref, cmd, exec_args, NULL, ASTOOLS_OK, true);
     ae = (astools_err)asngn_tools_invoke(t, selected->tool, exec_args, deadline_ms, &r);
     t->tool_calls++;
     t->tools_used = true;
@@ -394,6 +395,7 @@ asngn_err asngn_call_execute(asngn_ctx *c, asngn_turn_state *t, const char *line
     e = asngn_turn_journal(t, "observed",
                            r.result_xcdn ? r.result_xcdn
                                          : (r.error_code ? r.error_code : "unknown outcome"));
+    asngn_action_event(t, ref, cmd, exec_args, &r, ae, e == ASNGN_OK);
     if (e == ASNGN_OK)
       e = asngn_work_observe(t, ref, cmd, exec_args, ae == ASTOOLS_OK && r.ok, r.result_xcdn,
                              proof_base, proof_after);

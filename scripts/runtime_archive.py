@@ -20,7 +20,7 @@ def extract(archive, destination):
                 raise ValueError("Archive layout or size exceeds the runtime profile")
             members.append(member)
         if not members or not all(next(iter(roots)) + "/bin/" + name in names
-                                  for name in ("asngn", "asngn-mcp", "astools-jail", "astools-check")):
+                                  for name in ("asngn", "asngn-mcp", "asngn-acp", "astools-jail", "astools-check")):
             raise ValueError("Archive omits required runtime files")
         # No links or special files are admitted, and this directory is newly owned.
         destination.mkdir()

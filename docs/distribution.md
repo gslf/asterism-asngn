@@ -2,6 +2,7 @@
 
 The `linux-remote` profile builds a relocatable runtime archive from the four
 clean local component pins. It contains the TUI/headless CLI, three MCP servers,
+the limited [ACP editor host](acp.md),
 the Astools checker/jail helper, standard tool packages, starter configurations
 and licenses. It contains no weights, secrets, session state or development
 libraries. It uses the host Linux C/C++ runtime and libcurl dependencies;
@@ -48,7 +49,7 @@ ctest --test-dir build-runtime -R '^test_distribution$' --output-on-failure
 cmake --install build-runtime --prefix /new/installation
 ```
 
-The distribution option requires Linux, threaded TUI/MCP targets and no
+The distribution option requires Linux, threaded TUI/MCP/ACP targets and no
 sanitizers. Other build profiles remain available for development and embedding.
 `cmake --install` has CMake's ordinary replacement semantics; select a new prefix
 for reviewable upgrades. Existing stores are not migrated or erased by packaging.

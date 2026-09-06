@@ -1,5 +1,5 @@
 # A runtime bundle has no model weights, credentials, development libraries or state.
-install(TARGETS asngn asngn-mcp RUNTIME DESTINATION bin)
+install(TARGETS asngn asngn-mcp asngn-acp RUNTIME DESTINATION bin)
 # Sibling directories are EXCLUDE_FROM_ALL; install their explicitly built tools here.
 install(PROGRAMS $<TARGET_FILE:asper-mcp> $<TARGET_FILE:astools-mcp>
                  $<TARGET_FILE:astools-check> $<TARGET_FILE:astools-jail> DESTINATION bin)
@@ -9,7 +9,7 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/packages/" DESTINATION share/asterism/too
   USE_SOURCE_PERMISSIONS PATTERN ".*" EXCLUDE)
 install(DIRECTORY examples/ DESTINATION share/asterism/examples
   PATTERN "__pycache__" EXCLUDE)
-install(FILES release.json docs/distribution.md DESTINATION share/asterism)
+install(FILES release.json docs/distribution.md docs/acp.md DESTINATION share/asterism)
 foreach(component asngn asper asmodel astools)
   if(component STREQUAL "asngn")
     set(component_source "${CMAKE_CURRENT_SOURCE_DIR}")

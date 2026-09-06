@@ -22,6 +22,7 @@ set(ASNGN_TEST_PROGRAMS
   test_detail
   test_session
   test_task_record
+  test_action_events
   test_operations
   test_ledger
   test_context_golden
@@ -113,7 +114,7 @@ target_link_libraries(asngn_fake_tool PRIVATE xcdn)
 
 # The engine integration tests use the fixture writers (fixtures.c) and
 # invoke the fake tool by absolute path.
-foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals test_evidence test_task_record)
+foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals test_evidence test_task_record test_action_events)
   if(TARGET ${t})
     target_sources(${t} PRIVATE fixtures.c)
     target_compile_definitions(${t} PRIVATE
@@ -123,7 +124,34 @@ foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_a
 endforeach()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
+if(TARGET asngn_acp_host)
+  add_executable(test_acp_io acp/io.c)
+  target_include_directories(test_acp_io PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_options(test_acp_io PRIVATE ${ASNGN_C_FLAGS})
+  target_link_libraries(test_acp_io PRIVATE asngn_acp_host)
+  add_test(NAME test_acp_io COMMAND test_acp_io)
+  set_tests_properties(test_acp_io PROPERTIES TIMEOUT 20)
+endif()
 if(Python3_Interpreter_FOUND)
+  if(TARGET asngn_acp_host)
+    add_executable(asngn_acp_test_driver acp/driver.c fakes.c fixtures.c)
+    target_include_directories(asngn_acp_test_driver PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_options(asngn_acp_test_driver PRIVATE ${ASNGN_C_FLAGS})
+    target_link_libraries(asngn_acp_test_driver PRIVATE asngn_acp_host)
+    target_compile_definitions(asngn_acp_test_driver PRIVATE
+      "ASNGN_TEST_TOOL_PATH=\"$<TARGET_FILE:asngn_fake_tool>\"")
+    if(ASNGN_SANITIZERS)
+      target_compile_definitions(asngn_acp_test_driver PRIVATE ASNGN_TEST_SANITIZERS)
+    endif()
+    add_dependencies(asngn_acp_test_driver asngn_fake_tool)
+    add_test(NAME test_acp_protocol COMMAND ${Python3_EXECUTABLE} -B
+      ${CMAKE_CURRENT_SOURCE_DIR}/acp/protocol.py $<TARGET_FILE:asngn-acp>
+      $<TARGET_FILE:asngn_acp_test_driver>)
+    set_tests_properties(test_acp_protocol PROPERTIES TIMEOUT 90)
+    add_test(NAME test_acp_lifecycle COMMAND ${Python3_EXECUTABLE} -B
+      ${CMAKE_CURRENT_SOURCE_DIR}/acp/lifecycle.py $<TARGET_FILE:asngn_acp_test_driver>)
+    set_tests_properties(test_acp_lifecycle PROPERTIES TIMEOUT 90)
+  endif()
   add_test(NAME test_runtime_archive COMMAND ${Python3_EXECUTABLE} -B
     ${CMAKE_CURRENT_SOURCE_DIR}/test_runtime_archive.py)
   set_tests_properties(test_runtime_archive PROPERTIES TIMEOUT 30)

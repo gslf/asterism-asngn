@@ -142,10 +142,11 @@ Notes that apply to every platform:
   builds.
 - Build options: `ASNGN_BUILD_TUI` (ON), `ASNGN_BUILD_MCP` (ON),
   `ASNGN_BUILD_TESTS` (ON), `ASNGN_NO_THREADS` (OFF), `ASNGN_SANITIZERS`
-  (OFF), `ASNGN_WITH_LLAMA` (ON).
+  (OFF), `ASNGN_WITH_LLAMA` (ON), `ASNGN_BUILD_ACP` (ON for threaded POSIX
+  builds, OFF elsewhere).
 - Artifacts: `libasngn.a` / `libasngn.dylib` (`asngn.lib` / `asngn.dll` on
   Windows), the `asngn` terminal application, and the `asngn-mcp` MCP
-  server.
+  server. Threaded POSIX builds also include the limited `asngn-acp` editor host.
 
 ### 4. Download the model weights
 
@@ -236,6 +237,12 @@ POSIX (binaries in `build/`):
 # MCP server over stdio
 ./build/asngn-mcp
 ```
+
+For an editor that accepts a custom ACP stdio agent, configure
+`build/asngn-acp --workspace /absolute/repository --config /absolute/config.xcdn`.
+The initial host supports text, resource links, streaming and bound permissions
+for one operator-selected workspace. Read the [supported ACP profile](docs/acp.md)
+before enabling it; supplied MCP servers and session loading are not yet supported.
 
 Windows (binaries in `build\Release\`; the TUI needs a VT-capable console —
 any Windows 10+ console works, Windows Terminal recommended):

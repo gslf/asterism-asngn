@@ -9,13 +9,21 @@ option(ASNGN_BUILD_TUI   "Build the asngn terminal application"   ON)
 option(ASNGN_BUILD_MCP   "Build the asngn-mcp server"             ON)
 option(ASNGN_BUILD_TESTS "Build unit/integration tests"           ON)
 option(ASNGN_NO_THREADS  "Single-threaded build (asngn_tick)"     OFF)
+set(ASNGN_ACP_DEFAULT OFF)
+if(UNIX AND NOT ASNGN_NO_THREADS)
+  set(ASNGN_ACP_DEFAULT ON)
+endif()
+option(ASNGN_BUILD_ACP "Build the local ACP editor host (POSIX, threaded)" ${ASNGN_ACP_DEFAULT})
+if(ASNGN_BUILD_ACP AND (NOT UNIX OR ASNGN_NO_THREADS))
+  message(FATAL_ERROR "ACP requires a threaded POSIX build; configure ASNGN_BUILD_ACP=OFF")
+endif()
 option(ASNGN_SANITIZERS  "Enable ASan/UBSan"                      OFF)
 option(ASNGN_WITH_LLAMA  "Build the llama.cpp inference backend"  ON)
 option(ASNGN_BUILD_DISTRIBUTION "Build the Linux remote-provider runtime package" OFF)
 if(ASNGN_BUILD_DISTRIBUTION AND (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
     ASNGN_WITH_LLAMA OR ASNGN_SANITIZERS OR ASNGN_NO_THREADS OR
-    NOT ASNGN_BUILD_TUI OR NOT ASNGN_BUILD_MCP))
-  message(FATAL_ERROR "Distribution requires Linux, threaded TUI/MCP, ASNGN_WITH_LLAMA=OFF and sanitizers disabled")
+    NOT ASNGN_BUILD_TUI OR NOT ASNGN_BUILD_MCP OR NOT ASNGN_BUILD_ACP))
+  message(FATAL_ERROR "Distribution requires Linux, threaded TUI/MCP/ACP, ASNGN_WITH_LLAMA=OFF and sanitizers disabled")
 endif()
 
 # Sibling working trees (pinned deps). By default
@@ -220,6 +228,7 @@ set(ASNGN_SOURCES
   src/native_history.c
   src/native_loop.c
   src/action_apply.c
+  src/action_event.c
   src/answer.c
   src/tools.c
   src/safety.c
@@ -339,6 +348,19 @@ if(ASNGN_BUILD_MCP)
     ${CMAKE_CURRENT_SOURCE_DIR}/mcp)
   target_compile_options(asngn-mcp PRIVATE ${ASNGN_C_FLAGS})
   target_link_libraries(asngn-mcp PRIVATE asngn_static)
+endif()
+
+if(ASNGN_BUILD_ACP)
+  add_library(asngn_acp_host STATIC acp/io.c acp/protocol.c acp/dispatch.c
+    acp/session.c acp/stream.c acp/events.c acp/permission.c acp/run.c
+    mcp/tasks.c mcp/work.c)
+  target_include_directories(asngn_acp_host PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/acp)
+  target_compile_options(asngn_acp_host PRIVATE ${ASNGN_C_FLAGS})
+  target_link_libraries(asngn_acp_host PUBLIC asngn_static)
+  add_executable(asngn-acp acp/main.c)
+  target_compile_options(asngn-acp PRIVATE ${ASNGN_C_FLAGS})
+  target_link_libraries(asngn-acp PRIVATE asngn_acp_host)
 endif()
 
 # ── Tests ───────────────────────────────────────────────────────────────────

@@ -30,6 +30,9 @@ asngn_err asngn_call_outcome(asngn_ctx *c, asngn_turn_state *t, const char *ref,
 asngn_err asngn_call_error(asngn_ctx *c, asngn_turn_state *t, const char *ref, const char *cmd,
                            const char *args, const char *code, const char *message);
 void asngn_call_fallback(asngn_ctx *c, asngn_turn_state *t, const char *fallback);
+void asngn_action_event(asngn_turn_state *t, const char *ref, const char *command,
+                        const char *args, const astools_result *result,
+                        astools_err error, bool journaled);
 asngn_err asngn_call_confirm(asngn_ctx *c, asngn_turn_state *t,
     const astools_selected_command *tool, const char *args, const asngn_tool_note *note,
     bool *allowed, const char **deny_code);

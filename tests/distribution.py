@@ -23,6 +23,12 @@ def check(prefix):
         version = subprocess.run([prefix / "bin/asngn", "--version"], cwd=work,
             env=env, text=True, capture_output=True, check=True, timeout=15)
         assert "0." in version.stdout, version
+        acp = subprocess.run([prefix / "bin/asngn-acp", "--root", work / "acp-state",
+            "--workspace", work, "--allow-degraded"], cwd=work, env=env, text=True,
+            input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                              "params": {"protocolVersion": 1}}) + "\n",
+            capture_output=True, check=True, timeout=15)
+        assert json.loads(acp.stdout)["result"]["protocolVersion"] == 1, acp
         for name in ("asngn", "asper", "asmodel", "astools", "xcdn"):
             assert (prefix / "share/asterism/licenses" / (name + ".txt")).is_file()
         packages = prefix / "share/asterism/tools"

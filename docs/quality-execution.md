@@ -17,7 +17,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts, explicit partial-outcome reconciliation and reversible source deferral | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime, archived task retrieval through MCP/SDKs, instrumented shared JSON/provider and tool JSON/manifest/schema fuzz targets | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, storage/process fuzzing and TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
-| 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, relocatable Linux remote-provider runtime packaging, Python and JavaScript/TypeScript host SDKs, tested local packages, reviewed MCP 2026-07-28 stdio bindings with bounded schema validation and host-owned lifecycle, accurate build/accounting documentation | ACP, complete JSON Schema conformance and third-party MCP servers, HTTP/OAuth, signed packages, editor flows and external user trials |
+| 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, relocatable Linux remote-provider runtime packaging, Python and JavaScript/TypeScript host SDKs, tested local packages, reviewed MCP 2026-07-28 stdio bindings, native POSIX ACP session/stream/cancel/permission profile, accurate build/accounting documentation | ACP supplied-server lifecycle and editor interoperability, complete JSON Schema conformance and third-party MCP servers, HTTP/OAuth, signed packages and external user trials |
 
 No experimental routing or procedure promotion is enabled on the strength of
 fake-model tests. Paid APIs, signing credentials, hardware measurements and user
@@ -182,6 +182,27 @@ trials require actual resources. No real-model result has been produced here.
   unprobed; missing weights/configuration/credentials and ABI mismatches are visible.
 
 ## Validation at this checkpoint
+
+The native ACP profile links the same runtime and shared asynchronous observer;
+it does not add a model owner or expose approval mutation to MCP tool clients.
+Actual runtime action events correlate review UUIDs with action UUIDs and journal
+observations. Tests distinguish successful/failed processes from uncertain writes.
+ACP suites exercise real stdio framing, UTF-8 output recovery, exact 64-bit IDs,
+session limits, repeated/unknown permissions, stale workspace approval, cancel,
+close, EOF, stalled output and separate live sessions. A relocated installation
+also initializes the packaged host. The supported profile and its remaining
+supplied-MCP/editor conformance gates are documented in [ACP](acp.md).
+The complete restricted runs pass 53 ASan/UBSan executable suites (leak detection
+disabled), 54 ordinary distribution suites and 49 non-threaded suites. After
+caching the final answer length to avoid repeated full scans during output drain,
+all three ACP suites pass again in both threaded builds and relocated distribution
+passes again. Logs/JUnit are under `/tmp/asterism-acp-*-tests.*`; the final targeted
+checks use `/tmp/asterism-acp-final-*-tests.*`. HTTP, LSan and the production
+bubblewrap oracle remain excluded for the existing infrastructure reasons below.
+
+The retrieval/fuzzing checkpoint `1b01e44` passed clean reconstruction at
+`/tmp/asterism-restricted-release-bop9b65l`: 49 Asngn, 31 Asper, 6 asmodel and
+35 Astools executable suites passed. This clean result predates ACP.
 
 The `6974045` process/task checkpoint also passed clean reconstruction at
 `/tmp/asterism-restricted-release-kexafidt`: 48 Asngn, 31 Asper, 6 asmodel and
@@ -517,7 +538,8 @@ behavior have not been validated by these Linux no-llama runs.
    interruption remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
-3. Add durable task resumption, controlled processes and editor protocols.
+3. Add durable task resumption and controlled processes; extend the native ACP
+   profile with supplied-server lifecycle and validate actual editor integration.
    [ACP v1 requires MCP stdio clients](https://agentclientprotocol.com/protocol/v1/session-setup).
    Integrate tool-client lifecycle and host permission boundaries before claiming
    ACP conformance; a text-only facade that ignores supplied servers is insufficient.

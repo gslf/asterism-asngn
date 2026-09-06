@@ -120,6 +120,9 @@ endforeach()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME test_release_admission
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test_release.py)
+  set_tests_properties(test_release_admission PROPERTIES TIMEOUT 120)
   if(TARGET asngn)
     add_test(NAME test_confirmation_tui
       COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/confirmation_tui.py

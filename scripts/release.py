@@ -11,7 +11,19 @@ def git(root, *args):
     return subprocess.check_output(['git', '-C', str(root), *args], text=True).strip()
 
 
-def verify(root, manifest, allow_engine_dirty=False):
+def submodule(path, revision, required):
+    if not (path / '.git').exists():
+        if required:
+            raise ValueError(f'{path}: required submodule is not initialized')
+        return {'initialized': False, 'revision': revision}
+    actual = git(path, 'rev-parse', 'HEAD')
+    dirty = git(path, 'status', '--porcelain', '--untracked-files=normal', '--ignore-submodules=none')
+    if actual != revision or dirty:
+        raise ValueError(f'{path}: submodule checkout differs from its clean pin')
+    return {'initialized': True, 'revision': actual}
+
+
+def verify(root, manifest, allow_engine_dirty=False, with_llama=False):
     resolved = {'schema': 1, 'components': {}}
     for component, spec in manifest['components'].items():
         path = root / f'asterism-{component}'
@@ -26,14 +38,24 @@ def verify(root, manifest, allow_engine_dirty=False):
             if actual != expected:
                 raise ValueError(f'{component}: public contract changed: {header}')
         resolved['components'][component] = {'revision': revision, 'dirty': bool(dirty)}
+    dependency = json.loads((root / 'asterism-asper/dependencies.json').read_text())
+    model = manifest['components']['asmodel']
+    expected = {'schema': 1, 'asmodel': {key: model[key] for key in ('repository', 'revision')}}
+    if not isinstance(dependency, dict) or type(dependency.get('schema')) is not int or dependency != expected:
+        raise ValueError('asper: standalone dependency pin differs from the coordinated release')
+    resolved['submodules'] = {}
     for component in ('asper', 'astools'):
         path = root / f'asterism-{component}'
         entry = git(path, 'ls-tree', 'HEAD', 'deps/xcdn-c').split()
         if len(entry) < 3 or entry[2] != manifest['xcdn_revision']:
             raise ValueError(f'{component}: xCDN gitlink differs from the shared pin')
+        resolved['submodules'][f'{component}/xcdn'] = submodule(
+            path / 'deps/xcdn-c', manifest['xcdn_revision'], True)
     llama = git(root / 'asterism-asper', 'ls-tree', 'HEAD', 'deps/llama.cpp').split()
     if len(llama) < 3 or llama[2] != manifest['llama_revision']:
         raise ValueError('asper: llama.cpp gitlink differs from the release pin')
+    resolved['submodules']['asper/llama'] = submodule(
+        root / 'asterism-asper/deps/llama.cpp', manifest['llama_revision'], with_llama)
     resolved['llama_revision'] = manifest['llama_revision']
     resolved['xcdn_revision'] = manifest['xcdn_revision']
     return resolved
@@ -45,9 +67,11 @@ def main():
     parser.add_argument('--manifest', type=Path,
                         default=Path(__file__).resolve().parents[1] / 'release.json')
     parser.add_argument('--allow-engine-dirty', action='store_true')
+    parser.add_argument('--with-llama', action='store_true',
+                        help='require the pinned native backend checkout, not only its gitlink')
     args = parser.parse_args()
     try:
-        result = verify(args.root, json.loads(args.manifest.read_text()), args.allow_engine_dirty)
+        result = verify(args.root, json.loads(args.manifest.read_text()), args.allow_engine_dirty, args.with_llama)
     except (OSError, ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f'Release verification failed: {error}\n')
     print(json.dumps(result, indent=2))

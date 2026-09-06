@@ -62,6 +62,9 @@ jobs:
         env:
           CC: ${{ matrix.cc }}
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASMODEL_BUILD_TESTS=ON
+      - name: Require HTTP conformance coverage
+        working-directory: asterism-asmodel
+        run: cmake --build build --config Release --target asmodel-openai-smoke -j 4
       - name: Build and test asmodel
         working-directory: asterism-asmodel
         run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure

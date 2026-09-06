@@ -16,23 +16,35 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: asterism-asngn
+      - name: Read component pins
+        id: pins
+        shell: pwsh
+        run: |
+          $manifest = Get-Content asterism-asngn/release.json -Raw | ConvertFrom-Json
+          foreach ($component in @('asper', 'astools', 'asmodel')) {
+            "$component=$($manifest.components.$component.revision)" >> $env:GITHUB_OUTPUT
+          }
       - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asper
-          ref: 5cc2d37ebcf1644e91021cc55f02f79e383e526a
+          ref: ${{ steps.pins.outputs.asper }}
           path: asterism-asper
           submodules: recursive
       - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-astools
-          ref: 635e23e33c8aec72672fdde5e3376cd363e75d5c
+          ref: ${{ steps.pins.outputs.astools }}
           path: asterism-astools
           submodules: recursive
       - uses: actions/checkout@v7
         with:
           repository: gslf/asterism-asmodel
-          ref: 85de855206a29e5522afb5a30410ad5c94997f4d
+          ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
+      - name: Verify component and native backend contracts
+        run: python3 asterism-asngn/scripts/release.py --root . --with-llama
+      - name: Install protected verifier
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
       - name: Cache verified GGUF sources
         uses: actions/cache@v4
         with:

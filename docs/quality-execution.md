@@ -185,6 +185,20 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
+The latest clean checkpoint is Asngn `808dc77`, Asper `6cfb137`, asmodel
+`f097e33` and Astools `3d5b810`, reconstructed at
+`/tmp/asterism-restricted-release-ecwt73m5`. All available suites pass:
+57/31/6/35 respectively. The unsigned Linux remote-provider archive is
+`/tmp/asterism-runtime-consumption-20260906/asterism-0.1.0-linux-x86_64.tar.gz`,
+3,237,765 bytes, SHA-256
+`546ddd49c88521a23d7b4113f2f3dfb651182c4954cf01fed16d3337e5859cfe`.
+Its adjacent build receipt, JUnit and log record exact clean sources, relocated
+runtime, ACP initialization, doctor and a real packaged strict tool. The archive
+contains the consumption API/SDK-compatible MCP tool and quota correction.
+It includes no model weights and is not a signed or fully provider-validated
+release. LSan, loopback HTTP tests and the production bubblewrap oracle remain
+excluded under the previously recorded outer-sandbox constraints.
+
 The operation journal now admits at most 131,072 operations and reserves a
 record slot for every settlement within the 262,144-frame recovery bound.
 The regression against `8e6ffaa` shows two successful final settlements followed

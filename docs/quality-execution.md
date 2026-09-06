@@ -175,7 +175,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 46/46 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 46/46 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 46/46 passed.
-- Standalone Asper: 29/29; astools: 32/32; asmodel: 7/7.
+- Standalone Asper: 30/30; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -234,8 +234,8 @@ trials require actual resources. No real-model result has been produced here.
   and curation acknowledgement capacity before inference. A five-repeat component
   probe returns identical context with median process RSS 137,836 to 24,784 KiB
   and wall time 1.452 to 0.712 seconds on a warm 128 MiB Linux fixture. This is
-  not model evaluation; skipped metadata is not verified payload evidence, the pending
-  input queue remains unbounded; source-driven mutation batches now use durable
+  not model evaluation; skipped metadata is not verified payload evidence. Pending
+  source admission is now bounded; source-driven mutation batches use durable
   receipts and explicit reconciliation of interrupted partial outcomes.
   See [source context and raw measurements](../../asterism-asper/docs/source-context.md).
 - Source-curation receipts pass seven process-crash boundaries, seven live I/O
@@ -246,15 +246,26 @@ trials require actual resources. No real-model result has been produced here.
   call after a partial insertion; the receipt runtime retains that insertion,
   suspends the batch and makes no further call. This is conservative reconciliation,
   not atomic batch rollback or a task-success claim. Standalone no-thread Asper
-  also passes 29/29. See [curation recovery](../../asterism-asper/docs/curation-recovery.md).
+  also passes 30/30. See [curation recovery](../../asterism-asper/docs/curation-recovery.md).
 - Curation now selects complete inputs before retrieval or generation, retaining
   the omitted tail and checking the joined transcript against token and byte
   limits. Four cases cover exact receipt membership, failure with concurrent
   append, oversized events and non-additive/zero/missing counters. The same first
   case against the previous library reproduces seven silently omitted inputs out
   of twenty; the revised runtime sends all twenty once across three bounded calls.
-  Oversized head events stop with `LIMIT` and remain pending; segmentation and a
-  bounded replay queue remain open. This is a contract regression, not model quality.
+  Oversized head events stop with `LIMIT` and remain pending; segmentation remains
+  open. This is a contract regression, not model quality.
+- Asper ABI 7 bounds admitted and in-flight source text to 32 MiB and the configured
+  event limit, retaining excess inputs on disk behind per-scope cursors. Retry
+  restores reserved slots without allocating another array. Full flush captures
+  endpoints, so concurrent appends cannot extend that drain indefinitely. Eleven
+  cases cover restart, exact eventual coverage, four producers, the live worker,
+  byte pressure, corrupt sources, project changes and invalid/missing origin
+  objects. Default origins capture project identity before deferral; replay never
+  guesses the host's later active project. C/shared-library/MCP checks expose queue,
+  in-flight, byte, backlog and pending-receipt observations. This is not a whole
+  process memory quota; source tables and temporary reads retain separate bounds.
+  See [curation admission](../../asterism-asper/docs/curation-queue.md).
 - Release admission now tests actual temporary Git checkouts: stale standalone
   dependencies, dirty or replaced submodules, missing required checkouts and
   header changes cannot pass via the engine's development exception. All four

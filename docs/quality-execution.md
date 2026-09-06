@@ -17,7 +17,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts, explicit partial-outcome reconciliation and reversible source deferral | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime, instrumented shared JSON/provider fuzz targets | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, storage/process fuzzing and TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
-| 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, Python and JavaScript/TypeScript host SDKs, tested local packages, accurate build/accounting documentation | ACP, general MCP client, signed packages, editor flows and external user trials |
+| 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, Python and JavaScript/TypeScript host SDKs, tested local packages, reviewed MCP 2026-07-28 stdio bindings with bounded schema validation and host-owned lifecycle, accurate build/accounting documentation | ACP, complete JSON Schema conformance and third-party MCP servers, HTTP/OAuth, signed packages, editor flows and external user trials |
 
 No experimental routing or procedure promotion is enabled on the strength of
 fake-model tests. Paid APIs, signing credentials, hardware measurements and user
@@ -216,6 +216,21 @@ Python operator CLI, checked export and MCP observation; later sources proceed
 while the postponed event remains exact and unacknowledged. Decision removal
 allows later curation when the transcript budget admits it. Corrupt or changed
 source bindings fail store opening. See [offline deferral](../../asterism-asper/docs/curation-deferral.md).
+
+Astools adds a reviewed MCP stdio adapter in `88fe2d0` and shared batch
+admission in `aa8c418`, ABI 5 unchanged. It uses
+per-request MCP 2026-07-28 metadata, local command bindings, input/output validation,
+full error/incomplete payloads, bounded discovery and the existing sandboxed
+supervisor. Its JSON Schema profile deliberately rejects unsupported keywords;
+this is not full MCP conformance or a general ACP integration. All 35 standalone
+executables pass in ordinary and ASan/UBSan builds (leak detection disabled),
+and all 29 non-threaded executables pass. The new process/package tests cover
+both stdio hops, Linux basic/strict isolation and synthetic host environment
+grants. The updated integrated engine passes 45 restricted ASan/UBSan suites. See [MCP client scope](../../asterism-astools/docs/mcp-client.md).
+The preceding clean restricted checkpoint at
+`/tmp/asterism-restricted-release-x_4_t5zu` verified Asngn `623ecad`, Asper
+`6cfb137`, asmodel `f097e33` and the earlier Astools `228ec5c` with respectively
+45, 31, 6 and 32 executables. It does not validate the new MCP adapter.
 
 The shared runtime adds optional Clang/libFuzzer targets for strict JSON semantic
 round trips and provider/embedding decoding, instrumenting the actual library.

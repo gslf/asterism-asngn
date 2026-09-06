@@ -6,7 +6,6 @@
 #include "work_state.h"
 
 void asngn_ledger_zones(asngn_ledger_entry *led, const asngn_prompt *p);
-int64_t asngn_daily_spend(asngn_ctx *c);
 void asngn_output_stream(const char *piece, void *ud);
 asngn_err asngn_work_data(asngn_ctx *c, asngn_turn_state *t, const char *payload);
 char *asngn_context_text(asngn_session *s, const char *text);

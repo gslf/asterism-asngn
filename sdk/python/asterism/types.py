@@ -4,6 +4,29 @@ from typing import Literal, NotRequired, TypedDict
 TaskState = Literal["unconfirmed", "unavailable", "superseded", "succeeded", "incomplete"]
 
 
+class ConsumptionTotals(TypedDict):
+    calls: int
+    unsettled_calls: int
+    unknown_calls: int
+    failed_calls: int
+    cancelled_calls: int
+    known_input_tokens: int
+    known_output_tokens: int
+    unsettled_tokens: int
+    unknown_tokens: int
+    charged_tokens: int
+
+
+class Consumption(TypedDict):
+    schema: Literal[1]
+    scope: Literal["engine_store"]
+    unit: Literal["tokens"]
+    time_basis: Literal["reservation_utc_day"]
+    utc_day: int
+    lifetime: ConsumptionTotals
+    today: ConsumptionTotals
+
+
 class Criterion(TypedDict):
     id: str
     requirement: str

@@ -43,6 +43,7 @@
 #include "work.h"
 #include "approval.h"
 #include "recovery.h"
+#include "consumption.h"
 
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
@@ -741,6 +742,7 @@ static int tool_session_stats(server_state *st, const asmodel_json_value *args,
   ok &= asmodel_json_object_set(o, "world_epoch",
                       asmodel_json_int((long long)stt.world_epoch)) == 0;
   ok &= asmodel_json_object_set(o, "spent_tokens", asmodel_json_int(stt.spent_tokens)) == 0;
+  ok &= asmodel_json_object_set(o, "token_basis", asmodel_json_string("committed_turns")) == 0;
   if (!ok) {
     asmodel_json_free(o);
     return TOOL_OOM;
@@ -911,6 +913,14 @@ static int tool_engine_stats(server_state *st, const asmodel_json_value *args,
 
 /* ═══════════════════════ tool table ════════════════════════════ */
 
+static int tool_engine_consumption(server_state *st, const asmodel_json_value *args,
+                                   asmodel_json_value **out, const char **msg) {
+  if (asmodel_json_typeof(args) != ASMODEL_JSON_OBJECT || asmodel_json_object_count(args))
+    BADP("engine_consumption: arguments must be an empty object");
+  asngn_err e = mcp_consumption_read(st->ctx,out);
+  return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
+}
+
 static int tool_workspace_info(server_state *st, const asmodel_json_value *args,
                                asmodel_json_value **out, const char **msg) {
   asngn_workspace_info w;
@@ -942,6 +952,8 @@ typedef struct {
 } tool_def;
 
 static const tool_def TOOLS[] = {
+    {"engine_consumption", "Read durable engine-wide inference charges, known usage, unknown usage and unsettled reservations. Token/call counters are decimal strings, not conversation totals or monetary prices.",
+     "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{}}", tool_engine_consumption},
     {"agent_recover", "Read a task's durable outcome after release or restart. Requires an idle session; never resumes execution or replays events/effects.",
      "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"session\":{\"type\":\"string\"},\"task_id\":{\"type\":\"string\"}},\"required\":[\"session\",\"task_id\"]}", tool_agent_recover},
     {"session_approval", "Inspect the latest durable confirmation and complete redacted arguments. Read-only; never grants permission.",

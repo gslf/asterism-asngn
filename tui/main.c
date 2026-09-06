@@ -43,6 +43,7 @@ static long long now_ms(void) { return tui_now_ms(); }
 static void refresh_stats(tui_app *a) {
   if (a->ctx == NULL) return;
   a->stats_ok = asngn_get_stats(a->ctx, &a->stats) == ASNGN_OK;
+  a->consumption_ok = asngn_get_consumption(a->ctx, &a->consumption) == ASNGN_OK;
   a->sib_ok = asngn_get_sibling_stats(a->ctx, &a->sib) == ASNGN_OK;
   if (a->ses != NULL)
     a->sstats_ok =

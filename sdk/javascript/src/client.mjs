@@ -1,3 +1,4 @@
+import { consumption } from './consumption.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Transport } from './transport.mjs';
 import { payload, poll, states, taskRecord } from './contract.mjs';
@@ -36,6 +37,9 @@ export class Client {
   session(slug = 'main') {
     if (typeof slug !== 'string' || !slug || slug.includes('\0')) throw new TypeError('invalid session slug');
     return new Session(this, slug);
+  }
+  async consumption(options) {
+    return consumption(await this.callTool('engine_consumption', {}, options));
   }
   task(id) {
     if (typeof id !== 'string' || !id || id.includes('\0')) throw new TypeError('invalid task ID');

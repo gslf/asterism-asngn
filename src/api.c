@@ -119,10 +119,7 @@ double asngn_pressure(asngn_ctx *c, asngn_session *s) {
     if (ps > p) p = ps;
   }
   if (c->cfg.daily_tokens > 0) {
-    double pd;
-    os_rwlock_rdlock(&c->lock);
-    pd = (double)c->daily_spent / (double)c->cfg.daily_tokens;
-    os_rwlock_rdunlock(&c->lock);
+    double pd = (double)asngn_daily_spend(c) / (double)c->cfg.daily_tokens;
     if (pd > p) p = pd;
   }
   return p;
@@ -200,7 +197,7 @@ asngn_err asngn_open_with(const asngn_open_params *p,
   ctx_locks_init(c);
   c->clock = clk != NULL ? *clk : asngn_clock_system();
   c->log_cb = default_log_cb;
-  c->daily_day = asngn_clock_now(&c->clock) / 86400;
+  c->consumption.utc_day = asngn_clock_now(&c->clock) / 86400;
   c->allow_degraded = p->allow_degraded != 0;
 
   asngn_config_defaults(&c->cfg);

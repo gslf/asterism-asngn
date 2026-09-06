@@ -150,7 +150,7 @@ asngn_err asngn_session_delete(asngn_ctx *c, const char *slug);
 /* Read a session's headline numbers from disk without opening it. */
 typedef struct {
   size_t    turns;         /* committed answer turns (ledger entries) */
-  long long spent_tokens;  /* lifetime prompt+gen total               */
+  long long spent_tokens;  /* committed-turn projection, not consumption */
   long long created_at;    /* unix seconds UTC                        */
   long long last_turn_at;  /* unix seconds UTC; 0 = no turns yet      */
   char      project[65];   /* active Asper project or ""              */
@@ -388,10 +388,25 @@ typedef struct {
   size_t   escalations;
   double   qpt_rolling;           /* window of 20                        */
   uint64_t world_epoch;
-  long long spent_tokens;         /* lifetime prompt+gen total           */
+  long long spent_tokens;         /* committed-turn projection, not consumption */
 } asngn_session_stats;
 asngn_err asngn_session_get_stats(asngn_session *s,
                                   asngn_session_stats *out);
+
+/* Inference accounting for the entire engine store, including shared Asper
+ * calls. Unknown usage retains its reservation; charged_tokens is a budget
+ * charge, not an exact count of consumed tokens. Unsettled calls may be live
+ * or interrupted. A failed/uncertain journal returns IO and clears the output. */
+typedef struct {
+  int64_t calls, unsettled_calls, unknown_calls, failed_calls, cancelled_calls;
+  int64_t known_input_tokens, known_output_tokens;
+  int64_t unsettled_tokens, unknown_tokens, charged_tokens;
+} asngn_consumption_totals;
+typedef struct {
+  asngn_consumption_totals lifetime, today;
+  int64_t utc_day; /* greatest current or recorded reservation UTC day */
+} asngn_consumption;
+asngn_err asngn_get_consumption(asngn_ctx *c, asngn_consumption *out);
 
 typedef struct {
   int       asper_ok, astools_ok;

@@ -108,6 +108,14 @@ TEST(failed_and_cancelled_outcomes_are_terminal) {
     ASSERT_EQ_INT(r->turn_committed, 0);
     ASSERT_EQ_INT(f.s->interrupted_turns, 0);
     ASSERT_EQ_INT(f.s->log_n, 0);
+    asngn_consumption usage;
+    ASSERT_OK(asngn_get_consumption(f.c,&usage));
+    ASSERT_TRUE(usage.lifetime.calls >= 2);
+    ASSERT_EQ_INT(usage.lifetime.unsettled_calls,0);
+    ASSERT_TRUE(usage.lifetime.charged_tokens > 0);
+    ASSERT_EQ_INT(usage.lifetime.cancelled_calls,failures[i] == ASNGN_ERR_CANCELLED);
+    ASSERT_EQ_INT(usage.lifetime.failed_calls,failures[i] == ASNGN_ERR_TIMEOUT);
+    ASSERT_EQ_INT(f.s->spent_tokens,0); /* The conversation rolled back; inference did not. */
     asngn_task_record_free(r);
     asngn_turn_result_free(&result);
     eng_drop(&f);

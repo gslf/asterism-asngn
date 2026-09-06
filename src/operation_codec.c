@@ -49,12 +49,15 @@ asngn_err asngn_operation_decode(const char *text, size_t bytes, asngn_operation
   const asmodel_json_value *known = asmodel_json_object_get(v,"usage_known");
   bool valid_outcome = false;
   for (int i = ASNGN_OK; outcome && i <= ASNGN_ERR_LIMIT; i++)
-    if (!strcmp(outcome,asngn_err_name((asngn_err)i))) valid_outcome = true;
+    if (!strcmp(outcome,asngn_err_name((asngn_err)i))) {
+      valid_outcome = true; out->outcome = (asngn_err)i;
+    }
   int64_t schema;
   bool valid = asmodel_json_object_count(v) == 12 && id && asngn_uuid_valid(id) &&
       request && model && kind && state && (!strcmp(state,"reserved") || !strcmp(state,"settled")) &&
       valid_outcome && number(v,"schema",&schema) && schema == 2 &&
-      number(v,"day",&out->day) && number(v,"budget_delta",&out->delta) &&
+      number(v,"day",&out->day) && out->day >= INT64_MIN/86400 && out->day <= INT64_MAX/86400 &&
+      number(v,"budget_delta",&out->delta) &&
       number(v,"input_tokens",&out->input) && out->input >= 0 && out->input <= INT_MAX &&
       number(v,"output_tokens",&out->output) && out->output >= 0 && out->output <= INT_MAX &&
       asmodel_json_typeof(known) == ASMODEL_JSON_BOOL;

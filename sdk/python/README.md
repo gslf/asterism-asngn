@@ -23,4 +23,9 @@ and UUID: `session.recover(task_id)` reads durable outcomes and action uncertain
 after release or restart, without resuming execution. Approval inspection is
 read-only. Context exit closes the owned server; always close it.
 
+`await client.consumption()` reads lifetime/day inference accounting for the
+whole engine store, including failures and shared memory calls. Counters are
+Python `int`. Known tokens, unknown usage and unsettled reservations are separate;
+charged tokens are a budget charge, not a monetary bill or session total.
+
 See `sdk/README.md` in the source repository for the full lifecycle and limits.

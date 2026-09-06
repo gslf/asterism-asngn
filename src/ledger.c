@@ -250,17 +250,6 @@ static asngn_err led_reserve(asngn_session *s) {
   return ASNGN_OK;
 }
 
-/* live: a freshly committed turn. Replayed history feeds the session
- * totals only — adding it to the context-wide daily counter would double
- * count every time a session reopens within one process, so the daily
- * soft ceiling tracks spend observed live in this process. */
-static void led_account(asngn_session *s, const asngn_ledger_entry *e,
-                        bool live) {
-  /* Conversation totals are a projection, never an inference charge. */
-  (void)live;
-  s->spent_tokens += (int64_t)asngn_ledger_total_tokens(e);
-}
-
 /* ── public (internal) API ────────────────────────────────────────────── */
 
 asngn_err asngn_ledger_append(asngn_session *s, const asngn_ledger_entry *e) {
@@ -290,7 +279,7 @@ asngn_err asngn_ledger_append(asngn_session *s, const asngn_ledger_entry *e) {
   if (err != ASNGN_OK) return err;
 
   s->led[s->led_n++] = *e;
-  led_account(s, e, true);
+  s->spent_tokens += (int64_t)asngn_ledger_total_tokens(e);
   return ASNGN_OK;
 }
 
@@ -380,7 +369,7 @@ asngn_err asngn_ledger_replay(asngn_session *s) {
         return e;
       }
       s->led[s->led_n++] = le;
-      led_account(s, &le, false);
+      s->spent_tokens += (int64_t)asngn_ledger_total_tokens(&le);
     } else if (xcdn_node_has_tag(node, "ledger_feedback")) {
       const xcdn_value_t *obj = node->value;
       int64_t turn = 0, fb = 0;

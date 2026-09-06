@@ -179,6 +179,7 @@ set(ASNGN_SOURCES
   src/operation_replay.c
   src/operation_codec.c
   src/operations.c
+  src/consumption.c
   src/tokens.c
   src/models.c
   src/models_llama.c
@@ -343,7 +344,7 @@ endif()
 
 # ── asngn-mcp ───────────────────────────────────────────────────────────────
 if(ASNGN_BUILD_MCP)
-  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c mcp/approval.c mcp/recovery.c)
+  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c mcp/approval.c mcp/recovery.c mcp/consumption.c)
   target_include_directories(asngn-mcp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

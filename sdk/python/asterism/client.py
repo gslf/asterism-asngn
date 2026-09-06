@@ -2,9 +2,10 @@
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from .contract import STATES, integer, payload, poll, task_record
+from .consumption import consumption
 from .errors import ProtocolError, RequestTimeout
 from .transport import Transport, positive
-from .types import Approval, Definition, Poll, WorkState, TaskRecord
+from .types import Approval, Definition, Poll, WorkState, TaskRecord, Consumption
 
 
 class Client:
@@ -58,6 +59,10 @@ class Client:
         if not isinstance(slug, str) or not slug or "\0" in slug:
             raise ValueError("session slug must be a nonempty string without NUL")
         return Session(self, slug)
+
+    async def consumption(self, *, timeout: float | None = None) -> Consumption:
+        """Read engine-wide durable charges; token and call counters are exact ints."""
+        return consumption(await self.call_tool("engine_consumption", {}, timeout=timeout))
 
     def task(self, task_id: str) -> "Task":
         """Attach another observer to a handle on this same live server."""

@@ -6,6 +6,8 @@ const definition: Definition = { goal: 'Fix', constraints: 'Keep tests', criteri
 export async function useClient(): Promise<Poll> {
   const client = await Client.start(['asngn-mcp']);
   try {
+    const charged: bigint = (await client.consumption()).lifetime.charged_tokens;
+    void charged;
     const session = client.session('example');
     await session.defineWork(0, definition);
     const task = await session.submit('Build');

@@ -25,6 +25,7 @@ set(ASNGN_TEST_PROGRAMS
   test_task_record
   test_action_events
   test_operations
+  test_consumption
   test_ledger
   test_context_golden
   test_request_trace

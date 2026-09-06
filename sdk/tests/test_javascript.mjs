@@ -5,8 +5,29 @@ import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { Client, ProtocolError, RequestTimeout, RpcError, ToolError, TransportError } from '../javascript/src/index.mjs';
 import { poll, taskRecord } from '../javascript/src/contract.mjs';
+import { consumption } from '../javascript/src/consumption.mjs';
 
 const peer = [process.env.ASTERISM_TEST_PYTHON || 'python3', '-B', fileURLToPath(new URL('peer.py', import.meta.url))];
+
+test('consumption retains bigint counters and checks invariants', async () => {
+  const value = JSON.parse(await readFile(new URL('consumption.json', import.meta.url), 'utf8'));
+  const result = consumption(value);
+  assert.equal(result.lifetime.charged_tokens, 9007199254741115n);
+  assert.equal(result.lifetime.unsettled_tokens, 9007199254740993n);
+  for (const calls of [null, 1, true, '', '01', '-1', '1.0', '1e2', '1\n', '1\r', '1\u2028',
+    ' 1', '1\0', '١', '9223372036854775808', '9'.repeat(100)]) {
+    assert.throws(() => consumption({ ...value, lifetime: { ...value.lifetime, calls } }), ProtocolError);
+  }
+  for (const change of [{ charged_tokens: '0' }, { unsettled_calls: '0' }, { unknown_calls: '0' },
+    { calls: '1' }, { failed_calls: '4' }, { extra: '0' }]) {
+    assert.throws(() => consumption({ ...value, lifetime: { ...value.lifetime, ...change } }), ProtocolError);
+  }
+  for (const change of [{ scope: 'session' }, { schema: true }, { utc_day: 1.5 },
+    { utc_day: 106751991167301 }, { lifetime: [] }, { extra: false },
+    { lifetime: value.today, today: value.lifetime }]) {
+    assert.throws(() => consumption({ ...value, ...change }), ProtocolError);
+  }
+});
 
 test('durable outcomes do not imply replay or success', async () => {
   const { record, invalid_changes: changes } = JSON.parse(await readFile(new URL('task_records.json', import.meta.url), 'utf8'));

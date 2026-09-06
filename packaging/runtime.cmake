@@ -9,7 +9,8 @@ install(DIRECTORY "${CMAKE_BINARY_DIR}/packages/" DESTINATION share/asterism/too
   USE_SOURCE_PERMISSIONS PATTERN ".*" EXCLUDE)
 install(DIRECTORY examples/ DESTINATION share/asterism/examples
   PATTERN "__pycache__" EXCLUDE)
-install(FILES release.json docs/distribution.md docs/acp.md DESTINATION share/asterism)
+install(FILES release.json docs/distribution.md docs/acp.md docs/operations.md DESTINATION share/asterism)
+install(FILES docs/benchmarks/operation-replay.json DESTINATION share/asterism/benchmarks)
 foreach(component asngn asper asmodel astools)
   if(component STREQUAL "asngn")
     set(component_source "${CMAKE_CURRENT_SOURCE_DIR}")

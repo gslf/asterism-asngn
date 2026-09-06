@@ -10,11 +10,32 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from asterism import Client, ProtocolError, RequestTimeout, RpcError, ToolError, TransportError
 from asterism.contract import poll, task_record
+from asterism.consumption import consumption
 
 PEER = [sys.executable, "-B", str(Path(__file__).with_name("peer.py"))]
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    def test_consumption_retains_full_counters_and_checks_invariants(self):
+        value = json.loads(Path(__file__).with_name("consumption.json").read_text())
+        result = consumption(value)
+        self.assertEqual(result["lifetime"]["charged_tokens"], 9007199254741115)
+        self.assertEqual(result["lifetime"]["unsettled_tokens"], 9007199254740993)
+        for invalid in (None, 1, True, "", "01", "-1", "1.0", "1e2", "1\n", "1\r", "1\u2028",
+                        " 1", "1\0", "١", "9223372036854775808", "9" * 100):
+            bad = {**value, "lifetime": {**value["lifetime"], "calls": invalid}}
+            with self.subTest(invalid=invalid), self.assertRaises(ProtocolError):
+                consumption(bad)
+        for change in ({"charged_tokens": "0"}, {"unsettled_calls": "0"}, {"unknown_calls": "0"},
+                       {"calls": "1"}, {"failed_calls": "4"}, {"extra": "0"}):
+            with self.subTest(change=change), self.assertRaises(ProtocolError):
+                consumption({**value, "lifetime": {**value["lifetime"], **change}})
+        for change in ({"scope": "session"}, {"schema": True}, {"utc_day": 1.5},
+                       {"utc_day": 106751991167301}, {"lifetime": []}, {"extra": False},
+                       {"lifetime": value["today"], "today": value["lifetime"]}):
+            with self.subTest(change=change), self.assertRaises(ProtocolError):
+                consumption({**value, **change})
+
     def test_durable_outcomes_do_not_imply_replay_or_success(self):
         cases = json.loads(Path(__file__).with_name("task_records.json").read_text())
         record = cases["record"]

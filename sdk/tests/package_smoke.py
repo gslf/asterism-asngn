@@ -44,6 +44,7 @@ assert asterism.TaskRecord.__module__ == "asterism.types"
 async def main():
     async with await asterism.Client.start(sys.argv[1:]) as client:
         assert (await client.session().approval())["status"] == "none"
+        assert (await client.consumption())["lifetime"]["charged_tokens"] == 0
         try:
             await client.session().recover("932a126d-8662-4448-a887-2a3d63b5e118")
             raise AssertionError("unknown archive was found")
@@ -70,6 +71,7 @@ import { Client, ToolError } from '@asterism/sdk';
 const client = await Client.start(process.argv.slice(2));
 try {
   assert.equal((await client.session().approval()).status, 'none');
+  assert.equal((await client.consumption()).lifetime.charged_tokens, 0n);
   await assert.rejects(client.session().recover('932a126d-8662-4448-a887-2a3d63b5e118'),
     error => error instanceof ToolError && error.code === 'ASNGN_ERR_NOT_FOUND');
 }

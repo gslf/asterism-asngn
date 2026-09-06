@@ -419,6 +419,25 @@ static void pane_stats(tui_app *a, tui_frame *f, int x, int y, int w,
     row++;
   }
   if (row < h && a->models_n > 0) row++; /* gap */
+  if (row < h) row++;
+  if (row < h)
+    d_put(f,x,y+row++,"engine consumption",TFG_DIM,TBG_DEFAULT,0);
+  if (row < h && !a->consumption_ok)
+    d_put(f,x,y+row++,"journal unavailable",TFG_DIM,TBG_DEFAULT,0);
+  if (a->consumption_ok) {
+    const asngn_consumption_totals *v = &a->consumption.lifetime;
+    const char *labels[] = {"known", "unsettled", "unknown", "charged", "charged today"};
+    int64_t values[] = {v->known_input_tokens+v->known_output_tokens,
+        v->unsettled_tokens,v->unknown_tokens,v->charged_tokens,
+        a->consumption.today.charged_tokens};
+    for (size_t i = 0; i < 5 && row < h; i++) {
+      char line[64];
+      tui_fmt_count(b1,sizeof b1,(long long)values[i]);
+      snprintf(line,sizeof line,"%s %s tok",labels[i],b1);
+      d_put(f,x,y+row++,line,TFG_DEFAULT,TBG_DEFAULT,0);
+    }
+  }
+  if (row < h) row++;
   if (row < h)
     d_put(f, x, y + row++, "tokens/turn", TFG_DIM, TBG_DEFAULT, 0);
   if (row < h) {
@@ -475,10 +494,11 @@ static void pane_stats(tui_app *a, tui_frame *f, int x, int y, int w,
     tui_fmt_count(b2, sizeof b2, a->sstats.spent_tokens);
     {
       char line[48];
-      snprintf(line, sizeof line, "spent %s tok", b2);
+      snprintf(line, sizeof line, "committed %s tok", b2);
       d_put(f, x, y + row++, line, TFG_DIM, TBG_DEFAULT, 0);
     }
   }
+
 }
 
 static void pane_memory(tui_app *a, tui_frame *f, int x, int y, int w,

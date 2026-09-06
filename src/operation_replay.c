@@ -12,7 +12,7 @@ typedef struct {
 typedef struct {
   reservation *table;
   size_t cap, count, frames;
-  int64_t day, spent;
+  asngn_consumption usage;
 } replay;
 
 static size_t slot_for(reservation *table, size_t cap, const char *id) {
@@ -51,19 +51,16 @@ static asngn_err observe(void *ud, const char *text, size_t bytes) {
         row.delta != (row.known ? row.input + row.output - r->reserved : 0)) return ASNGN_ERR_PARSE;
     r->settled = true;
   }
-  if (row.day == p->day) {
-    if ((row.delta > 0 && p->spent > INT64_MAX-row.delta) ||
-        (row.delta < 0 && p->spent < -row.delta)) return ASNGN_ERR_PARSE;
-    p->spent += row.delta;
-  }
+  if (!asngn_consumption_observe(&p->usage,&row,r->reserved)) return ASNGN_ERR_PARSE;
   return ASNGN_OK;
 }
 
 asngn_err asngn_operations_load(asngn_ctx *c) {
-  replay p = {.day = asngn_clock_now(&c->clock)/86400};
+  replay p = {0};
+  p.usage.utc_day = asngn_clock_now(&c->clock)/86400;
   char *path = os_path_join(c->root,"operations.xcdn");
   asngn_err e = path ? asngn_wal_visit(c,path,4096,observe,&p) : ASNGN_ERR_NOMEM;
-  if (e == ASNGN_OK) { c->daily_day = p.day; c->daily_spent = p.spent; }
+  if (e == ASNGN_OK) c->consumption = p.usage;
   c->usage_recovery_required = e != ASNGN_OK;
   free(p.table); free(path); return e;
 }

@@ -3,8 +3,57 @@
 The shared backend reserves budget before invoking inference and settles it from
 that call's usage, including failure and cancellation. An unknown result retains
 the reservation; neither a conversation rollback nor a missing trace refunds it.
-The current projection enforces the UTC-day budget. Session-lifetime totals,
-monetary pricing, loader costs and external reconciliation remain separate work.
+One projection now serves live admission, restart recovery and public inspection,
+with separate lifetime and reservation-day totals for the entire engine store.
+It includes generation and embedding through the shared manager, including Asper.
+Complete session attribution, monetary pricing, loader costs and external
+reconciliation remain separate work. Missing session identity is never guessed
+from whichever foreground task happens to be running.
+
+## Inspect consumption
+
+Use `asngn_get_consumption` in C, `engine_consumption` with `{}` over MCP, or
+`await client.consumption()` in either SDK. No session is opened, no inference
+is invoked and inspection never repairs or rewrites the journal. The C getter
+returns a bounded atomic snapshot without scanning the history on each read.
+An uncertain journal returns `ASNGN_ERR_IO` and clears the output; a stale
+successful-looking projection is not substituted.
+
+| Counter in `lifetime` and `today` | Meaning |
+|---|---|
+| `calls` | Durable reservations, whether settled or not |
+| `unsettled_calls`, `unsettled_tokens` | Reservations without a terminal receipt; they may be live or interrupted |
+| `unknown_calls`, `unknown_tokens` | Settled calls whose final usage is unknown; the original reservation remains charged |
+| `known_input_tokens`, `known_output_tokens` | Usage from settlements explicitly marked known, including failures and cancellations |
+| `failed_calls` | Settled outcomes other than success or cancellation |
+| `cancelled_calls` | Settled backend cancellations, separate from failed calls |
+| `charged_tokens` | Known input/output plus unsettled and unknown reservations |
+
+Zero charged tokens do not establish that every call had known usage: inspect
+the call counters too. `charged_tokens` is a budget charge, not an exact physical
+or monetary measurement. Backend success does not mean that later application
+validation or the task succeeded. A failed turn can have nonzero consumption and
+zero committed conversation tokens.
+
+MCP schema 1 declares `scope: "engine_store"`, `unit: "tokens"` and
+`time_basis: "reservation_utc_day"`. Token/call counters use canonical decimal
+strings so JavaScript cannot round integers above 2^53. Python converts them to
+`int`; JavaScript uses `bigint`. The SDKs validate scalar bounds, counter sums and
+daily/lifetime consistency. The raw `call_tool`/`callTool` result retains strings.
+The TUI stats pane labels committed conversation totals separately from known,
+unsettled, unknown and charged engine tokens. Existing session `spent_tokens`
+and the `session_tokens` soft policy remain committed-turn projections; they
+must not be used as a complete inference bill or per-session admission limit.
+
+`today` uses the greatest current or recorded reservation UTC day. Reading after
+midnight updates this view without requiring another inference. Settling an old
+reservation changes its lifetime accounting, not the new day's allowance.
+New reservations never move behind an already observed day, so wall-clock
+rollback cannot reuse an earlier allowance. Reads do not persist clock changes;
+restart reconstructs the high-water mark from reservations and the current clock.
+Lifetime limits and arithmetic remain checked even when daily counters reset.
+
+## Durable records
 
 Generation request spans travel through asmodel ABI 8 to both durable records as
 `request_id`. The accounting `id` is a separate, runtime-generated UUID. Repeated
@@ -30,10 +79,19 @@ the file intact, even if an incomplete tail follows. Incomplete-tail repair stil
 requires successful prefix validation and sync. Other WAL consumers now decode
 complete frames separately; xCDN's general duplicate-key semantics are unchanged.
 
-Reservation/settlement arithmetic is checked before signed overflow. An uncertain
+Reservation identity strings are copied before dispatch, so caller mutation
+cannot silently reassign the settlement. Reservation/settlement arithmetic is
+checked before signed overflow. An uncertain
 write blocks further inference admission and settlement appends until recovery;
 already consumed inference remains represented by its outstanding reservation.
 This does not certify power-loss behavior or bound a native model loader.
+
+Seven counter tests cover outcomes without commits, zero-usage uncertainty,
+midnight and clock rollback, lifetime overflow, copied identities, uncertain sync
+and four concurrent lanes. Actual worker failure/cancellation retains charges
+after conversational rollback. Both SDKs inspect a checksummed history across
+process restarts without changing its bytes, including counters above 2^53.
+These are contract checks, not real-model cost measurements.
 
 ## Component measurement
 

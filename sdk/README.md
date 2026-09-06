@@ -73,6 +73,15 @@ engine cancellation. `Client` also implements `Symbol.asyncDispose`.
 
 ## Lifecycle and results
 
+`await client.consumption()` reads durable **engine-wide** inference accounting,
+including shared memory and embedding calls. It opens no session. `lifetime` and
+`today` separate known tokens, unsettled reservations, unknown usage and budget
+charges. A charge is not an exact bill; an unsettled call may be live or interrupted.
+Python counters are `int`; JavaScript counters are `bigint` (use `.toString()`
+when serializing them). The raw MCP tool uses decimal strings. Both clients
+reject malformed or inconsistent totals. See [consumption](../docs/operations.md)
+for reservation-day semantics, errors and the remaining session-attribution limit.
+
 - `session(slug)` selects a store session; its first operation opens it on the server.
   `submit` returns immediately after admission. `client.task(id)` attaches another
   observer on the **same live client/server**; it does not recover a crashed task. `session.recover(taskId)` reads durable

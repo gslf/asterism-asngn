@@ -29,6 +29,9 @@ else()
   message(STATUS "SDK JavaScript checks skipped: Node 22+ unavailable")
 endif()
 if(TARGET asngn-mcp)
+  add_test(NAME test_sdk_consumption COMMAND ${Python3_EXECUTABLE} -B
+    ${CMAKE_CURRENT_SOURCE_DIR}/consumption_live.py $<TARGET_FILE:asngn-mcp> ${ASNGN_NODE})
+  set_tests_properties(test_sdk_consumption PROPERTIES TIMEOUT 60)
   add_test(NAME test_sdk_recovery COMMAND ${Python3_EXECUTABLE} -B
     ${CMAKE_CURRENT_SOURCE_DIR}/recovery_live.py $<TARGET_FILE:asngn-mcp> ${ASNGN_NODE})
   set_tests_properties(test_sdk_recovery PROPERTIES TIMEOUT 60)

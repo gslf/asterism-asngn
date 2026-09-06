@@ -331,7 +331,7 @@ void      asngn_config_free(asngn_config *cfg);
 typedef struct {
   char id[37];
   char request_id[ASMODEL_REQUEST_ID_MAX+1];
-  const char *model, *kind;
+  char model[ASMODEL_ID_MAX+1], kind[33];
   int64_t reserved, day;
   bool active;
 } asngn_operation;
@@ -341,6 +341,7 @@ asngn_err asngn_operation_begin(asngn_ctx *c, const char *model,
 asngn_err asngn_operation_end(asngn_ctx *c, asngn_operation *op,
                                int ti, int to, bool known, asngn_err outcome);
 asngn_err asngn_operations_load(asngn_ctx *c);
+int64_t asngn_daily_spend(asngn_ctx *c);
 
 /* ── model runtime (models.c, models_llama.c) ─────────────────────────── */
 
@@ -514,7 +515,7 @@ struct asngn_session {
   /* resident ledger (small; drives stats, QpT, feedback, export) */
   struct asngn_ledger_entry_s *led;
   size_t      led_n, led_cap;
-  int64_t     spent_tokens;  /* session lifetime total               */
+  int64_t     spent_tokens;  /* committed-turn projection only        */
   /* turn serialization */
   bool        busy;          /* a turn runs                           */
   asngn_task *running;       /* borrowed pointer to the active task  */
@@ -1220,8 +1221,7 @@ struct asngn_ctx {
 
   /* budgets / stats */
   bool          usage_recovery_required;
-  int64_t       daily_spent;
-  asngn_time    daily_day;         /* unix day of daily_spent        */
+  asngn_consumption consumption;  /* authoritative operation projection */
   asngn_stats   stats;
 
   /* confirmations */

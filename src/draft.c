@@ -271,7 +271,7 @@ static asngn_err draft_file_content(asngn_ctx *c, asngn_turn_state *t, const cha
       if ((c->cfg.session_tokens > 0 &&
            t->s->spent_tokens + (int64_t)t->led.gt_aux >= c->cfg.session_tokens) ||
           (c->cfg.daily_tokens > 0 &&
-           asngn_daily_spend(c) + (int64_t)t->led.gt_aux >= c->cfg.daily_tokens)) {
+           asngn_daily_spend(c) >= c->cfg.daily_tokens)) {
         e = asngn_seterr(c, ASNGN_ERR_LIMIT,
                          "draft continuation paused at %zu bytes by the "
                          "configured token budget",

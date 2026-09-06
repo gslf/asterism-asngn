@@ -10,7 +10,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | Milestone | Work items | Implemented and tested | Remaining gate |
 |---|---|---|---|
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
-| 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
+| 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations, atomic lifetime/day consumption views through C/MCP/SDKs | Published pins, calibrated remote tokenizer margins, complete session/cost attribution |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, bounded Git identity and registered worktree resolution, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals, streamed recovery and durable terminal task observations | Incremental snapshots/ignore syntax, other Git metadata layouts, effect reconciliation and resume, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, query-ranked bounded corpus across continued scans, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, generation trace/consumption correlation, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper and embedding traces, fine-grained dependencies and task hypotheses |
@@ -89,8 +89,10 @@ trials require actual resources. No real-model result has been produced here.
   spans with accounting and decode strict JSON frame by frame, avoiding the full
   history DOM. Invalid metadata or uncertain writes block further admission;
   failed replay cannot publish partial accounting. See [consumption](operations.md).
-  Session-lifetime cost and monetary reconciliation
-  still need a dedicated operation projection.
+  The same reducer now maintains engine-lifetime and reservation-day consumption,
+  including unknown and unsettled calls. C/MCP/SDK inspection preserves exact
+  integer counters and never conflates them with committed-turn statistics.
+  Complete session attribution, loading costs and monetary reconciliation remain.
 - The owner store has a single-writer lock. Action/consumption WALs have
   version-2 length/header/payload SHA-256 framing, per-frame and total-log quotas. Complete corrupt frames
   fail closed; only incomplete final frames are repaired. Short writes and flush
@@ -182,6 +184,28 @@ trials require actual resources. No real-model result has been produced here.
   unprobed; missing weights/configuration/credentials and ABI mismatches are visible.
 
 ## Validation at this checkpoint
+
+Engine-wide consumption now projects lifetime and reservation-day totals through
+one reducer for live admission and replay. Known usage, settled unknown usage and
+unsettled reservations remain distinct, including zero-token reservations and
+failed/cancelled tasks with no conversational commit. C/MCP/TUI and both SDKs
+expose the distinction; wire counters use exact decimal strings. Session/price/
+loader attribution remains open. See [consumption](operations.md).
+
+Seven counter cases include four concurrent lanes, clock rollback, midnight,
+cross-day overflow and uncertain sync. A probe against `d126888` returns 100
+stale daily tokens after midnight and `ASNGN_ERR_PARSE` after caller identity
+strings change; the new implementation returns 0 and `ASNGN_OK`. The source and
+results are `/tmp/asterism-consumption-edges.c` and
+`/tmp/asterism-consumption-edges.json`. The draft continuation gate also stops
+adding auxiliary tokens that the daily operation projection already charged.
+Full checks pass 57 restricted ASan/UBSan suites (without LSan), 58 ordinary
+distribution suites and 53 non-threaded suites. Logs/JUnit are
+`/tmp/asterism-consumption-final-{sanitize,native,nothreads}-tests.*`.
+Both SDK packages build and install outside the checkout, then read consumption
+through actual MCP and type-check installed exports; the log is
+`/tmp/asterism-consumption-sdk-packages.log`. Tests with unavailable weights and
+scripted peers do not establish model quality or monetary accuracy.
 
 Acceptance-state replay now uses the same canonical byte check as approval
 replay and a 256 KiB frame bound. Production WAL consumers all stream records;

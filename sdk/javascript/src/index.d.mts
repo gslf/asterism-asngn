@@ -1,5 +1,26 @@
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type TaskState = 'unconfirmed' | 'unavailable' | 'superseded' | 'succeeded' | 'incomplete';
+export interface ConsumptionTotals {
+  calls: bigint;
+  unsettled_calls: bigint;
+  unknown_calls: bigint;
+  failed_calls: bigint;
+  cancelled_calls: bigint;
+  known_input_tokens: bigint;
+  known_output_tokens: bigint;
+  unsettled_tokens: bigint;
+  unknown_tokens: bigint;
+  charged_tokens: bigint;
+}
+export interface Consumption {
+  schema: 1;
+  scope: 'engine_store';
+  unit: 'tokens';
+  time_basis: 'reservation_utc_day';
+  utc_day: number;
+  lifetime: ConsumptionTotals;
+  today: ConsumptionTotals;
+}
 export interface Criterion {
   id: string;
   requirement: string;
@@ -77,6 +98,8 @@ export class Client {
   close(): Promise<void>;
   [Symbol.asyncDispose](): Promise<void>;
   callTool(name: string, args: Record<string, Json>, options?: RequestOptions): Promise<Record<string, Json>>;
+  /** Durable engine-wide charges. Counters are bigint, not JSON numbers. */
+  consumption(options?: RequestOptions): Promise<Consumption>;
   session(slug?: string): Session;
   task(id: string): Task;
 }

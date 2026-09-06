@@ -7,6 +7,10 @@
 static asngn_err record(asngn_ctx *c, const asngn_operation *op,
                         const char *state, int64_t delta, int ti, int to,
                         bool known, asngn_err outcome) {
+  asngn_consumption next = c->consumption;
+  asngn_operation_record row = {.reserved = !strcmp(state,"reserved"),
+      .day=op->day, .delta=delta, .input=ti, .output=to, .known=known, .outcome=outcome};
+  if (!asngn_consumption_observe(&next,&row,op->reserved)) return ASNGN_ERR_LIMIT;
   asngn_stream st;
   char *path = os_path_join(c->root, "operations.xcdn");
   char *text = asngn_operation_encode(op,state,delta,ti,to,known,outcome);
@@ -17,7 +21,7 @@ static asngn_err record(asngn_ctx *c, const asngn_operation *op,
     asngn_stream_close(&st);
   }
   free(text); free(path);
-  if (e == ASNGN_OK && op->day == c->daily_day) c->daily_spent += delta;
+  if (e == ASNGN_OK) c->consumption = next;
   if (e != ASNGN_OK) c->usage_recovery_required = true;
   return e;
 }
@@ -36,14 +40,13 @@ asngn_err asngn_operation_begin(asngn_ctx *c, const char *model,
   memset(op, 0, sizeof *op);
   asngn_uuid_v4(op->id);
   if (request_id) strcpy(op->request_id,request_id);
-  op->model = model; op->kind = kind;
+  strcpy(op->model,model); strcpy(op->kind,kind);
   op->reserved = reserve;
-  op->day = asngn_clock_now(&c->clock) / 86400;
   os_rwlock_wrlock(&c->lock);
-  if (op->day > c->daily_day) { c->daily_day = op->day; c->daily_spent = 0; }
+  asngn_consumption_roll(&c->consumption,asngn_clock_now(&c->clock)/86400);
+  op->day = c->consumption.utc_day;
   if (c->usage_recovery_required) e = ASNGN_ERR_IO;
-  else if (op->reserved > INT64_MAX-c->daily_spent) e = ASNGN_ERR_LIMIT;
-  else if (c->cfg.daily_tokens > 0 && op->reserved > c->cfg.daily_tokens - c->daily_spent)
+  else if (c->cfg.daily_tokens > 0 && op->reserved > c->cfg.daily_tokens - c->consumption.today.charged_tokens)
     e = ASNGN_ERR_LIMIT;
   else e = record(c, op, "reserved", op->reserved, 0, 0, false, ASNGN_OK);
   op->active = e == ASNGN_OK;
@@ -61,9 +64,11 @@ asngn_err asngn_operation_end(asngn_ctx *c, asngn_operation *op,
   os_rwlock_wrlock(&c->lock);
   op->active = false;
   if (c->usage_recovery_required) e = ASNGN_ERR_IO;
-  else if (op->day == c->daily_day && delta > 0 && c->daily_spent > INT64_MAX-delta) {
-    c->usage_recovery_required = true; e = ASNGN_ERR_LIMIT;
-  } else e = record(c, op, "settled", delta, ti, to, known, outcome);
+  else {
+    asngn_consumption_roll(&c->consumption,asngn_clock_now(&c->clock)/86400);
+    e = record(c, op, "settled", delta, ti, to, known, outcome);
+    if (e != ASNGN_OK) c->usage_recovery_required = true;
+  }
   os_rwlock_wrunlock(&c->lock);
   return e;
 }

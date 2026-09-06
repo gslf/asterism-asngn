@@ -467,10 +467,11 @@ typedef struct tui_app {
   /* cached engine introspection */
   asngn_stats         stats;
   asngn_session_stats sstats;
+  asngn_consumption   consumption;
   asngn_sibling_stats sib;
   asngn_model_info    models[8];
   size_t              models_n;
-  int stats_ok, sstats_ok, sib_ok;
+  int stats_ok, sstats_ok, sib_ok, consumption_ok;
 
   /* config snapshot (read once after asngn_open; see main.c) */
   long long budget_session;

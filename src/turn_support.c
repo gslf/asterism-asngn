@@ -12,14 +12,6 @@ void asngn_ledger_zones(asngn_ledger_entry *led, const asngn_prompt *p) {
   led->pt_working += p->tok_working;
 }
 
-int64_t asngn_daily_spend(asngn_ctx *c) {
-  asngn_ctx *owner = c->owner ? c->owner : c;
-  os_rwlock_rdlock(&owner->lock);
-  int64_t n = owner->daily_spent;
-  os_rwlock_rdunlock(&owner->lock);
-  return n;
-}
-
 asngn_err asngn_work_push(asngn_ctx *c, asngn_turn_state *t, const char *text) {
   char *copy;
   char event_id[37] = {0};

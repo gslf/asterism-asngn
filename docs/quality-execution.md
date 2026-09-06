@@ -222,6 +222,11 @@ are documented with [raw measurements](operations.md#component-measurement).
 Standalone Asper passes 30/30 with the updated runtime and ASan/UBSan; asmodel
 passes 6/6 available restricted checks in ordinary and sanitizer builds. Its HTTP
 check remains pending with the other external-sandbox validation.
+Clean local clones at engine `c02b6f9`, Asper `48f6720`, asmodel `2d0e3db` and
+astools `228ec5c` also build and pass the restricted release checks: 45 engine,
+30 memory, 6 runtime and 32 tool executables, plus 25 selected oracle cases.
+The HTTP target is explicitly built even though its execution is pending. This
+is a clean-build checkpoint, not completion of the external validation gates.
 
 - Standalone Asper: 30/30; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
@@ -398,5 +403,8 @@ behavior have not been validated by these Linux no-llama runs.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
 3. Add durable task resumption, controlled processes and editor protocols.
+   [ACP v1 requires MCP stdio clients](https://agentclientprotocol.com/protocol/v1/session-setup).
+   Integrate tool-client lifecycle and host permission boundaries before claiming
+   ACP conformance; a text-only facade that ignores supplied servers is insufficient.
 4. Run the real-model matrix with supplied configuration before admitting learned
    routing, reusable procedures, alternative patches or offline policy promotion.

@@ -28,6 +28,11 @@ if(ASNGN_NODE)
 else()
   message(STATUS "SDK JavaScript checks skipped: Node 22+ unavailable")
 endif()
+if(TARGET asngn-mcp)
+  add_test(NAME test_sdk_recovery COMMAND ${Python3_EXECUTABLE} -B
+    ${CMAKE_CURRENT_SOURCE_DIR}/recovery_live.py $<TARGET_FILE:asngn-mcp> ${ASNGN_NODE})
+  set_tests_properties(test_sdk_recovery PROPERTIES TIMEOUT 60)
+endif()
 if(TARGET asngn-mcp AND (WIN32 OR "CURL::libcurl" IN_LIST ASNGN_MODEL_LINKS))
   add_test(NAME test_sdk_python_live COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/python_live.py
     $<TARGET_FILE:asngn-mcp> $<TARGET_FILE:asngn_fake_tool>)

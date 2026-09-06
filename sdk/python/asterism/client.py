@@ -1,10 +1,10 @@
 """Async host API. Task handles belong to this live server, not to the store."""
 import asyncio
 from collections.abc import AsyncIterator, Sequence
-from .contract import STATES, integer, payload, poll
+from .contract import STATES, integer, payload, poll, task_record
 from .errors import ProtocolError, RequestTimeout
 from .transport import Transport, positive
-from .types import Approval, Definition, Poll, WorkState
+from .types import Approval, Definition, Poll, WorkState, TaskRecord
 
 
 class Client:
@@ -75,6 +75,12 @@ class Session:
         if not isinstance(result.get("task_id"), str) or not result["task_id"]:
             raise ProtocolError("submit returned no task handle")
         return self.client.task(result["task_id"])
+
+    async def recover(self, task_id: str, *, timeout: float | None = None) -> TaskRecord:
+        """Read durable evidence from an idle session; never rerun the task."""
+        self.client.task(task_id)  # Reuse the public identity validation.
+        value = await self.client.call_tool("agent_recover", {"session": self.slug, "task_id": task_id}, timeout=timeout)
+        return task_record(value, task_id)
 
     async def work(self) -> WorkState:
         return await self._work({"mode": "get"})

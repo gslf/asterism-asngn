@@ -1,4 +1,5 @@
 """Validate lifecycle and cursor fields before they guide a caller's decisions."""
+import re
 from .errors import ProtocolError, ToolError
 from .transport import decode
 
@@ -45,4 +46,31 @@ def poll(value, identity, cursor):
     if value["done"] and (not isinstance(value.get("outcome"), str) or
                           not isinstance(value.get("answer"), str) or (not isinstance(value.get("task_state"), str) or value["task_state"] not in STATES)):
         raise ProtocolError("missing terminal outcome")
+    return value
+
+
+def task_record(value, identity):
+    """A journal observation must never be mistaken for a running task or a replay."""
+    state = value.get("state")
+    if value.get("task_id") != identity or state not in ("interrupted", "turn_committed", "finished") or \
+            any(type(value.get(k)) is not bool for k in ("turn_committed", "action_uncertain")) or \
+            value.get("execution_resumed") is not False or value.get("events_replayed") is not False or \
+            not integer(value.get("admitted_work_revision")):
+        raise ProtocolError("invalid durable task lifecycle")
+    if any(not isinstance(value.get(k), str) for k in ("input", "answer", "action_id", "last_action", "last_observation")) or \
+            not isinstance(value.get("task_state"), str) or value["task_state"] not in STATES:
+        raise ProtocolError("missing durable evidence")
+    committed, action = value["turn_committed"], value["action_id"]
+    if (state == "interrupted" and committed) or (state == "turn_committed" and not committed) or \
+            (action and not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", action)) or \
+            (not action and (value["action_uncertain"] or value["last_action"] or value["last_observation"])):
+        raise ProtocolError("inconsistent durable state")
+    if state == "finished":
+        outcome = value.get("outcome")
+        if not isinstance(outcome, str) or not re.fullmatch(
+                r"ASNGN_(OK|ERR_(IO|PARSE|CONFIG|MODEL|NOT_FOUND|INVALID|DENIED|TIMEOUT|CANCELLED|BUSY|PROTOCOL|CONTEXT|UNSUPPORTED|SIBLING|NOMEM|LIMIT))", outcome) or \
+                (outcome == "ASNGN_OK" and not committed):
+            raise ProtocolError("invalid durable outcome")
+    elif "outcome" in value:
+        raise ProtocolError("unfinished task has a terminal outcome")
     return value

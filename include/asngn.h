@@ -190,8 +190,9 @@ asngn_err asngn_session_transcript(asngn_session *s,
 
 /* ---- events (telemetry sink; the TUI is built on this) ----------------- */
 
-/* One #asngn_event xCDN value per call. Called from engine threads; the
- * callback must be fast and must not call back into the API. */
+/* One #asngn_event xCDN value per call. Called from engine threads; callbacks
+ * must not reenter the API. Exception: a NO_THREADS confirm callback may call
+ * asngn_approval_get and asngn_confirm synchronously. Never submit or close here. */
 typedef void (*asngn_event_fn)(const char *event_xcdn, void *ud);
 void asngn_set_event_sink(asngn_ctx *c, asngn_event_fn fn, void *ud);
 
@@ -220,6 +221,22 @@ uint64_t asngn_task_work_revision(const asngn_task *task);
  * state and are never replayed automatically. Counts reflect the last open. */
 asngn_err asngn_session_recovery_info(asngn_session *s,
     size_t *interrupted_turns, size_t *uncertain_actions);
+
+/* Durable task observations survive task_free and server restart. This API
+ * reads an idle session's journal without replaying effects or repairing files.
+ * FINISHED means a runtime outcome was recorded, not that the goal succeeded.
+ * COMMITTED without FINISHED means the conversation committed before a crash. */
+typedef enum { ASNGN_TASK_INTERRUPTED = 0, ASNGN_TASK_COMMITTED, ASNGN_TASK_FINISHED } asngn_task_record_state;
+typedef struct {
+  char task_id[37], action_id[37];
+  asngn_task_record_state state;
+  asngn_err outcome;             /* valid only when state == FINISHED */
+  uint64_t work_revision;
+  int turn_committed, action_uncertain;
+  char *input, *answer, *last_action, *last_observation;
+} asngn_task_record;
+asngn_err asngn_session_task_read(asngn_session *s, const char *task_id, asngn_task_record **out);
+void asngn_task_record_free(asngn_task_record *record);
 
 /* Editor/host context used for hybrid retrieval; copied, session-local.
  * Set before submit. NULL clears a field; BUSY while a turn is accepted. */
@@ -338,6 +355,8 @@ void asngn_approval_free(asngn_approval *approval);
 /* An event of kind "confirm" carries data.confirm_id; the agent worker
  * blocks until asngn_confirm answers it (or the turn is cancelled).
  * Decisions are durable before the worker wakes. Conflicting repeats fail.
+ * NO_THREADS: the confirm event callback must decide before returning;
+ * otherwise the turn ends with ERR_DENIED and the approval is interrupted.
  * session_wide != 0 permits the same tool package/workspace/profile for this
  * process's session lifetime; a changed package or profile needs a new decision. */
 asngn_err asngn_confirm(asngn_ctx *c, const char *confirm_id,

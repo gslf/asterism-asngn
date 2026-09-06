@@ -45,6 +45,7 @@ asngn_err asngn_turn_journal(asngn_turn_state *t, const char *state,
   if (!v)
     return ASNGN_ERR_NOMEM;
   if (!asngn_xobj_put(v, "schema", xcdn_value_int(1)) ||
+      !asngn_xobj_put(v, "work_revision", xcdn_value_int((int64_t)t->work_revision)) ||
       !asngn_xobj_put(v, "action_id", xcdn_value_string(t->action_id)) ||
       !asngn_xobj_put(v, "approval_id", xcdn_value_string(t->approval_id)) ||
       !asngn_xobj_put(v, "verification_snapshot", xcdn_value_string(t->verification_snapshot)) ||
@@ -63,13 +64,48 @@ asngn_err asngn_turn_journal(asngn_turn_state *t, const char *state,
     xcdn_value_free(v);
     return ASNGN_ERR_NOMEM;
   }
+  os_rwlock_wrlock(&t->s->lock);
+  if (t->s->recovery_required) {
+    xcdn_value_free(v);
+    os_rwlock_wrunlock(&t->s->lock);
+    return ASNGN_ERR_IO;
+  }
   e = append(t->s, v);
   if (e == ASNGN_OK)
     e = boundary(t->s->ctx, state);
+  /* Never append another frame behind a possibly incomplete write. */
+  if (e != ASNGN_OK) t->s->recovery_required = true;
+  os_rwlock_wrunlock(&t->s->lock);
   return e;
 }
-static asngn_err checkpoint(asngn_session *s, const xcdn_value_t *v) {
-  const char *text = asngn_xstr(asngn_xfield(v, "checkpoint"));
+bool asngn_turn_outcome(const xcdn_value_t *v, asngn_err *outcome) {
+  int64_t schema;
+  if (!asngn_xint(asngn_xfield(v,"schema"),&schema) || schema != 1) return false;
+  const char *name = asngn_xstr(asngn_xfield(v,"outcome"));
+  for (int i = ASNGN_OK; name && i <= ASNGN_ERR_LIMIT; i++)
+    if (!strcmp(name,asngn_err_name((asngn_err)i))) { *outcome = (asngn_err)i; return true; }
+  return false;
+}
+asngn_err asngn_turn_finished(asngn_turn_state *t, asngn_err outcome) {
+  asngn_session *s = t->s;
+  if (s->recovery_required) return ASNGN_ERR_IO;
+  if (outcome == ASNGN_OK && !t->tx_committed) return ASNGN_ERR_PROTOCOL;
+  xcdn_value_t *v = frame(t->span_root,"finished");
+  if (!v) return ASNGN_ERR_NOMEM;
+  if (!asngn_xobj_put(v,"schema",xcdn_value_int(1)) ||
+      !asngn_xobj_put(v,"outcome",xcdn_value_string(asngn_err_name(outcome))) ||
+      !asngn_xobj_put(v,"committed",xcdn_value_bool(t->tx_committed)) ||
+      !asngn_xobj_put(v,"answer",xcdn_value_string(!t->tx_committed && t->answer ? t->answer : ""))) {
+    xcdn_value_free(v); return ASNGN_ERR_NOMEM;
+  }
+  asngn_err e = boundary(s->ctx,"before_finished");
+  if (e == ASNGN_OK) { e = append(s,v); v = NULL; }
+  xcdn_value_free(v);
+  if (e == ASNGN_OK) e = boundary(s->ctx,"finished");
+  if (e != ASNGN_OK) s->recovery_required = true;
+  return e;
+}
+asngn_err asngn_turn_checkpoint(asngn_session *s, const char *text) {
   char *current = NULL;
   asngn_err e = ASNGN_OK;
   if (!text || !s->ctx->asper_ok)
@@ -80,7 +116,7 @@ static asngn_err checkpoint(asngn_session *s, const xcdn_value_t *v) {
   asper_free(current);
   return e;
 }
-static asngn_err project(asngn_session *s, const xcdn_value_t *v) {
+asngn_err asngn_turn_project(asngn_session *s, const xcdn_value_t *v) {
   asngn_turn u, a;
   asngn_ledger_entry led;
   xcdn_node_t node;
@@ -193,9 +229,9 @@ asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer) {
       t->tx_committed = true;
       e = boundary(s->ctx, "committed");
       if (e == ASNGN_OK)
-        e = project(s, v);
+        e = asngn_turn_project(s, v);
       if (e == ASNGN_OK)
-        e = checkpoint(s, v);
+        e = asngn_turn_checkpoint(s,asngn_xstr(asngn_xfield(v,"checkpoint")));
       if (e == ASNGN_OK)
         s->recovery_required = false;
     }
@@ -206,78 +242,4 @@ asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer) {
 oom:
   xcdn_value_free(v);
   return ASNGN_ERR_NOMEM;
-}
-asngn_err asngn_turn_recover(asngn_session *s) {
-  struct xcdn_document *doc = NULL;
-  asngn_err e =
-      asngn_wal_load(s->ctx, s->journal_st.path, &doc);
-  if (e != ASNGN_OK)
-    return e;
-  if (!doc)
-    return ASNGN_OK;
-  char pending[37] = {0}, pending_action[37] = {0};
-  size_t actions = 0;
-  const xcdn_value_t *last_commit = NULL;
-  s->interrupted_turns = 0;
-  s->uncertain_actions = 0;
-  for (size_t i = 0; i < doc->values_len; i++) {
-    const xcdn_value_t *v = doc->values[i]->value;
-    const char *state = asngn_xstr(asngn_xfield(v, "state"));
-    const char *id = asngn_xstr(asngn_xfield(v, "id"));
-    if (!state || !id || !asngn_uuid_valid(id)) {
-      e = ASNGN_ERR_PARSE;
-      break;
-    }
-    if (!strcmp(state, "started")) {
-      if (pending[0]) {
-        s->interrupted_turns++;
-        s->uncertain_actions += actions;
-      }
-      memcpy(pending, id, 37);
-      actions = 0; pending_action[0] = 0;
-    } else if (strcmp(id, pending)) {
-      e = ASNGN_ERR_PARSE;
-      break;
-    }
-    if (!strcmp(state, "action")) {
-      const char *action_id = asngn_xstr(asngn_xfield(v, "action_id"));
-      if (pending_action[0] || !action_id || !asngn_uuid_valid(action_id)) {
-        e = ASNGN_ERR_PARSE; break;
-      }
-      memcpy(pending_action, action_id, 37);
-      actions++;
-      int64_t epoch = 0;
-      if (asngn_xint(asngn_xfield(v, "world_epoch"), &epoch) && epoch > 0 &&
-          (uint64_t)epoch > s->world_epoch)
-        s->world_epoch = (uint64_t)epoch;
-    }
-    if (!strcmp(state, "observed")) {
-      const char *action_id = asngn_xstr(asngn_xfield(v, "action_id"));
-      if (!action_id || !pending_action[0] || strcmp(action_id, pending_action)) {
-        e = ASNGN_ERR_PARSE; break;
-      }
-      actions--; pending_action[0] = 0;
-    }
-    if (!strcmp(state, "committed")) {
-      e = project(s, v);
-      pending[0] = 0;
-      actions = 0;
-      last_commit = v;
-    } else if (strcmp(state, "started") && strcmp(state, "action") &&
-               strcmp(state, "observed"))
-      e = ASNGN_ERR_PARSE;
-    if (e != ASNGN_OK)
-      break;
-  }
-  if (pending[0]) {
-    s->interrupted_turns++;
-    s->uncertain_actions += actions;
-  }
-  if (e == ASNGN_OK && last_commit)
-    e = checkpoint(s, last_commit);
-  xcdn_document_free(doc);
-  if (e == ASNGN_OK)
-    e = asngn_session_save_manifest(s);
-  s->recovery_required = e != ASNGN_OK;
-  return e;
 }

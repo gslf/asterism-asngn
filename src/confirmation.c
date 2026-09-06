@@ -78,7 +78,14 @@ asngn_err asngn_call_confirm(asngn_ctx *c, asngn_turn_state *t,
       e = ASNGN_ERR_IO;
       break;
     }
+#ifdef ASNGN_NO_THREADS
+    /* The caller cannot answer later while submit owns its only thread. */
+    e = asngn_seterr(c, ASNGN_ERR_DENIED,
+                    "synchronous confirmation requires a decision in the confirm event callback");
+    break;
+#else
     os_cond_timedwait(&c->confirm.cv, &c->confirm.mu, 100);
+#endif
   }
   bool decided = c->confirm.decided != 0, allow = c->confirm.allow != 0;
   int wide = c->confirm.session_wide;

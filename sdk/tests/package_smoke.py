@@ -40,9 +40,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).with_name("python")))
 import asterism
 assert Path(asterism.__file__).is_relative_to(Path(__file__).parent)
+assert asterism.TaskRecord.__module__ == "asterism.types"
 async def main():
     async with await asterism.Client.start(sys.argv[1:]) as client:
         assert (await client.session().approval())["status"] == "none"
+        try:
+            await client.session().recover("932a126d-8662-4448-a887-2a3d63b5e118")
+            raise AssertionError("unknown archive was found")
+        except asterism.ToolError as error:
+            assert error.code == "ASNGN_ERR_NOT_FOUND"
 asyncio.run(main())
 ''', encoding="utf-8")
     run([sys.executable, "-I", python, engine, "--root", root / "python-store"], consumer)
@@ -60,9 +66,13 @@ asyncio.run(main())
     run([*npm, "install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", root / "npm-cache", package], consumer)
     javascript = consumer / "consumer.mjs"
     javascript.write_text('''import assert from 'node:assert/strict';
-import { Client } from '@asterism/sdk';
+import { Client, ToolError } from '@asterism/sdk';
 const client = await Client.start(process.argv.slice(2));
-try { assert.equal((await client.session().approval()).status, 'none'); }
+try {
+  assert.equal((await client.session().approval()).status, 'none');
+  await assert.rejects(client.session().recover('932a126d-8662-4448-a887-2a3d63b5e118'),
+    error => error instanceof ToolError && error.code === 'ASNGN_ERR_NOT_FOUND');
+}
 finally { await client.close(); }
 ''', encoding="utf-8")
     run([node, javascript, engine, "--root", root / "javascript-store"], consumer)

@@ -27,6 +27,14 @@ static void task_finish(asngn_ctx *c, asngn_task *task, asngn_err verdict) {
   asngn_session *s = task->session;
   char terminal[128];
 
+  /* Persist the runtime outcome before publishing completion to any client. */
+  if (t && s) {
+    os_rwlock_wrlock(&s->lock);
+    asngn_err saved = asngn_turn_finished(t,verdict);
+    if (saved != ASNGN_OK) { s->recovery_required = true; verdict = saved; }
+    os_rwlock_wrunlock(&s->lock);
+  }
+
   /* A turn has exactly one terminal event, regardless of which phase
    * returned.  Emitting it here (rather than only on the success/cancel
    * paths in loop.c) also closes the TUI live-phase marker after model,

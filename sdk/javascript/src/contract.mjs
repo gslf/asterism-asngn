@@ -34,3 +34,25 @@ export function poll(value, identity, cursor) {
   }
   return value;
 }
+
+
+export function taskRecord(value, identity) {
+  const state = value.state, committed = value.turn_committed, action = value.action_id;
+  if (value.task_id !== identity || !['interrupted', 'turn_committed', 'finished'].includes(state) ||
+      typeof committed !== 'boolean' || typeof value.action_uncertain !== 'boolean' ||
+      value.execution_resumed !== false || value.events_replayed !== false || !integer(value.admitted_work_revision)) {
+    throw new ProtocolError('invalid durable task lifecycle');
+  }
+  if (!['input', 'answer', 'action_id', 'last_action', 'last_observation'].every(k => typeof value[k] === 'string') ||
+      !states.has(value.task_state)) throw new ProtocolError('missing durable evidence');
+  if ((state === 'interrupted' && committed) || (state === 'turn_committed' && !committed) ||
+      (action && !/^[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}$/.test(action)) ||
+      (!action && (value.action_uncertain || value.last_action || value.last_observation))) {
+    throw new ProtocolError('inconsistent durable state');
+  }
+  if (state === 'finished') {
+    if (typeof value.outcome !== 'string' || !/^ASNGN_(OK|ERR_(IO|PARSE|CONFIG|MODEL|NOT_FOUND|INVALID|DENIED|TIMEOUT|CANCELLED|BUSY|PROTOCOL|CONTEXT|UNSUPPORTED|SIBLING|NOMEM|LIMIT))$/.test(value.outcome) ||
+        (value.outcome === 'ASNGN_OK' && !committed)) throw new ProtocolError('invalid durable outcome');
+  } else if ('outcome' in value) throw new ProtocolError('unfinished task has a terminal outcome');
+  return value;
+}

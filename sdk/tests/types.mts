@@ -15,6 +15,9 @@ export async function useClient(): Promise<Poll> {
     }
     const result = await task.wait();
     await task.release();
+    const archived = await session.recover(task.id);
+    const resumed: false = archived.execution_resumed;
+    void resumed;
     return result;
   } catch (error) {
     if (error instanceof ToolError) { const code: string = error.code; void code; }

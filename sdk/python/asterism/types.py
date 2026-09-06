@@ -72,3 +72,19 @@ class Approval(TypedDict):
     package_sha256: NotRequired[str]
     snapshot: NotRequired[str]
     workspace: NotRequired[str]
+
+
+class TaskRecord(WorkState):
+    task_id: str
+    state: Literal["interrupted", "turn_committed", "finished"]
+    turn_committed: bool
+    action_uncertain: bool
+    admitted_work_revision: int
+    execution_resumed: Literal[False]
+    events_replayed: Literal[False]
+    input: str
+    answer: str
+    action_id: str
+    last_action: str
+    last_observation: str
+    outcome: NotRequired[str]

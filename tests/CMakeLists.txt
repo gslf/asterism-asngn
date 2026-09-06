@@ -20,6 +20,7 @@ set(ASNGN_TEST_PROGRAMS
   test_route
   test_detail
   test_session
+  test_task_record
   test_operations
   test_ledger
   test_context_golden
@@ -111,7 +112,7 @@ target_link_libraries(asngn_fake_tool PRIVATE xcdn)
 
 # The engine integration tests use the fixture writers (fixtures.c) and
 # invoke the fake tool by absolute path.
-foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals test_evidence)
+foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals test_evidence test_task_record)
   if(TARGET ${t})
     target_sources(${t} PRIVATE fixtures.c)
     target_compile_definitions(${t} PRIVATE
@@ -175,6 +176,10 @@ endif()
 
 if(TARGET test_work)
   target_sources(test_work PRIVATE ../mcp/work.c)
+endif()
+
+if(TARGET test_task_record)
+  target_sources(test_task_record PRIVATE ../mcp/recovery.c ../mcp/work.c)
 endif()
 
 if(Python3_Interpreter_FOUND)

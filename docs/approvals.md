@@ -35,6 +35,15 @@ Embedded clients use `asngn_approval_get` to inspect the latest durable record a
 inspection over MCP, including complete redacted arguments. MCP tool clients do
 not gain an approval mutation endpoint. Keep approval authority in the trusted host.
 
+In a `NO_THREADS` build, submission occupies the caller's thread. A trusted
+`confirm` event callback must inspect with `asngn_approval_get` and answer with
+`asngn_confirm` before returning. These two calls are the specific exception to
+the event sink's no-reentry rule. Without a decision the runtime interrupts the
+approval and returns `ASNGN_ERR_DENIED`, without dispatching the tool or waiting
+for a caller that cannot run. Read-only and explicitly authorized operations
+retain their ordinary policy path. Synchronous tests cover allow, deny, changed
+snapshots, failed decision writes and the absent-callback case.
+
 A client reconnecting to a running engine can rediscover the active request by
 session and ID. Reopening the store marks pending or approved-but-unconsumed
 records interrupted. It never replays the action. Durable task resumption and

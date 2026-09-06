@@ -284,7 +284,9 @@ switching profile or granting the tool permission enables the action.
 [Python and JavaScript/TypeScript SDKs](sdk/README.md) expose asynchronous tasks,
 cursor events, cancellation, acceptance criteria and read-only approval inspection
 over the local MCP server. They ship without runtime dependencies and distinguish
-committed turns from verified task success. Task handles remain process-local.
+committed turns from verified task success. Live task handles are process-local;
+[durable task observations](docs/task-recovery.md) remain readable after release
+or server restart through `agent_recover`.
 
 ## Shared model runtime and API providers
 

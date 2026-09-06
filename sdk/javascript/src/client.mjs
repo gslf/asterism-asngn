@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { Transport } from './transport.mjs';
-import { payload, poll, states } from './contract.mjs';
+import { payload, poll, states, taskRecord } from './contract.mjs';
 import { integer, positive } from './json.mjs';
 import { ProtocolError, RequestTimeout } from './errors.mjs';
 
@@ -49,6 +49,11 @@ export class Session {
     const result = await this.client.callTool('agent_submit', { session: this.slug, message }, options);
     if (typeof result.task_id !== 'string' || !result.task_id) throw new ProtocolError('submit returned no task handle');
     return this.client.task(result.task_id);
+  }
+  async recover(taskId, options) {
+    this.client.task(taskId);
+    const value = await this.client.callTool('agent_recover', { session: this.slug, task_id: taskId }, options);
+    return taskRecord(value, taskId);
   }
   async work() { return this.readWork({ mode: 'get' }); }
   async defineWork(expectedRevision, definition) {

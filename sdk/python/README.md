@@ -18,7 +18,9 @@ Durations are seconds. `done` and `ASNGN_OK` do not certify task success;
 inspect `task_state`. A local timeout/coroutine cancellation does not cancel the
 engine task; call `task.cancel()`, poll to completion, then release.
 `task.updates()` yields cursor pages including event gaps/truncation. Handles
-belong to the live server and do not survive its restart. Approval inspection is
+belong to the live server and do not survive its restart. Save the session slug
+and UUID: `session.recover(task_id)` reads durable outcomes and action uncertainty
+after release or restart, without resuming execution. Approval inspection is
 read-only. Context exit closes the owned server; always close it.
 
 See `sdk/README.md` in the source repository for the full lifecycle and limits.

@@ -1,0 +1,27 @@
+{
+  "record": {
+    "task_id": "932a126d-8662-4448-a887-2a3d63b5e118",
+    "state": "finished",
+    "outcome": "ASNGN_ERR_CANCELLED",
+    "turn_committed": false,
+    "action_uncertain": true,
+    "admitted_work_revision": 7,
+    "execution_resumed": false,
+    "events_replayed": false,
+    "task_state": "superseded",
+    "work_revision": 8,
+    "input": "Repair α / 日本語",
+    "answer": "Partial response",
+    "action_id": "81a28720-17cc-4a04-9116-9bcf451b3d30",
+    "last_action": "edit.apply {}",
+    "last_observation": ""
+  },
+  "invalid_changes": [
+    {"state": "succeeded"}, {"outcome": "success"}, {"outcome": "ASNGN_OK"},
+    {"state": "interrupted"}, {"state": "turn_committed"},
+    {"task_id": "wrong"}, {"action_id": ""}, {"action_id": "wrong"},
+    {"turn_committed": 1}, {"action_uncertain": 1}, {"admitted_work_revision": true},
+    {"execution_resumed": true}, {"events_replayed": true},
+    {"last_action": null}, {"task_state": "complete"}
+  ]
+}

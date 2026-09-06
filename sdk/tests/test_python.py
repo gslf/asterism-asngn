@@ -1,6 +1,7 @@
 """Transport faults use a hostile peer; lifecycle integration uses asngn-mcp."""
 import asyncio
 import errno
+import json
 import os
 from pathlib import Path
 import sys
@@ -8,12 +9,24 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 from asterism import Client, ProtocolError, RequestTimeout, RpcError, ToolError, TransportError
-from asterism.contract import poll
+from asterism.contract import poll, task_record
 
 PEER = [sys.executable, "-B", str(Path(__file__).with_name("peer.py"))]
 
 
 class TransportTests(unittest.IsolatedAsyncioTestCase):
+    def test_durable_outcomes_do_not_imply_replay_or_success(self):
+        cases = json.loads(Path(__file__).with_name("task_records.json").read_text())
+        record = cases["record"]
+        self.assertEqual(task_record(record, record["task_id"]), record)
+        for change in cases["invalid_changes"]:
+            with self.subTest(change=change), self.assertRaises(ProtocolError):
+                task_record({**record, **change}, record["task_id"])
+        for state in ("interrupted", "turn_committed"):
+            value = {**record, "state": state, "turn_committed": state == "turn_committed"}
+            del value["outcome"]
+            self.assertEqual(task_record(value, value["task_id"]), value)
+
     async def test_correlated_parallel_errors_and_unicode(self):
         async with await Client.start(PEER) as client:
             values = await asyncio.gather(*(client.call_tool("echo", {"i": i, "text": "α\n日本語"}) for i in range(32)))

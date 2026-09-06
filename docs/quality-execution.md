@@ -11,11 +11,11 @@ astools efa6d22. Local source changes are included in the tested builds.
 |---|---|---|---|
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
-| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, bounded Git identity and registered worktree resolution, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots/ignore syntax, other Git metadata layouts, durable task recovery, explicit data conversion, cross-process workspace coordination |
+| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, bounded Git identity and registered worktree resolution, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals, streamed recovery and durable terminal task observations | Incremental snapshots/ignore syntax, other Git metadata layouts, effect reconciliation and resume, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, generation trace/consumption correlation, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper and embedding traces, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts, explicit partial-outcome reconciliation and reversible source deferral | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
-| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime, instrumented shared JSON/provider fuzz targets | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, storage/process fuzzing and TSan |
+| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime, archived task retrieval through MCP/SDKs, instrumented shared JSON/provider fuzz targets | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, storage/process fuzzing and TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, relocatable Linux remote-provider runtime packaging, Python and JavaScript/TypeScript host SDKs, tested local packages, reviewed MCP 2026-07-28 stdio bindings with bounded schema validation and host-owned lifecycle, accurate build/accounting documentation | ACP, complete JSON Schema conformance and third-party MCP servers, HTTP/OAuth, signed packages, editor flows and external user trials |
 
@@ -239,6 +239,27 @@ manifest checking and real packaged strict-sandbox file reads. The distribution
 build passes 47 restricted executable suites, including archive rejection tests.
 This does not validate inference, other Linux distributions or publisher signing.
 See [runtime distribution](distribution.md).
+
+Durable task observations now distinguish interrupted admission, conversational
+commit and a persisted terminal runtime outcome. The C API, MCP `agent_recover`
+and both SDKs recover exact answers/partial output and action uncertainty after
+handle release or server restart. Journal recovery streams frames; uncertain
+writes block further appends. NO_THREADS confirmations require an immediate host
+callback decision and fail explicitly when none arrives. Eight task-record cases
+and four synchronous approval cases supplement the existing threaded checks.
+The updated tree passes 48 restricted ASan/UBSan executables (leak detection off),
+49 ordinary distribution executables and 47 non-threaded executables. Both SDK
+archives pass isolated installation, live MCP calls and installed TypeScript
+checks. These results do not establish resumable decoding or external-effect replay.
+See [task recovery](task-recovery.md).
+
+The complete clean-source packaging CLI also produced an unsigned archive from
+Asngn `7ed4e7a`, Asper `6cfb137`, asmodel `f097e33` and Astools `aa8c418` at
+`/tmp/asterism-runtime-local-20260906/asterism-0.1.0-linux-x86_64.tar.gz`.
+Its 2,628,136 bytes have SHA-256
+`dc011c39cec91de17d8dcfd4e1918641daef070964c250d8d3f4cfe4ea3d436a`;
+the adjacent build receipt, JUnit and log record clean pins, relocation and
+extracted-archive checks. That archive predates the task-recovery extension.
 
 The preceding clean restricted checkpoint at
 `/tmp/asterism-restricted-release-x_4_t5zu` verified Asngn `623ecad`, Asper

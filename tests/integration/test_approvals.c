@@ -11,6 +11,12 @@ static int scripted_mutation(eng_fx *f) {
          fake_model_push(&f->stdm, "Action result reported.\n");
 }
 
+static int fail_write(void *ud, const char *point) {
+  (void)ud;
+  return !strcmp(point, "stream_short_write");
+}
+
+#ifndef ASNGN_NO_THREADS
 static asngn_approval *wait_pending(eng_fx *f, asngn_task *task) {
   for (int i = 0; i < 2000; i++) {
     asngn_approval *a = NULL;
@@ -108,10 +114,6 @@ TEST(changed_workspace_invalidates_an_approved_request) {
   eng_drop(&f);
 }
 
-static int fail_write(void *ud, const char *point) {
-  (void)ud;
-  return !strcmp(point, "stream_short_write");
-}
 
 TEST(failed_approval_write_never_releases_the_action) {
   eng_fx f;
@@ -134,6 +136,8 @@ TEST(failed_approval_write_never_releases_the_action) {
   asngn_turn_result_free(&r);
   eng_drop(&f);
 }
+
+#endif
 
 TEST(interrupted_approvals_reopen_without_replaying_tools) {
   eng_fx f;
@@ -163,6 +167,7 @@ TEST(interrupted_approvals_reopen_without_replaying_tools) {
   eng_drop(&f);
 }
 
+#ifndef ASNGN_NO_THREADS
 TEST(approval_contains_the_expanded_artifact) {
   eng_fx f;
   ASSERT_TRUE(eng_setup_tool(&f, "fs", "echo", NULL));
@@ -225,6 +230,8 @@ TEST(session_grants_cannot_authorize_a_replaced_package) {
   eng_drop(&f);
 }
 
+#endif
+
 TEST(reviewed_fields_cannot_change_during_a_decision) {
   eng_fx f;
   ASSERT_TRUE(eng_setup(&f, "echo", NULL));
@@ -255,11 +262,77 @@ TEST(reviewed_fields_cannot_change_during_a_decision) {
   eng_drop(&f);
 }
 
-TEST_LIST = {TEST_ENTRY(approval_binds_payload_and_is_durable_before_execution),
-             TEST_ENTRY(session_grants_cannot_authorize_a_replaced_package),
-             TEST_ENTRY(reviewed_fields_cannot_change_during_a_decision),
-             TEST_ENTRY(changed_workspace_invalidates_an_approved_request),
-             TEST_ENTRY(failed_approval_write_never_releases_the_action),
-             TEST_ENTRY(interrupted_approvals_reopen_without_replaying_tools),
-             TEST_ENTRY(approval_contains_the_expanded_artifact)};
+#ifdef ASNGN_NO_THREADS
+typedef struct { eng_fx *f; int mode, calls; asngn_err decision; } sync_review;
+static void review_now(const char *event, void *ud) {
+  sync_review *r = ud;
+  xcdn_document_t *doc = xcdn_parse_str(event,strlen(event),NULL);
+  const xcdn_value_t *v = doc && doc->values_len == 1 ? doc->values[0]->value : NULL;
+  const char *kind = asngn_xstr(asngn_xfield(v,"kind"));
+  if (kind && !strcmp(kind,"confirm")) {
+    asngn_approval *a = NULL;
+    r->calls++;
+    r->decision = asngn_approval_get(r->f->s,&a);
+    if (r->decision == ASNGN_OK) {
+      if (r->mode == 2) {
+        char path[512]; snprintf(path,sizeof path,"%s/external.txt",r->f->ws_raw);
+        r->decision = os_write_file(path,"change",6);
+      }
+      if (r->mode == 3) r->f->c->fault = fail_write;
+      if (r->decision == ASNGN_OK) r->decision = asngn_confirm(r->f->c,a->id,r->mode != 1,0);
+      asngn_approval_free(a);
+    }
+  }
+  xcdn_document_free(doc);
+}
+TEST(synchronous_review_checks_decisions_before_dispatch) {
+  const asngn_approval_status states[] = {ASNGN_APPROVAL_CONSUMED,ASNGN_APPROVAL_DENIED,
+                                        ASNGN_APPROVAL_INVALIDATED};
+  for (int mode = 0; mode < 4; mode++) {
+    eng_fx f; ASSERT_TRUE(eng_setup(&f,"echo",NULL)); ASSERT_TRUE(scripted_mutation(&f));
+    sync_review review = {.f=&f,.mode=mode}; asngn_set_event_sink(f.c,review_now,&review);
+    asngn_task *task = NULL; asngn_turn_result result = {0};
+    ASSERT_OK(asngn_submit(f.s,"Run fake.mut",NULL,NULL,NULL,&task));
+    asngn_err expected = mode == 3 ? ASNGN_ERR_IO : ASNGN_OK;
+    ASSERT_EQ_INT(asngn_task_wait(task,1,&result),expected);
+    ASSERT_EQ_INT(review.calls,1); ASSERT_EQ_INT(review.decision,expected);
+    asngn_task_free(task); f.c->fault = NULL;
+    asngn_stats stats; ASSERT_OK(asngn_get_stats(f.c,&stats));
+    ASSERT_EQ_INT(stats.tool_calls,mode == 0 ? 1 : 0);
+    if (mode != 3) {
+      asngn_approval *a = NULL; ASSERT_OK(asngn_approval_get(f.s,&a));
+      ASSERT_EQ_INT(a->status,states[mode]); asngn_approval_free(a);
+    }
+    asngn_turn_result_free(&result); eng_drop(&f);
+  }
+}
+TEST(synchronous_missing_decision_finishes_without_execution) {
+  eng_fx f; ASSERT_TRUE(eng_setup(&f,"echo",NULL)); ASSERT_TRUE(scripted_mutation(&f));
+  asngn_task *task = NULL; asngn_turn_result result = {0}; char id[37];
+  ASSERT_OK(asngn_submit(f.s,"Run fake.mut",NULL,NULL,NULL,&task));
+  memcpy(id,asngn_task_id(task),37);
+  ASSERT_ERR(asngn_task_wait(task,1,&result),ASNGN_ERR_DENIED); asngn_task_free(task);
+  asngn_approval *a = NULL; ASSERT_OK(asngn_approval_get(f.s,&a));
+  ASSERT_EQ_INT(a->status,ASNGN_APPROVAL_INTERRUPTED); asngn_approval_free(a);
+  asngn_stats stats; ASSERT_OK(asngn_get_stats(f.c,&stats)); ASSERT_EQ_INT(stats.tool_calls,0);
+  asngn_task_record *record = NULL; ASSERT_OK(asngn_session_task_read(f.s,id,&record));
+  ASSERT_EQ_INT(record->state,ASNGN_TASK_FINISHED); ASSERT_EQ_INT(record->outcome,ASNGN_ERR_DENIED);
+  asngn_task_record_free(record); asngn_turn_result_free(&result); eng_drop(&f);
+}
+#endif
+
+TEST_LIST = {
+#ifndef ASNGN_NO_THREADS
+  TEST_ENTRY(approval_binds_payload_and_is_durable_before_execution),
+  TEST_ENTRY(session_grants_cannot_authorize_a_replaced_package),
+  TEST_ENTRY(changed_workspace_invalidates_an_approved_request),
+  TEST_ENTRY(failed_approval_write_never_releases_the_action),
+  TEST_ENTRY(approval_contains_the_expanded_artifact),
+#else
+  TEST_ENTRY(synchronous_review_checks_decisions_before_dispatch),
+  TEST_ENTRY(synchronous_missing_decision_finishes_without_execution),
+#endif
+  TEST_ENTRY(reviewed_fields_cannot_change_during_a_decision),
+  TEST_ENTRY(interrupted_approvals_reopen_without_replaying_tools)
+};
 RUN_ALL_TESTS()

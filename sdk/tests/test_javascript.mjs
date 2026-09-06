@@ -4,9 +4,20 @@ import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
 import { Client, ProtocolError, RequestTimeout, RpcError, ToolError, TransportError } from '../javascript/src/index.mjs';
-import { poll } from '../javascript/src/contract.mjs';
+import { poll, taskRecord } from '../javascript/src/contract.mjs';
 
 const peer = [process.env.ASTERISM_TEST_PYTHON || 'python3', '-B', fileURLToPath(new URL('peer.py', import.meta.url))];
+
+test('durable outcomes do not imply replay or success', async () => {
+  const { record, invalid_changes: changes } = JSON.parse(await readFile(new URL('task_records.json', import.meta.url), 'utf8'));
+  assert.deepEqual(taskRecord(record, record.task_id), record);
+  for (const change of changes) assert.throws(() => taskRecord({ ...record, ...change }, record.task_id), ProtocolError);
+  for (const state of ['interrupted', 'turn_committed']) {
+    const value = { ...record, state, turn_committed: state === 'turn_committed' };
+    delete value.outcome;
+    assert.deepEqual(taskRecord(value, value.task_id), value);
+  }
+});
 
 test('parallel correlation, Unicode and structured errors', async () => {
   const client = await Client.start(peer);

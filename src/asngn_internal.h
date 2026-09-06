@@ -201,6 +201,8 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path, struct xcdn_document **
 typedef asngn_err (*asngn_wal_record_fn)(void *ud, const char *record, size_t bytes);
 asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t frame_limit,
                           asngn_wal_record_fn record_fn, void *ud);
+asngn_err asngn_wal_inspect(asngn_ctx *c, const char *path, size_t frame_limit,
+                            asngn_wal_record_fn record_fn, void *ud);
 asngn_err asngn_stream_load(asngn_ctx *c, const char *path, const char *what,
                             struct xcdn_document **out_doc);
 
@@ -1138,6 +1140,10 @@ asngn_err asngn_turn_journal(asngn_turn_state *t, const char *state,
                              const char *action);
 asngn_err asngn_turn_commit(asngn_turn_state *t, const asngn_turn *answer);
 asngn_err asngn_turn_recover(asngn_session *s);
+asngn_err asngn_turn_finished(asngn_turn_state *t, asngn_err outcome);
+bool asngn_turn_outcome(const struct xcdn_value *value, asngn_err *outcome);
+asngn_err asngn_turn_project(asngn_session *s, const struct xcdn_value *value);
+asngn_err asngn_turn_checkpoint(asngn_session *s, const char *text);
 asngn_err asngn_session_stage_turn(asngn_session *s, const asngn_turn *t);
 /* Internal fault hook, per context. Return nonzero to fail the named boundary. */
 

@@ -38,8 +38,8 @@ asngn_err asngn_wal_append(asngn_ctx *c, asngn_stream *st,
   return e;
 }
 
-asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t frame_limit,
-                          asngn_wal_record_fn record_fn, void *ud) {
+static asngn_err scan(asngn_ctx *c, const char *path, size_t frame_limit,
+                      asngn_wal_record_fn record_fn, void *ud, bool repair) {
   FILE *f;
   asngn_err e = ASNGN_OK;
   uint64_t file_size = 0;
@@ -99,6 +99,7 @@ asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t frame_limit,
   }
   if (ferror(f)) e = ASNGN_ERR_IO;
   fclose(f);
+  if (e == ASNGN_OK && torn && !repair) return ASNGN_ERR_PARSE;
   if (e == ASNGN_OK && torn) {
     e = os_truncate(path, (uint64_t)good);
     f = e == ASNGN_OK ? os_fopen(path, "ab") : NULL;
@@ -107,6 +108,13 @@ asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t frame_limit,
     if (e == ASNGN_OK) asngn_log(c, ASNGN_LOG_WARN, "storage", "discarded incomplete WAL tail: %s", path);
   }
   return e;
+}
+
+asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t cap, asngn_wal_record_fn fn, void *ud) {
+  return scan(c,path,cap,fn,ud,true);
+}
+asngn_err asngn_wal_inspect(asngn_ctx *c, const char *path, size_t cap, asngn_wal_record_fn fn, void *ud) {
+  return scan(c,path,cap,fn,ud,false);
 }
 
 static asngn_err collect(void *ud, const char *record, size_t bytes) {

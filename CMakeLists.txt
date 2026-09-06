@@ -159,6 +159,8 @@ set(ASNGN_SOURCES
   src/doctor.c
   src/session.c
   src/turn_journal.c
+  src/turn_recovery.c
+  src/task_record.c
   src/workspace.c
   src/workspace_git.c
   src/workspace_git_paths.c
@@ -328,7 +330,7 @@ endif()
 
 # ── asngn-mcp ───────────────────────────────────────────────────────────────
 if(ASNGN_BUILD_MCP)
-  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c mcp/approval.c)
+  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c mcp/approval.c mcp/recovery.c)
   target_include_directories(asngn-mcp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

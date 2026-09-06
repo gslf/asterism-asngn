@@ -29,6 +29,22 @@ export interface Poll extends Partial<WorkState> {
   outcome?: string;
   answer?: string;
 }
+/** Archived evidence, not a resumed execution or a replayable event cursor. */
+export interface TaskRecord extends WorkState {
+  task_id: string;
+  state: 'interrupted' | 'turn_committed' | 'finished';
+  turn_committed: boolean;
+  action_uncertain: boolean;
+  admitted_work_revision: number;
+  execution_resumed: false;
+  events_replayed: false;
+  input: string;
+  answer: string;
+  action_id: string;
+  last_action: string;
+  last_observation: string;
+  outcome?: string;
+}
 export interface Approval {
   status: 'none' | 'pending' | 'approved' | 'denied' | 'consumed' | 'invalidated' | 'interrupted';
   id?: string;
@@ -69,6 +85,7 @@ export class Session {
   readonly client: Client;
   readonly slug: string;
   submit(message: string, options?: RequestOptions): Promise<Task>;
+  recover(taskId: string, options?: RequestOptions): Promise<TaskRecord>;
   work(): Promise<WorkState>;
   defineWork(expectedRevision: number, definition: Definition): Promise<WorkState>;
   invalidateWork(expectedRevision: number): Promise<WorkState>;

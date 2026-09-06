@@ -75,7 +75,9 @@ engine cancellation. `Client` also implements `Symbol.asyncDispose`.
 
 - `session(slug)` selects a store session; its first operation opens it on the server.
   `submit` returns immediately after admission. `client.task(id)` attaches another
-  observer on the **same live client/server**; it does not recover a crashed task.
+  observer on the **same live client/server**; it does not recover a crashed task. `session.recover(taskId)` reads durable
+  outcomes and action uncertainty after release or restart; it never reruns work.
+  See [task recovery](../docs/task-recovery.md) for states and size limits.
 - `poll(cursor)` returns retained events and `next_cursor`. Pass that cursor into
   the next poll. `updates` does this automatically and yields even empty pages.
   Stop iteration to stop polling; neither that nor a local deadline cancels the task.

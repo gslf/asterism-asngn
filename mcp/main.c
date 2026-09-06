@@ -42,6 +42,7 @@
 #include "tasks.h"
 #include "work.h"
 #include "approval.h"
+#include "recovery.h"
 
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
@@ -369,6 +370,19 @@ static int tool_session_approval(server_state *st, const asmodel_json_value *arg
   int rc = state_session(st,slug,&s,out);
   if (rc != TOOL_OK) return rc;
   asngn_err e = mcp_approval_read(s,out);
+  return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
+}
+
+static int tool_agent_recover(server_state *st, const asmodel_json_value *args,
+                              asmodel_json_value **out, const char **msg) {
+  const char *id = NULL, *slug = NULL;
+  asngn_session *s = NULL;
+  if (arg_str(args,"task_id",&id,msg) != 1 || !asngn_uuid_valid(id) ||
+      arg_str(args,"session",&slug,msg) != 1 || asmodel_json_object_count(args) != 2)
+    BADP("session and task_id UUID are required; no other fields are accepted");
+  int rc = state_session(st,slug,&s,out);
+  if (rc != TOOL_OK) return rc;
+  asngn_err e = mcp_task_recover(s,id,out);
   return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
 }
 
@@ -928,6 +942,8 @@ typedef struct {
 } tool_def;
 
 static const tool_def TOOLS[] = {
+    {"agent_recover", "Read a task's durable outcome after release or restart. Requires an idle session; never resumes execution or replays events/effects.",
+     "{\"type\":\"object\",\"additionalProperties\":false,\"properties\":{\"session\":{\"type\":\"string\"},\"task_id\":{\"type\":\"string\"}},\"required\":[\"session\",\"task_id\"]}", tool_agent_recover},
     {"session_approval", "Inspect the latest durable confirmation and complete redacted arguments. Read-only; never grants permission.",
      "{\"type\":\"object\",\"properties\":{\"session\":{\"type\":\"string\"}},\"additionalProperties\":false}", tool_session_approval},
     {"session_work", "Read or define host acceptance criteria; revisions prevent stale updates. Only the runtime records proof.",

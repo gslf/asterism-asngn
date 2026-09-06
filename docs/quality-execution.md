@@ -175,7 +175,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 46/46 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 46/46 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 46/46 passed.
-- Standalone Asper: 28/28; astools: 32/32; asmodel: 7/7.
+- Standalone Asper: 29/29; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -246,7 +246,15 @@ trials require actual resources. No real-model result has been produced here.
   call after a partial insertion; the receipt runtime retains that insertion,
   suspends the batch and makes no further call. This is conservative reconciliation,
   not atomic batch rollback or a task-success claim. Standalone no-thread Asper
-  also passes 28/28. See [curation recovery](../../asterism-asper/docs/curation-recovery.md).
+  also passes 29/29. See [curation recovery](../../asterism-asper/docs/curation-recovery.md).
+- Curation now selects complete inputs before retrieval or generation, retaining
+  the omitted tail and checking the joined transcript against token and byte
+  limits. Four cases cover exact receipt membership, failure with concurrent
+  append, oversized events and non-additive/zero/missing counters. The same first
+  case against the previous library reproduces seven silently omitted inputs out
+  of twenty; the revised runtime sends all twenty once across three bounded calls.
+  Oversized head events stop with `LIMIT` and remain pending; segmentation and a
+  bounded replay queue remain open. This is a contract regression, not model quality.
 - Release admission now tests actual temporary Git checkouts: stale standalone
   dependencies, dirty or replaced submodules, missing required checkouts and
   header changes cannot pass via the engine's development exception. All four

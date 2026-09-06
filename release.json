@@ -10,7 +10,7 @@
     },
     "asper": {
       "repository": "gslf/asterism-asper",
-      "revision": "cb1ed0b0f9cd9b171d6c67971e3d71c1f3bce673",
+      "revision": "7615962001bc3bc65d115aed256359b79a17be6d",
       "headers": {
         "include/asper.h": "88ebdbe60dffa962c88b227345666e44dd95e5e0cb45ff09883406b72b797bad"
       }

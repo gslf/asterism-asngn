@@ -194,6 +194,17 @@ The complete updated runs pass 55 restricted ASan/UBSan suites without LSan,
 56 ordinary distribution suites and 51 non-threaded suites. Logs/JUnit are
 `/tmp/asterism-state-final-{sanitize,native,nothreads}-tests.*`.
 
+The acceptance-replay checkpoint `d126888` passed clean reconstruction at
+`/tmp/asterism-restricted-release-wdwnjsen`: 55 Asngn, 31 Asper, 6 asmodel and
+35 Astools suites. The unsigned Linux remote-provider archive at
+`/tmp/asterism-runtime-state-20260906/asterism-0.1.0-linux-x86_64.tar.gz`
+contains 3,226,443 bytes with SHA-256
+`b508c3e14025b861f4ce6e68f4733b14c71d8482c3d4be74242fc0b06eb686b5`.
+The adjacent build receipt, log and JUnit record exact clean pins, relocated
+runtime, ACP initialization, read-only doctor and an actual packaged strict tool.
+This development package is unsigned and includes no weights; real inference,
+other distributions and complete provider/ACP conformance remain unvalidated.
+
 The approval checkpoint `7b3040f` passed clean reconstruction at
 `/tmp/asterism-restricted-release-guqjcud8`: 54 Asngn, 31 Asper, 6 asmodel and
 35 Astools suites. Its unsigned runtime archive at

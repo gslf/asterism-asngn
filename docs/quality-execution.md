@@ -13,7 +13,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots/ignore syntax, durable task recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Direct native final responses, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
-| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, ranked role coverage, granular Asper/native-request traces, fine-grained dependencies and task hypotheses |
+| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper/native-request traces, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
@@ -110,6 +110,14 @@ trials require actual resources. No real-model result has been produced here.
   restart. Checked history retains earlier claim text across record compaction.
   The engine observes the session workspace before memory materialization. See
   [Asper grounding](../../asterism-asper/docs/knowledge.md) for semantics and limits.
+- Optional clangd navigation uses a closed LSP contract on the existing process
+  runtime. Source SHA-256 preconditions, UTF-8 position negotiation, exact-version
+  diagnostics and final source rechecks prevent stale source observations from
+  becoming successful replies. Host reads reject symlink ancestors and out-of-scope
+  locations. Server requests cannot edit or execute host actions. Errors remain
+  attached to the request through MCP. Target hashes identify current host reads;
+  headers, server indexes and toolchain freshness are not certified. These results
+  never count as verification receipts. See [LSP limits and setup](../../asterism-astools/docs/lsp.md).
 - Response cache keys include conversation, objective, active file, prompt,
   security profile and current workspace. Response reuse is disabled while Asper
   is active because a verifiable memory revision is not yet available.
@@ -167,7 +175,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 45/45 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 45/45 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 45/45 passed.
-- Standalone Asper: 24/24; astools: 27/27; asmodel: 7/7.
+- Standalone Asper: 24/24; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -224,7 +232,7 @@ trials require actual resources. No real-model result has been produced here.
 - Ten persistent-runtime cases and two real-library cases pass. Seven lifecycle
   regressions also fail against the previous runtime: stale executable reuse,
   deleted scratch, delayed deadlines/cancellation and surviving descendants. The
-  no-thread Astools build passes 26/26 (persistent execution is unavailable there).
+  no-thread Astools build passes 28/28 (persistent execution is unavailable there).
 - Ten evidence cases cover late and dense diagnostics, compressor omissions,
   exact redacted offsets, invalid UTF-8, strict native/JSON range contracts and
   reads that cannot certify success. The native build also checks actual pinned
@@ -246,14 +254,20 @@ trials require actual resources. No real-model result has been produced here.
   checks use isolated installs, live MCP calls and installed TypeScript exports.
   Local interpreters were Python 3.14.7/3.12 and Node 26.7.0; the compiler was 7.0.2.
   CI requests Node 22 and locks its test tooling; other platform runs are not claimed.
+- LSP checks include real clangd 22.1.8 overloads, Unicode byte columns, references,
+  diagnostics and Linux strict queries. Hostile peers exercise duplicate keys,
+  wrong IDs, stale diagnostics, in-query source changes, external locations,
+  server requests, deadlines, cancellation, clean restart and bounded Unicode
+  errors. The optional package test checks the complete generated manifest,
+  disabled repository config, MCP discovery and output-schema validation.
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.
 
 The asmodel mock needs a loopback socket and LeakSanitizer needs process
-inspection, so these checks ran outside the tool sandbox. The earlier parallel
-astools process-headroom sampling race is not an enforcement guarantee; the
-complete sequential suite passes. Windows/macOS, embedded llama and real-model
+inspection, so these checks ran outside the tool sandbox. Astools' process-limit selector now exposes the same observation used to derive
+its headroom, removing the test's race between separate desktop task samples.
+The observation still is not a per-tree process quota guarantee. Windows/macOS, embedded llama and real-model
 behavior have not been validated by these Linux no-llama runs.
 
 ## Next implementation order

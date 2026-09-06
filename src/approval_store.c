@@ -31,6 +31,8 @@ asngn_err asngn_approval_save(asngn_session *s, asngn_approval *next) {
   asngn_buf b;
   asngn_buf_init(&b);
   asngn_err e = asngn_xnode_write(node, false, &b);
+  if (e == ASNGN_OK && b.len > ASNGN_APPROVAL_FRAME_MAX) e = ASNGN_ERR_LIMIT;
+  if (e == ASNGN_OK && !asngn_utf8_valid(b.data, b.len)) e = ASNGN_ERR_INVALID;
   if (e == ASNGN_OK) e = asngn_wal_append(s->ctx, &s->approvals->stream, b.data, b.len);
   xcdn_node_free(node);
   asngn_buf_free(&b);
@@ -56,40 +58,6 @@ asngn_err asngn_approval_transition(asngn_session *s, asngn_approval_status stat
   next->session_wide = wide;
   asngn_err e = asngn_approval_save(s, next);
   if (e != ASNGN_OK) asngn_approval_free(next);
-  return e;
-}
-
-asngn_err asngn_approval_load(asngn_session *s) {
-  char *path = os_path_join(s->dir, "approvals.xcdn");
-  xcdn_document_t *doc = NULL;
-  asngn_approval_store *store = calloc(1, sizeof *store);
-  asngn_err e = ASNGN_ERR_NOMEM;
-  if (!path || !store) goto done;
-  e = asngn_wal_load(s->ctx, path, &doc);
-  if (e != ASNGN_OK) goto done;
-  for (size_t i = 0; doc && i < doc->values_len; i++) {
-    asngn_approval *next = NULL;
-    e = asngn_approval_decode(doc->values[i]->value, &next);
-    if (e == ASNGN_OK && !asngn_approval_follows(store->current, next)) e = ASNGN_ERR_PARSE;
-    if (e != ASNGN_OK) {
-      asngn_approval_free(next);
-      goto done;
-    }
-    asngn_approval_free(store->current);
-    store->current = next;
-  }
-  e = asngn_stream_open(s->ctx, &store->stream, path, true);
-  if (e == ASNGN_OK) {
-    s->approvals = store;
-    store = NULL;
-    asngn_approval *a = s->approvals->current;
-    if (a && (a->status == ASNGN_APPROVAL_PENDING || a->status == ASNGN_APPROVAL_APPROVED))
-      e = asngn_approval_transition(s, ASNGN_APPROVAL_INTERRUPTED, a->session_wide);
-  }
-done:
-  free(path);
-  xcdn_document_free(doc);
-  asngn_approval_store_free(store);
   return e;
 }
 

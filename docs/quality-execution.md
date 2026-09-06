@@ -183,6 +183,29 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
+Approval recovery now streams one canonical record per frame under a 2 MiB bound.
+Checks run before torn-tail repair and before the recovered state is published.
+Initial regressions against `6a737e8` reproduce accepted extra fields and multiple
+transitions in one frame. A follow-up exposed xCDN's last-key replacement, so
+canonical writer comparison also rejects identical duplicates, escaped NULs and
+unwritten annotations. The negative-test fixture now joins its workers before
+returning from a failed reproduction; an earlier negative-run ASan finding came
+from that test cleanup path, not the replay runtime. Seven dedicated tests include
+maximum escaped arguments and a 256-record history over 32 MiB. See
+[approval recovery](approvals.md) for the exact contract.
+The updated tree passes 54 restricted ASan/UBSan suites without LSan, 55 ordinary
+distribution suites and 50 non-threaded suites. Their logs and JUnit reports are
+`/tmp/asterism-approval-final-{sanitize,native,nothreads}-tests.*`.
+
+The ACP checkpoint `6a737e8` passed clean reconstruction at
+`/tmp/asterism-restricted-release-_prtarbh`: 53 Asngn, 31 Asper, 6 asmodel and
+35 Astools suites. Its unsigned runtime archive is
+`/tmp/asterism-runtime-acp-20260906/asterism-0.1.0-linux-x86_64.tar.gz`,
+3,225,886 bytes, SHA-256
+`2083bcae4405ec3fb6467eef342cdfb802c3d90900b527f3636b6139ec6c13ae`.
+The adjacent receipt and JUnit/log record exact clean pins, relocated ACP startup,
+doctor and packaged strict tools. This archive predates the approval replay fix.
+
 The native ACP profile links the same runtime and shared asynchronous observer;
 it does not add a model owner or expose approval mutation to MCP tool clients.
 Actual runtime action events correlate review UUIDs with action UUIDs and journal

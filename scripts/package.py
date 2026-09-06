@@ -68,7 +68,7 @@ def package(root, output, jobs):
         receipt = {"schema": 1, "profile": "linux-remote", "signed": False,
             "archive": {"name": archives[0].name, "sha256": digest, "bytes": archives[0].stat().st_size},
             "sources": isolated, "platform": platform.platform(), "machine": platform.machine(),
-            "validation": ["relocated runtime", "doctor without inference", "strict packaged tool"],
+            "validation": ["relocated runtime", "ACP v1 initialization", "doctor without inference", "strict packaged tool"],
             "not_validated": ["model inference", "other distributions", "full provider conformance"]}
         (stage / "build-receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
         files = [archives[0], checksum,

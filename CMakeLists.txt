@@ -220,6 +220,7 @@ set(ASNGN_SOURCES
   src/confirmation.c
   src/approval_codec.c
   src/approval_store.c
+  src/approval_replay.c
   src/approval_request.c
   src/tool_action.c
   src/action_instruction.c

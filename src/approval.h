@@ -4,6 +4,8 @@
 #include "execution.h"
 #include "xcdn.h"
 #define ASNGN_APPROVAL_ARGS_MAX (256 * 1024)
+/* Includes worst-case escaping of all bounded review fields. */
+#define ASNGN_APPROVAL_FRAME_MAX (2u * 1024u * 1024u)
 typedef struct asngn_approval_store {
   asngn_approval *current;
   asngn_stream stream;

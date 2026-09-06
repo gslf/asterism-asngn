@@ -47,7 +47,9 @@ asngn_err asngn_approval_decode(const xcdn_value_t *v, asngn_approval **out) {
   bool wide;
   *out = NULL;
   if (!a) return ASNGN_ERR_NOMEM;
-  bool ok = asngn_xint(asngn_xfield(v, "schema"), &schema) && schema == 1 &&
+  /* Replay also checks canonical bytes: xCDN parsing can replace duplicate keys. */
+  bool ok = v && v->type == XCDN_VAL_OBJECT && v->data.object.len == 14 &&
+            asngn_xint(asngn_xfield(v, "schema"), &schema) && schema == 1 &&
             asngn_xint(asngn_xfield(v, "sequence"), &sequence) && sequence > 0 &&
             asngn_xint(asngn_xfield(v, "profile"), &profile) && profile >= ASNGN_SECURITY_CHAT &&
             profile <= ASNGN_SECURITY_AUTOMATION_CI &&

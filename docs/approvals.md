@@ -14,6 +14,17 @@ a failed write prevents execution and poisons the session until recovery. Later
 transitions cannot rewrite reviewed fields. A conflicting duplicate decision
 fails; an identical retry while the wakeup slot remains active is idempotent.
 
+Recovery validates one approval per frame, with a 2 MiB frame cap covering escaped
+review text. It retains only the previous/current approval while scanning, rather
+than materializing the full log. Complete frames must match the canonical UTF-8
+form written by the approval codec. This rejects unknown fields, repeated keys
+(which the pinned xCDN parser would otherwise replace), lossy escaped NULs and
+unwritten annotations. A malformed complete record or illegal transition stops
+recovery without repairing a later incomplete tail or publishing partial state.
+Only an incomplete physical tail after valid records is repairable. Existing
+runtime-written canonical records retain their format; hand-edited records are
+not an alternate admission path. Writes enforce the same frame/encoding bounds.
+
 After approval, the engine rechecks the workspace snapshot and selected package.
 A change while the user was reviewing invalidates that request. Consuming the
 approval is durable before dispatch, and the action journal carries its ID.
@@ -53,3 +64,8 @@ does not claim restart-safe execution or exactly-once external effects.
 Tests exercise expanded file payloads, ownership of review copies, immutable
 fields, changed snapshots and packages, rejected decision writes, reopen without
 replay, read-only MCP inspection and scrolling to the end of long Unicode input.
+Seven replay cases additionally cover canonical framing, duplicate keys, two
+transitions in one frame, semantic corruption before a torn tail, a maximum
+256 KiB escaped review, oversized frames, invalid UTF-8, escaped NULs, annotations
+and a 256-record history exceeding 32 MiB. This bounds replay state, not total
+process memory or power-loss durability on every filesystem.

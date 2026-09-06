@@ -27,7 +27,7 @@ class Handler(BaseHTTPRequestHandler):
             calls = []
             text = ""
             if tools:
-                assert request["tool_choice"] == "required"
+                assert request["tool_choice"] == "auto"
                 definitions = tools if responses else [v["function"] for v in tools]
                 messages = request["input" if responses else "messages"]
                 results = [v for v in messages if v.get("type") == "function_call_output" or v.get("role") == "tool"]
@@ -36,11 +36,15 @@ class Handler(BaseHTTPRequestHandler):
                     assert results[0].get("call_id", results[0].get("tool_call_id")) == "wire-read"
                     assert "wire observation" in results[0].get("output", results[0].get("content", ""))
                     name, call_id, args = "asterism_finish", "wire-finish", {}
+                    if self.server.direct:
+                        name = None
+                        text = "Observed the tool result over the native protocol."
                 else:
                     definition = next(v for v in definitions if v["description"].startswith("wire.run:"))
                     assert definition["parameters"]["required"] == ["msg"]
                     name, call_id, args = definition["name"], "wire-read", {"msg": "wire observation"}
-                calls = [{"name": name, "call_id": call_id, "arguments": json.dumps(args)}]
+                if name is not None:
+                    calls = [{"name": name, "call_id": call_id, "arguments": json.dumps(args)}]
             elif len(self.server.requests) == 1:
                 text = "CLASS MODERATE | DETAIL NORMAL | MODE PLAN | TASK LOOKUP\n" if "grammar" in request else json.dumps(
                     {"class": "MODERATE", "detail": "NORMAL", "mode": "PLAN", "task": "LOOKUP"})
@@ -69,9 +73,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(500)
 
 
-def exercise(provider):
+def exercise(provider, direct):
     with tempfile.TemporaryDirectory(prefix="asngn-native-wire-") as tmp, ThreadingHTTPServer(("127.0.0.1", 0), Handler) as server:
-        server.requests, server.errors = [], []
+        server.requests, server.errors, server.direct = [], [], direct
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -114,11 +118,12 @@ def exercise(provider):
             result = replies[-1]["result"]
             assert result["isError"] is False, result
             assert "Observed the tool result" in result["content"][0]["text"], result
-            assert len(server.requests) == 4, server.requests
+            assert len(server.requests) == (3 if direct else 4), server.requests
         finally:
             server.shutdown()
             thread.join(timeout=5)
 
 
 for profile in ("llama-server", "lmstudio"):
-    exercise(profile)
+    for direct in (False, True):
+        exercise(profile, direct)

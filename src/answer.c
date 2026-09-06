@@ -210,6 +210,14 @@ asngn_err asngn_answer_run(asngn_ctx *c, asngn_turn_state *t, size_t *aux_tokens
   int attempt;
   int cap = asngn_detail_cap(c, t->detail);
 
+  if (t->phase != ASNGN_PHASE_RESPONSE)
+    return asngn_seterr(c, ASNGN_ERR_PROTOCOL, "response validation entered outside response phase");
+  if (t->native_answer) {
+    answer = t->native_answer; t->native_answer = NULL;
+    if (!asngn_native_answer_eligible(c, t)) { free(answer); answer = NULL; }
+    else { tokens = t->native_answer_tokens; cap = t->native_answer_cap; }
+  }
+
   switch (c->cfg.judge) {
   case ASNGN_JUDGE_OFF:
     judge_this = false;
@@ -227,13 +235,15 @@ asngn_err asngn_answer_run(asngn_ctx *c, asngn_turn_state *t, size_t *aux_tokens
     /* Always buffer first.  A token callback before the protocol gate would
      * make a rejected pseudo-call visible and could not be taken back. */
     bool stream = false;
-    e = answer_once(c, t, stream, &answer, &tokens, &cap);
+    bool prepaid = attempt == 0 && answer != NULL;
+    e = prepaid ? ASNGN_OK : answer_once(c, t, stream, &answer, &tokens, &cap);
     if (e != ASNGN_OK) {
       free(answer);
       free(best_answer);
       return e;
     }
-    t->led.gt_answer += (size_t)(tokens > 0 ? tokens : 0);
+    /* Native proposals were already charged to their action-phase request. */
+    if (!prepaid) t->led.gt_answer += (size_t)(tokens > 0 ? tokens : 0);
 
     /* detail cap: sentence-boundary trim, visible flag */
     if (tokens >= cap && answer != NULL) {

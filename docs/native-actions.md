@@ -16,9 +16,10 @@ No automatic fallback silently changes protocols after a failed native request.
 
 The generator proposes selected tools directly, without a mandatory planner or
 THINK action. File payloads are supplied inline; the separate draft model is not
-invoked. Classification and the final response phase retain their configured
-policies, including the optional response judge. This is an alternative action
-protocol, not yet a measured reduction in latency or total inference cost.
+invoked. Classification and response validation retain their configured policies,
+including the optional response judge. A successful native text response can be
+reused after validation, without a separate response-generation request. This is
+not yet a measured improvement in real-model latency, cost or task success.
 
 ## Contract and execution
 
@@ -34,6 +35,19 @@ and transition to the response phase. Functions are absent when their capability
 is unavailable. Their small JSON argument contracts are validated by the runtime;
 Astools validates tool arguments and current permissions. `asterism_finish` takes
 an empty object and does not assert task success. The artifact gate still applies.
+
+When that gate allows reporting, tool choice is `auto`: a request can return calls
+or a final text proposal. While a required artifact is missing, tool choice remains
+`required`, and the runtime independently rejects a transition without the artifact.
+Text accompanying tool calls is discarded. Empty/invalid text and failed or partial
+generations cannot become user responses.
+
+Final proposals are buffered until the response phase. They pass the same hard
+tool-syntax gate and optional reviewer as generated responses; rejected text never
+streams to the user. Denied actions, continuations, forced endings and artifacts
+without a current verification receipt retain the dedicated response pass. Receipt
+freshness is checked immediately before reuse, independently of the router's task
+label. A text proposal does not certify task success or replace the acceptance graph.
 
 The entire proposed batch is validated before its first effect. Multiple proposals
 must all name read-only, non-destructive tools and fit the remaining action/tool
@@ -65,8 +79,20 @@ There is no silent role flattening, history eviction or durable native resume.
 Native schemas count toward admission. Zone telemetry remains diagnostic token
 accounting; per-operation usage receipts distinguish known and unknown consumption.
 
+The prompt states both the action-generation ceiling and the final-response ceiling
+(the smaller of the action and detail caps). A proposal that reaches its response
+cap uses the dedicated response pass, which can rebuild context for that budget.
+Native generation is charged once to its action-phase operation and `gt_decision`;
+reuse adds no `gt_answer` charge. A reviewer or replacement response retains its own
+operation receipt. The native path does not promise real-time output streaming.
+
 Deterministic tests cover batch preflight, disabled capabilities, artifact gates,
-discovery, result correlation and interruption. An HTTP integration test exercises
+discovery, result correlation, interruption, Unicode final text, response caps,
+review rejection, stale verification, withheld output and single-charge reuse.
+An HTTP integration test exercises
 the complete MCP/Asngn/asmodel/Astools path for Chat Completions and Responses with
-scripted local peers. These tests establish contract behavior, not real-model
-quality, calibration or performance.
+scripted local peers. In both wire formats, the explicit-finish baseline makes
+four requests (classification, tool call, finish, response); the same scripted
+answer as native text needs three (classification, tool call, final response).
+This isolates one avoided request. It does not measure model quality, calibration,
+real-server latency or financial cost.

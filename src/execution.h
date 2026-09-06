@@ -41,6 +41,7 @@ asngn_err asngn_actions_run(asngn_ctx *c, asngn_turn_state *t);
 asngn_err asngn_native_run(asngn_ctx *c, asngn_turn_state *t);
 bool asngn_response_has_tool_protocol(asngn_ctx *c, const char *text);
 asngn_err asngn_answer_run(asngn_ctx *c, asngn_turn_state *t, size_t *aux_tokens);
+bool asngn_native_answer_eligible(asngn_ctx *c, asngn_turn_state *t);
 asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asngn_task_kind task,
                                const asmodel_input *input, const char *gbnf, const char *schema,
                                const asmodel_tools *tools, int max_tokens, asngn_token_fn cb,

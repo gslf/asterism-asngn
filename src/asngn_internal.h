@@ -1063,6 +1063,8 @@ typedef struct asngn_turn_state {
   asngn_ledger_entry led;
   /* result */
   char          *answer;        /* owned                             */
+  char          *native_answer; /* buffered proposal, still subject to response gates */
+  int            native_answer_tokens, native_answer_cap;
   bool           capped, clarify;
   /* streaming */
   asngn_token_fn token_cb; void *token_ud;

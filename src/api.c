@@ -998,6 +998,7 @@ void asngn_turn_state_free(asngn_turn_state *t) {
   for (i = 0; i < t->tools_list_n; i++) free(t->tools_list[i]);
   free(t->tools_list);
   free(t->answer);
+  free(t->native_answer);
   memset(t, 0, sizeof *t);
 }
 

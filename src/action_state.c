@@ -44,3 +44,11 @@ bool asngn_coding_verification_unresolved(asngn_turn_state *t) {
   return asngn_coding_task(t->prof.task) && t->artifact_written &&
          (!t->verification_attempted || !asngn_verification_current(t));
 }
+
+/* Incomplete or denied work keeps the dedicated response pass, which receives
+ * the current runtime outcome instructions. Recheck immediately before use. */
+bool asngn_native_answer_eligible(asngn_ctx *c, asngn_turn_state *t) {
+  return !t->cancel && !t->continuation && !t->forced_answer && !t->authorization_blocked &&
+      !asngn_turn_expired(c, t) && !asngn_generation_needs_artifact(c, t) &&
+      (!t->artifact_written || (t->verification_attempted && asngn_verification_current(t)));
+}

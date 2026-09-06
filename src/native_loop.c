@@ -11,7 +11,9 @@ static const char instruction[] =
     "missing information. Use asterism_finish when ready to report results, including "
     "incomplete or failed work. Finishing a turn does not certify task success. "
     "Produce file content directly in tool arguments. Do not use draft markers. "
-    "The user response will be generated after the action phase.";
+    "You may instead return a final user-facing message when ready. It must contain no "
+    "tool invocation syntax. Report only observed outcomes and verification receipts. "
+    "A final message is a response proposal, not a task-success certificate.";
 
 static asngn_err native_round(asngn_ctx *c, asngn_turn_state *t, const asngn_prompt *seed,
                               asngn_native_history *h, asngn_native_contract *contract,
@@ -30,12 +32,17 @@ static asngn_err native_round(asngn_ctx *c, asngn_turn_state *t, const asngn_pro
   asngn_step steps[32] = {{0}};
   asmodel_tools tools = {.schemas = contract->schemas,
                          .count = contract->count,
-                         .choice = ASMODEL_TOOLS_REQUIRED,
+                         .choice = asngn_generation_needs_artifact(c, t) ? ASMODEL_TOOLS_REQUIRED : ASMODEL_TOOLS_AUTO,
                          .output = &calls};
-  e = asngn_native_input(c, t, seed, h, &status, messages, blocks, &input);
   char *text = NULL;
   int ti = 0, to = 0;
   int cap = c->cfg.s_decide.max_tokens > 0 ? c->cfg.s_decide.max_tokens : 1024;
+  int response_cap = asngn_detail_cap(c, t->detail);
+  if (response_cap > cap) response_cap = cap;
+  e = asngn_buf_printf(&status, "Response style: %s\nHard output ceiling: %d tokens; "
+                       "a final user response must fit within %d tokens.\n",
+                       asngn_detail_directive(t->detail), cap, response_cap);
+  if (e == ASNGN_OK) e = asngn_native_input(c, t, seed, h, &status, messages, blocks, &input);
   if (e == ASNGN_OK) {
     asngn_ledger_zones(&t->led, seed);
     t->led.pt_system += (size_t)asngn_models_count_tokens(c, t->gen_slot, status.data);
@@ -54,9 +61,21 @@ static asngn_err native_round(asngn_ctx *c, asngn_turn_state *t, const asngn_pro
                              NULL, NULL, &text, &ti, &to);
   }
   t->led.gt_decision += (size_t)(to > 0 ? to : 0);
-  free(text); /* Action narration is not an accepted user response. */
+  if (e == ASNGN_OK && !calls.count) {
+    if (!text || !text[strspn(text, " \t\r\n")] || !asngn_utf8_valid(text, strlen(text)))
+      e = asngn_seterr(c, ASNGN_ERR_PROTOCOL, "native response contains no usable text or action");
+    else {
+      asngn_step finish = {.kind = ASNGN_STEP_ANSWER};
+      e = asngn_action_apply(c, t, &finish, call_now, false, discover_now, done);
+      if (e == ASNGN_OK && to < response_cap) {
+        t->native_answer = text; text = NULL;
+        t->native_answer_tokens = to; t->native_answer_cap = response_cap;
+      }
+    }
+  }
+  free(text); /* Narration accompanying calls never becomes a user response. */
   if (e == ASNGN_OK && calls.count > ASNGN_NATIVE_HISTORY - h->count) e = ASNGN_ERR_CONTEXT;
-  if (e == ASNGN_OK) e = asngn_native_steps(c, t, contract, &calls, steps);
+  if (e == ASNGN_OK && calls.count) e = asngn_native_steps(c, t, contract, &calls, steps);
   if (e == ASNGN_OK && calls.count > 1 &&
       calls.count > (size_t)(c->cfg.max_tool_calls - t->tool_calls))
     e = asngn_seterr(c, ASNGN_ERR_LIMIT, "native batch exceeds the remaining tool budget");

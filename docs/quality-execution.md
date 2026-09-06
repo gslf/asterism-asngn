@@ -11,7 +11,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 |---|---|---|---|
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
-| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots, durable task recovery, explicit data conversion, cross-process workspace coordination |
+| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots/ignore syntax, durable task recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Direct native final responses, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, ranked role coverage, granular Asper/native-request traces, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
@@ -89,6 +89,12 @@ trials require actual resources. No real-model result has been produced here.
   changed files and before/after versions. Rechecks precede replacement; rollback
   preserves intervening external edits. This is optimistic conflict detection,
   not atomic compare-and-swap against arbitrary editors.
+- Workspace fingerprinting and retrieval share an authorized tree walk and ignore
+  policy. Global quotas apply before file callbacks, even within flat directories.
+  Hashing streams through 8 KiB; failed or incomplete snapshots expose no fingerprint.
+  Retrieval attaches full-file/chunk hashes and exact ranges and reports partial
+  scans. See [workspace boundaries](workspace-tree.md) for the remaining incremental,
+  ignore-pattern, hard-link and platform limits.
 - Asper record store format 2 rejects legacy/unframed data, complete corruption and
   impossible replay transitions. Checked snapshots and compaction markers bind
   backups by hash. Recovery validates all backups before restoring any target;
@@ -150,9 +156,9 @@ trials require actual resources. No real-model result has been produced here.
 ## Validation at this checkpoint
 
 - Native CPU build against the pinned llama.cpp submodule compiles the actual
-  adapters and passes 39/39 fake-based tests; no weights were loaded.
-- Integrated no-llama suite: 39/39 CTest executables passed.
-- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 39/39 passed.
+  adapters and passes 40/40 fake-based tests; no weights were loaded.
+- Integrated no-llama suite: 40/40 CTest executables passed.
+- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 40/40 passed.
 - Standalone Asper: 24/24; astools: 27/27; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
@@ -217,6 +223,11 @@ trials require actual resources. No real-model result has been produced here.
   llama.cpp grammar acceptance. Context traces are deterministic, omit source text
   and report capped detail; a pressure test retains whole file events while
   bounding ring/batch bytes.
+- Eleven workspace cases cover traversal and byte quotas, descriptor containment,
+  changed files/directories, aliases/FIFO, stable content versions and the corpus
+  cap. A separate probe against the previous committed build reproduces the flat
+  directory bug: 264 MiB was accepted despite the 256 MiB limit; the new snapshot
+  fails with no fingerprint. The Windows handle walker remains unvalidated here.
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.

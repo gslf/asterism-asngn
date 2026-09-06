@@ -12,6 +12,7 @@ set(ASNGN_TEST_PROGRAMS
   test_log
   test_redact
   test_verification
+  test_workspace_tree
   test_work
   test_steps
   test_grammar

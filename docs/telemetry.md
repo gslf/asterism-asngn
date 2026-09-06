@@ -20,6 +20,7 @@ and unknown `data` fields (forward compatibility).
 | `fold`        | `mode` ("compressor" \| "extractive")                  |
 | `evidence_selection` | `schema`, `policy`, `source` (object hash), `source_bytes`, `selected_bytes`, `diagnostic_markers`, `excerpt_budget_bytes`, `compressor_used`, `spans` (`start`, `end`, `reason`) |
 | `context_selection` | `schema`, `policy`, `scope`, `model`, `phase`, `observed_snapshot`, `memory_owner`, `count_basis`, budgets, `zone_tokens` (attribution quality unknown), prompt hashes, fragment decisions and `items_omitted`; no source text |
+| `retrieval_scan` | `schema`, `policy`, `entries`, `files`, `excluded`, `ignored`, `chunks`, `complete`, `error`; completeness describes traversal, not semantic evidence coverage |
 | `judge`       | `score` (0–10), `tokens`                               |
 | `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated), `arguments_sha256`, `package_sha256`, `snapshot` — inspect full redacted arguments via `asngn_approval_get`, answer via `asngn_confirm` |
 | `authorization` | `granted`, `profile` — a profile denied an action; the turn may continue and report the required grant |

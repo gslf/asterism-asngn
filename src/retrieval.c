@@ -5,146 +5,10 @@
 #include <string.h>
 #include "asngn_internal.h"
 #include "asper.h"
-#define CODE_MAX 1024
-#define CHUNK 2048
+#include "retrieval.h"
+#include "execution.h"
 
-typedef struct {
-  char *path, *text;
-  size_t line;
-  uint8_t hash[32];
-  float *vec;
-} chunk;
-typedef struct {
-  chunk *v;
-  size_t n;
-  int dim;
-  uint8_t model[32];
-} code_index;
-void asngn_code_index_free(void *ptr) {
-  code_index *ix = ptr;
-  if (!ix)
-    return;
-  for (size_t i = 0; i < ix->n; i++) {
-    free(ix->v[i].path);
-    free(ix->v[i].text);
-    free(ix->v[i].vec);
-  }
-  free(ix->v);
-  free(ix);
-}
-static int names(const void *a, const void *b) {
-  return strcmp(*(char *const *)a, *(char *const *)b);
-}
-static bool code_file(const char *name) {
-  const char *ext = strrchr(name, '.');
-  const char *allowed[] = {".c",  ".h",  ".cpp", ".hpp", ".rs",  ".go",
-                           ".py", ".js", ".jsx", ".ts",  ".tsx", ".java",
-                           ".cs", ".sh", ".lua", ".rb",  ".sql", ".swift",
-                           ".kt", ".md", ".json", ".yaml", ".yml", ".toml", ".cmake", NULL};
-  if (!strcmp(name, "CMakeLists.txt") || !strcmp(name, "Makefile") ||
-      !strcmp(name, "Dockerfile")) return true;
-  if (!ext || name[0] == '.')
-    return false;
-  for (size_t i = 0; allowed[i]; i++)
-    if (!strcmp(ext, allowed[i]))
-      return true;
-  return false;
-}
-static bool skip(const char *name) {
-  return name[0] == '.' || !strcmp(name, "node_modules") ||
-         !strcmp(name, "build") || !strcmp(name, "dist") ||
-         !strcmp(name, "target") || !strcmp(name, "vendor") ||
-         !strcmp(name, "deps") || !strcmp(name, "__pycache__");
-}
-static bool stopped(asngn_ctx *c, asngn_turn_state *t) {
-  return t->cancel || (t->deadline_mono > 0 &&
-                       asngn_clock_mono_ms(&c->clock) >= t->deadline_mono);
-}
-static void scan_file(code_index *ix, const char *root, const char *path) {
-  for (size_t i = 0; i < ix->n; i++)
-    if (!strcmp(ix->v[i].path, path)) return;
-      char *full = os_path_join(root, path);
-      char *data = NULL;
-      size_t len = 0;
-      if (path && asngn_workspace_read(root, path, 262144, &data, &len) == ASNGN_OK &&
-          !memchr(data, 0, len)) {
-        size_t off = 0, line = 1;
-        while (off < len && ix->n < CODE_MAX) {
-          size_t end = off + CHUNK;
-          if (end > len)
-            end = len;
-          if (end < len) {
-            while (end > off && data[end - 1] != '\n')
-              end--;
-            if (end == off)
-              end = off + CHUNK;
-          }
-          while (end < len && ((unsigned char)data[end] & 0xc0) == 0x80)
-            end++;
-          chunk *v = &ix->v[ix->n];
-          v->path = asngn_strdup(path);
-          v->text = malloc(end - off + 1);
-          v->line = line;
-          if (!v->path || !v->text) {
-            free(v->path);
-            free(v->text);
-            memset(v, 0, sizeof *v);
-            break;
-          }
-          memcpy(v->text, data + off, end - off);
-          v->text[end - off] = 0;
-          asngn_sha256(v->text, end - off, v->hash);
-          ix->n++;
-          for (; off < end; off++)
-            if (data[off] == '\n')
-              line++;
-        }
-      }
-      free(data);
-      free(full);
- }
-static void scan(asngn_ctx *c, asngn_turn_state *t, code_index *ix,
-                 const char *root, const char *rel, unsigned depth) {
-  char *dir = os_path_join(root, rel), **files = NULL, **dirs = NULL;
-  size_t nf = 0, nd = 0;
-  if (!dir || depth > 32 || ix->n >= CODE_MAX || stopped(c, t)) {
-    free(dir);
-    return;
-  }
-  (void)os_list_dir(dir, &files, &nf);
-  (void)os_list_dirs(dir, &dirs, &nd);
-  if (nf > 1)
-    qsort(files, nf, sizeof *files, names);
-  if (nd > 1)
-    qsort(dirs, nd, sizeof *dirs, names);
-  for (size_t i = 0; i < nf; i++) {
-    if (code_file(files[i]) && ix->n < CODE_MAX && !stopped(c, t)) {
-      char *path = os_path_join(rel, files[i]);
-      if (path) scan_file(ix, root, path);
-      free(path);
-    }
-    free(files[i]);
-  }
-  for (size_t i = 0; i < nd; i++) {
-    if (!skip(dirs[i])) {
-      char *next = os_path_join(rel, dirs[i]);
-      char *full = os_path_join(root, next ? next : "");
-      char *real = full ? os_realpath(full) : NULL;
-      /* Do not follow directory aliases/cycles. */
-      if (next && real && full && !strcmp(real, full))
-        scan(c, t, ix, root, next, depth + 1);
-      free(real);
-      free(full);
-      free(next);
-    }
-    free(dirs[i]);
-  }
-  free(files);
-  free(dirs);
-  free(dir);
-}
-static asngn_err query_field(asngn_buf *q, const char *label, const char *text,
-                             size_t cap) {
+static asngn_err query_field(asngn_buf *q, const char *label, const char *text, size_t cap) {
   const char *s = text ? text : "";
   size_t n = strlen(s);
   if (n > cap) {
@@ -153,40 +17,31 @@ static asngn_err query_field(asngn_buf *q, const char *label, const char *text,
       n--;
   }
   asngn_err e = asngn_buf_printf(q, "%s: ", label);
-  if (e == ASNGN_OK)
-    e = asngn_buf_append(q, s, n);
-  if (e == ASNGN_OK)
-    e = asngn_buf_appendc(q, '\n');
+  if (e == ASNGN_OK) e = asngn_buf_append(q, s, n);
+  if (e == ASNGN_OK) e = asngn_buf_appendc(q, '\n');
   return e;
 }
-asngn_err asngn_retrieval_query(asngn_session *s, asngn_turn_state *t,
-                                char **out) {
+asngn_err asngn_retrieval_query(asngn_session *s, asngn_turn_state *t, char **out) {
   asngn_buf q;
   asngn_err e;
   asngn_buf_init(&q);
   *out = NULL;
   e = query_field(&q, "active_file", s->active_file, 1024);
   if (e == ASNGN_OK)
-    e = query_field(&q, "objective",
-                    s->objective ? s->objective : s->last_user_msg, 1024);
-  if (e == ASNGN_OK)
-    e = query_field(&q, "message", t->user_msg, 1024);
+    e = query_field(&q, "objective", s->objective ? s->objective : s->last_user_msg, 1024);
+  if (e == ASNGN_OK) e = query_field(&q, "message", t->user_msg, 1024);
   size_t first = s->log_n > 4 ? s->log_n - 4 : 0;
   for (size_t i = first; e == ASNGN_OK && i < s->log_n; i++) {
-    if (!strcmp(s->log[i].text, t->user_msg))
-      continue;
+    if (!strcmp(s->log[i].text, t->user_msg)) continue;
     e = query_field(&q, s->log[i].role, s->log[i].text, 128);
   }
   if (e == ASNGN_OK && s->ctx->asper_ok) {
     char *checkpoint = NULL;
-    if (asper_checkpoint_load(s->ctx->asper, s->slug, &checkpoint) ==
-            ASPER_OK &&
-        checkpoint)
+    if (asper_checkpoint_load(s->ctx->asper, s->slug, &checkpoint) == ASPER_OK && checkpoint)
       e = query_field(&q, "recent_checkpoint", checkpoint, 256);
     asper_free(checkpoint);
   }
-  if (e == ASNGN_OK)
-    *out = asngn_buf_detach(&q);
+  if (e == ASNGN_OK) *out = asngn_buf_detach(&q);
   asngn_buf_free(&q);
   return e;
 }
@@ -198,26 +53,28 @@ static void embed_candidates(asngn_ctx *c, asngn_turn_state *t, code_index *ix,
   size_t selected[32], count = 0, ranked_n = 0;
   const char *texts[32];
   asper_search_hit ranked[64];
-  if (ix->dim <= 0 || stopped(c,t)) return;
+  if (ix->dim <= 0 || asngn_code_stopped(c, t)) return;
   for (size_t i = 0; t->s->active_file && i < ix->n && count < 8; i++)
-    if (!ix->v[i].vec && !strcmp(ix->v[i].path,t->s->active_file)) selected[count++] = i;
-  (void)asper_hybrid_search(docs,ix->n,t->retrieval_query,NULL,0,64,ranked,&ranked_n);
-  for (size_t k = 0; k < ranked_n+ix->n && count < 32; k++) {
-    size_t i = k < ranked_n ? ranked[k].index : k-ranked_n;
+    if (!ix->v[i].vec && !strcmp(ix->v[i].path, t->s->active_file)) selected[count++] = i;
+  (void)asper_hybrid_search(docs, ix->n, t->retrieval_query, NULL, 0, 64, ranked, &ranked_n);
+  for (size_t k = 0; k < ranked_n + ix->n && count < 32; k++) {
+    size_t i = k < ranked_n ? ranked[k].index : k - ranked_n;
     bool have = ix->v[i].vec != NULL;
-    for (size_t j = 0; j < count; j++) if (selected[j] == i) have = true;
+    for (size_t j = 0; j < count; j++)
+      if (selected[j] == i) have = true;
     if (!have) selected[count++] = i;
   }
-  if (!count || (size_t)ix->dim > SIZE_MAX/count/sizeof(float)) return;
-  for (size_t i = 0; i < count; i++) texts[i] = ix->v[selected[i]].text;
-  float *vectors = calloc(count*(size_t)ix->dim,sizeof *vectors);
+  if (!count || (size_t)ix->dim > SIZE_MAX / count / sizeof(float)) return;
+  for (size_t i = 0; i < count; i++)
+    texts[i] = ix->v[selected[i]].text;
+  float *vectors = calloc(count * (size_t)ix->dim, sizeof *vectors);
   if (!vectors) return;
   asmodel_embedding_info info = {0};
-  (void)asngn_models_embed_many(c,texts,count,0,vectors,&info);
+  (void)asngn_models_embed_many(c, texts, count, 0, vectors, &info);
   for (size_t i = 0; i < info.completed && i < count; i++) {
     chunk *v = &ix->v[selected[i]];
-    v->vec = malloc((size_t)ix->dim*sizeof *v->vec);
-    if (v->vec) memcpy(v->vec,vectors+i*(size_t)ix->dim,(size_t)ix->dim*sizeof *v->vec);
+    v->vec = malloc((size_t)ix->dim * sizeof *v->vec);
+    if (v->vec) memcpy(v->vec, vectors + i * (size_t)ix->dim, (size_t)ix->dim * sizeof *v->vec);
     docs[selected[i]].vector = v->vec;
   }
   free(vectors);
@@ -231,17 +88,18 @@ asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
   float *qv = NULL;
   asngn_buf block;
   asngn_err e = ASNGN_OK;
-  if (!ix)
-    return ASNGN_ERR_NOMEM;
+  if (!ix) return ASNGN_ERR_NOMEM;
   ix->v = calloc(CODE_MAX, sizeof *ix->v);
   if (!ix->v) {
     free(ix);
     return ASNGN_ERR_NOMEM;
   }
-  /* Admit the active file before the corpus cap, even in large repositories. */
-  if (t->s->active_file && *t->s->active_file)
-    scan_file(ix, t->s->workspace.canonical_root, t->s->active_file);
-  scan(c, t, ix, t->s->workspace.canonical_root, "", 0);
+  e = asngn_code_scan(c, t, ix);
+  if (e != ASNGN_OK && e != ASNGN_ERR_LIMIT) {
+    asngn_code_index_free(ix);
+    return e;
+  }
+  e = ASNGN_OK; /* A capped corpus remains explicitly partial in the scan trace. */
   ix->dim = asngn_models_embed_dim(c);
   asngn_models_embed_hash(c, ix->model);
   if (old && old->dim == ix->dim && !memcmp(old->model, ix->model, 32))
@@ -255,9 +113,8 @@ asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
   asngn_code_index_free(old);
   t->s->code_index = ix;
   docs = calloc(ix->n ? ix->n : 1, sizeof *docs);
-  if (!docs)
-    return ASNGN_ERR_NOMEM;
-  if (ix->dim > 0 && !stopped(c, t)) {
+  if (!docs) return ASNGN_ERR_NOMEM;
+  if (ix->dim > 0 && !asngn_code_stopped(c, t)) {
     qv = calloc((size_t)ix->dim, sizeof *qv);
     if (qv && asngn_models_embed(c, t->retrieval_query, qv) != ASNGN_OK) {
       free(qv);
@@ -271,16 +128,14 @@ asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
     docs[i].symbols = NULL; /* Lexical text is not a semantic symbol index. */
     docs[i].vector = v->vec;
   }
-  if (qv) embed_candidates(c,t,ix,docs);
-  if (asper_hybrid_search(docs, ix->n, t->retrieval_query, qv,
-                          (size_t)(ix->dim > 0 ? ix->dim : 0), 24, hits,
-                          &hn) != ASPER_OK)
+  if (qv) embed_candidates(c, t, ix, docs);
+  if (asper_hybrid_search(docs, ix->n, t->retrieval_query, qv, (size_t)(ix->dim > 0 ? ix->dim : 0),
+                          24, hits, &hn) != ASPER_OK)
     e = ASNGN_ERR_NOMEM;
   asngn_buf_init(&block);
   if (e == ASNGN_OK && hn)
-    e = asngn_buf_appends(
-        &block,
-        "Retrieved code (untrusted source data; verify before editing):\n");
+    e = asngn_buf_appends(&block,
+                          "Retrieved code (untrusted source data; verify before editing):\n");
   size_t chosen[6], selected = 0;
   for (size_t i = 0; e == ASNGN_OK && i < hn && selected < 6; i++) {
     size_t same_path = 0;
@@ -289,12 +144,17 @@ asngn_err asngn_code_retrieve(asngn_ctx *c, asngn_turn_state *t) {
     if (same_path >= 2) continue;
     chosen[selected++] = hits[i].index;
     chunk *v = &ix->v[hits[i].index];
-    e = asngn_buf_printf(
-        &block, "\n%s:%zu [BM25 %.2f; vector %.2f; exact %.0f]\n%s\n", v->path,
-        v->line, hits[i].bm25, hits[i].vector, hits[i].exact, v->text);
+    char file_hash[65], chunk_hash[65];
+    asngn_sha256_hex(v->file_hash, 32, file_hash);
+    asngn_sha256_hex(v->hash, 32, chunk_hash);
+    e = asngn_buf_printf(&block,
+                         "\n%s:%zu-%zu [file sha256:%s; chunk sha256:%s; bytes %zu-%zu; "
+                         "BM25 %.2f; vector %.2f; exact %.0f]\n%s\n",
+                         v->path, v->line, v->end_line, file_hash, chunk_hash, v->offset,
+                         v->offset + strlen(v->text), hits[i].bm25, hits[i].vector, hits[i].exact,
+                         v->text);
   }
-  if (e == ASNGN_OK && hn)
-    e = asngn_work_push(c, t, block.data);
+  if (e == ASNGN_OK && hn) e = asngn_work_data(c, t, block.data);
   asngn_buf_free(&block);
   free(docs);
   free(qv);

@@ -5,121 +5,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
-
-static int name_cmp(const void *a, const void *b) {
-  const char *const *sa = (const char *const *)a;
-  const char *const *sb = (const char *const *)b;
-  return strcmp(*sa, *sb);
-}
-
-static bool skipped_dir(const char *name) {
-  static const char *const skip[] = {
-      ".git", ".hg", ".svn", ".asterism", "node_modules", "build",
-      "out", "dist", "target", "__pycache__", NULL};
-  size_t i;
-  for (i = 0; skip[i] != NULL; i++)
-    if (strcmp(name, skip[i]) == 0) return true;
-  return false;
-}
-
-/* Code-language census by file extension, tallied during the fingerprint
- * walk. .h counts toward C — indistinguishable from C++ headers without
- * parsing, and close enough for a routing signal. */
-static const struct { const char *ext; const char *lang; } ws_langs[] = {
-    {"c", "c"},      {"h", "c"},       {"cpp", "cpp"},  {"cc", "cpp"},
-    {"cxx", "cpp"},  {"hpp", "cpp"},   {"hh", "cpp"},   {"py", "python"},
-    {"rs", "rust"},  {"go", "go"},     {"js", "js"},    {"jsx", "js"},
-    {"mjs", "js"},   {"ts", "ts"},     {"tsx", "ts"},   {"java", "java"},
-    {"cs", "csharp"},{"rb", "ruby"},   {"php", "php"},  {"sh", "shell"},
-    {"swift", "swift"}, {"kt", "kotlin"}, {"zig", "zig"}, {NULL, NULL}};
-
-#define WS_LANG_N (sizeof ws_langs / sizeof ws_langs[0] - 1)
-
-typedef struct {
-  size_t files, bytes;
-  bool incomplete;
-  size_t ext_count[WS_LANG_N];
-} ws_scan;
-
-static void ws_scan_file(ws_scan *scan, const char *name, size_t len) {
-  const char *dot = strrchr(name, '.');
-  size_t i;
-  scan->files++;
-  scan->bytes += len;
-  if (dot == NULL || dot[1] == '\0') return;
-  for (i = 0; i < WS_LANG_N; i++) {
-    const char *e = ws_langs[i].ext, *p = dot + 1;
-    while (*e != '\0' && *p != '\0' &&
-           (char)(*p >= 'A' && *p <= 'Z' ? *p - 'A' + 'a' : *p) == *e) {
-      e++; p++;
-    }
-    if (*e == '\0' && *p == '\0') { scan->ext_count[i]++; return; }
-  }
-}
-
-static void ws_scan_finish(const ws_scan *scan, asngn_repo_stats *out) {
-  /* dominant language = argmax of per-language counts (extensions that
-   * map to one language pool their tallies) */
-  size_t lang_count[WS_LANG_N];
-  size_t i, j, best = 0, best_count = 0;
-  memset(lang_count, 0, sizeof lang_count);
-  for (i = 0; i < WS_LANG_N; i++) {
-    for (j = 0; j <= i; j++)
-      if (strcmp(ws_langs[j].lang, ws_langs[i].lang) == 0) break;
-    lang_count[j] += scan->ext_count[i];
-  }
-  out->files = scan->files;
-  out->bytes = scan->bytes;
-  out->language[0] = '\0';
-  for (i = 0; i < WS_LANG_N; i++) {
-    if (lang_count[i] > best_count) { best = i; best_count = lang_count[i]; }
-  }
-  if (best_count > 0)
-    snprintf(out->language, sizeof out->language, "%s", ws_langs[best].lang);
-  out->loaded = true;
-}
-
-static void hash_tree(asngn_sha256_ctx *h, ws_scan *scan, const char *root,
-                      const char *relative, unsigned depth) {
-  char *dir = relative[0] != '\0' ? os_path_join(root, relative)
-                                   : asngn_strdup(root);
-  char **files = NULL, **dirs = NULL;
-  size_t nf = 0, nd = 0, i;
-  if (dir == NULL || depth > 64 || scan->files > 65536 ||
-      scan->bytes > 256 * 1024 * 1024) {
-    scan->incomplete = true; free(dir); return;
-  }
-  if (os_list_dir(dir, &files, &nf) != ASNGN_OK) { nf = 0; scan->incomplete = true; }
-  if (os_list_dirs(dir, &dirs, &nd) != ASNGN_OK) { nd = 0; scan->incomplete = true; }
-  if (nf > 1) qsort(files, nf, sizeof *files, name_cmp);
-  if (nd > 1) qsort(dirs, nd, sizeof *dirs, name_cmp);
-  for (i = 0; i < nf; i++) {
-    char *rel = relative[0] != '\0' ? os_path_join(relative, files[i])
-                                     : asngn_strdup(files[i]);
-    char *full = rel != NULL ? os_path_join(root, rel) : NULL;
-    char *data = NULL;
-    size_t len = 0;
-    if (full != NULL && asngn_workspace_read(root, rel, 8 * 1024 * 1024,
-                                                &data, &len) == ASNGN_OK) {
-      uint64_t n = (uint64_t)len;
-      asngn_sha256_update(h, rel, strlen(rel) + 1);
-      asngn_sha256_update(h, &n, sizeof n);
-      asngn_sha256_update(h, data, len);
-      ws_scan_file(scan, files[i], len);
-    } else scan->incomplete = true;
-    free(data); free(full); free(rel); free(files[i]);
-  }
-  for (i = 0; i < nd; i++) {
-    if (!skipped_dir(dirs[i])) {
-      char *rel = relative[0] != '\0' ? os_path_join(relative, dirs[i])
-                                       : asngn_strdup(dirs[i]);
-      if (rel != NULL) hash_tree(h, scan, root, rel, depth + 1);
-      free(rel);
-    }
-    free(dirs[i]);
-  }
-  free(files); free(dirs); free(dir);
-}
+#include "workspace_tree.h"
 
 static void copy_trimmed(char *dst, size_t cap, const char *src) {
   size_t n = src != NULL ? strcspn(src, "\r\n") : 0;
@@ -232,8 +118,9 @@ static void hash_optional_file(asngn_sha256_ctx *h, const char *root,
   size_t len = 0;
   asngn_sha256_update(h, name, strlen(name) + 1);
   if (path != NULL && asngn_workspace_read(root, name, 1024 * 1024, &data, &len) == ASNGN_OK) {
-    uint64_t n = (uint64_t)len;
-    asngn_sha256_update(h, &n, sizeof n);
+    unsigned char size[8];
+    for (size_t i = 0; i < sizeof size; i++) size[i] = (unsigned char)((uint64_t)len >> (i * 8));
+    asngn_sha256_update(h, size, sizeof size);
     asngn_sha256_update(h, data, len);
   }
   free(data); free(path);
@@ -274,15 +161,15 @@ asngn_err asngn_workspace_snapshot(asngn_workspace_info *workspace,
                                       asngn_repo_stats *stats) {
   asngn_sha256_ctx h;
   uint8_t digest[32];
-  ws_scan scan;
+  if (stats) memset(stats, 0, sizeof *stats);
+  if (workspace) workspace->fingerprint[0] = '\0';
   if (workspace == NULL ||
       workspace->canonical_root[0] == '\0')
     return ASNGN_ERR_INVALID;
-  memset(&scan, 0, sizeof scan);
   workspace->head[0] = workspace->branch[0] = '\0';
   git_identity(workspace);
   asngn_sha256_init(&h);
-  asngn_sha256_update(&h, "asngn-workspace-v1", 18);
+  asngn_sha256_update(&h, "asngn-workspace-v2", 18);
   asngn_sha256_update(&h, workspace->canonical_root,
                       strlen(workspace->canonical_root) + 1);
   asngn_sha256_update(&h, workspace->repository_root,
@@ -298,11 +185,10 @@ asngn_err asngn_workspace_snapshot(asngn_workspace_info *workspace,
                       strlen(workspace->build_adapter) + 1);
   hash_optional_file(&h, workspace->repository_root, ".gitignore");
   hash_optional_file(&h, workspace->canonical_root, ".asterismignore");
-  hash_tree(&h, &scan, workspace->canonical_root, "", 0);
-  if (scan.incomplete) { workspace->fingerprint[0] = 0; return ASNGN_ERR_LIMIT; }
+  asngn_err e = asngn_workspace_tree_hash(workspace->canonical_root, &h, stats);
+  if (e != ASNGN_OK) { workspace->fingerprint[0] = 0; return e; }
   asngn_sha256_final(&h, digest);
   asngn_sha256_hex(digest, sizeof digest, workspace->fingerprint);
-  if (stats) ws_scan_finish(&scan, stats);
   return ASNGN_OK;
 }
 
@@ -346,7 +232,7 @@ static asngn_err workspace_info_build(asngn_ctx *c, const char *selected,
   snprintf(out->repository_root, sizeof out->repository_root, "%s",
            repository);
   snprintf(out->ignore_rules, sizeof out->ignore_rules,
-           ".gitignore;.asterismignore;built-in-generated-dirs");
+           "built-in-v1;ignore-file-content-hashed");
   if (project_id != NULL && project_id[0] != '\0')
     snprintf(out->project_id, sizeof out->project_id, "%s", project_id);
   else

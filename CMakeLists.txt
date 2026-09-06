@@ -155,6 +155,8 @@ set(ASNGN_SOURCES
   src/turn_journal.c
   src/workspace.c
   src/workspace_read.c
+  src/workspace_tree.c
+  src/workspace_fingerprint.c
   src/ledger.c
   src/operation_replay.c
   src/operations.c
@@ -168,6 +170,7 @@ set(ASNGN_SOURCES
   src/context_budget.c
   src/context_history.c
   src/retrieval.c
+  src/retrieval_index.c
   src/digest.c
   src/excerpt.c
   src/blob.c
@@ -216,9 +219,9 @@ set(ASNGN_SOURCES
   src/os_common.c
 )
 if(WIN32)
-  list(APPEND ASNGN_SOURCES src/os_win32.c)
+  list(APPEND ASNGN_SOURCES src/os_win32.c src/workspace_tree_win32.c)
 else()
-  list(APPEND ASNGN_SOURCES src/os_posix.c)
+  list(APPEND ASNGN_SOURCES src/os_posix.c src/workspace_tree_posix.c)
 endif()
 if(ASNGN_WITH_LLAMA)
   # The guard shim is C++: it is the only place a C++ exception escaping

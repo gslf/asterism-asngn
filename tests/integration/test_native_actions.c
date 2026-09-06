@@ -5,6 +5,7 @@
 
 static void inspect_request_events(eng_fx *f, bool rejected) {
   char **events = NULL, requests[32][37];
+  bool closed[32] = {0};
   size_t count = 0, request_n = 0, outcomes = 0, native = 0;
   ASSERT_OK(asngn_telemetry_tail(f->c, 256, &events, &count));
   for (size_t i = 0; i < count; i++) {
@@ -34,8 +35,8 @@ static void inspect_request_events(eng_fx *f, bool rejected) {
       ASSERT_TRUE(asngn_xuuid(asngn_xfield(v, "span"), span));
       size_t j = 0;
       while (j < request_n && strcmp(span, requests[j])) j++;
-      ASSERT_TRUE(j < request_n && requests[j][0]);
-      requests[j][0] = 0; /* A second outcome cannot match an already closed span. */
+      ASSERT_TRUE(j < request_n && !closed[j]);
+      closed[j] = true; /* A second outcome cannot match an already closed span. */
       ASSERT_TRUE(asngn_xbool(asngn_xfield(data, "runtime_dispatch_attempted"), &dispatched));
       ASSERT_EQ_INT(dispatched, !rejected);
       ASSERT_EQ_STR(asngn_xstr(asngn_xfield(data, "outcome")),
@@ -46,6 +47,31 @@ static void inspect_request_events(eng_fx *f, bool rejected) {
   }
   ASSERT_EQ_INT(outcomes, request_n);
   ASSERT_TRUE(rejected ? outcomes == 1 : outcomes >= 4 && native == 2);
+  char *path = os_path_join(f->c->root,"operations.xcdn");
+  xcdn_document_t *operations = NULL;
+  ASSERT_TRUE(path);
+  ASSERT_OK(asngn_wal_load(f->c,path,&operations));
+  for (size_t i = 0; i < request_n; i++) {
+    size_t reserved = 0, settled = 0;
+    char operation_id[37] = {0};
+    for (size_t j = 0; operations && j < operations->values_len; j++) {
+      const xcdn_value_t *v = operations->values[j]->value;
+      const char *request = asngn_xstr(asngn_xfield(v,"request_id"));
+      if (!request || strcmp(request,requests[i])) continue;
+      const char *state = asngn_xstr(asngn_xfield(v,"state"));
+      if (!strcmp(state,"reserved")) {
+        reserved++;
+        const char *id = asngn_xstr(asngn_xfield(v,"id"));
+        ASSERT_TRUE(asngn_uuid_valid(id)); strcpy(operation_id,id);
+      } else {
+        settled++;
+        ASSERT_EQ_STR(asngn_xstr(asngn_xfield(v,"id")),operation_id);
+      }
+    }
+    ASSERT_EQ_INT(reserved,rejected ? 0 : 1);
+    ASSERT_EQ_INT(settled,reserved);
+  }
+  free(path); xcdn_document_free(operations);
   asngn_strings_free(events, count);
 }
 

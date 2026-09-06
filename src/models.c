@@ -190,6 +190,7 @@ asngn_err asngn_models_generate_input(asngn_ctx *c, int slot, asngn_task_kind ta
   asngn_context_diagnostics budget = {0};
   char request[37];
   asngn_uuid_v4(request);
+  p.request_id = request;
   e=asngn_context_validate_input(c,slot,input,p.max_tokens,extra,&budget);
   char *trace = asngn_request_trace(c,turn,slot,task,input,grammar,&p,&budget,e);
   if (trace) asngn_tele_emit(c,"request_context",request,turn ? turn->led.turn_id : NULL,

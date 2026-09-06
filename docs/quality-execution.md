@@ -13,7 +13,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, bounded Git identity and registered worktree resolution, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots/ignore syntax, other Git metadata layouts, durable task recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
-| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper traces, durable operation/trace correlation, fine-grained dependencies and task hypotheses |
+| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, generation trace/consumption correlation, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper and embedding traces, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts and explicit partial-outcome reconciliation | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
@@ -61,7 +61,7 @@ trials require actual resources. No real-model result has been produced here.
   text proposal can now reuse the response validation path without a separate
   generation, retaining configured classification, output gates and review. See
   [native actions](native-actions.md) for bounds and unmeasured costs.
-- Output contracts now travel explicitly through asmodel ABI 7. The remote
+- Output contracts now travel explicitly through asmodel ABI 8. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
   GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns
   its curation/review/recall schema and exact output wrapper. Astools exports typed
@@ -85,7 +85,11 @@ trials require actual resources. No real-model result has been produced here.
 - Operation reservations are durable before inference, including shared Asper
   generation and embeddings. Unknown usage retains its reservation. Conversation
   rollback cannot refund consumption. Replay validates reserve/settle identities
-  and rejects double settlement. Session-lifetime cost and monetary reconciliation
+  and rejects double settlement. Schema-2 records correlate generation request
+  spans with accounting and decode strict JSON frame by frame, avoiding the full
+  history DOM. Invalid metadata or uncertain writes block further admission;
+  failed replay cannot publish partial accounting. See [consumption](operations.md).
+  Session-lifetime cost and monetary reconciliation
   still need a dedicated operation projection.
 - The owner store has a single-writer lock. Action/consumption WALs have
   version-2 length/header/payload SHA-256 framing, per-frame and total-log quotas. Complete corrupt frames
@@ -183,8 +187,10 @@ The last complete external-sandbox checkpoint was `7e62625`: 48/48 integrated
 tests passed in native CPU and ASan/UBSan/LeakSanitizer builds, and all four
 components passed from clean clones. No weights were loaded.
 
-The subsequent ancestor-marker correction and request traces are built against
-the same pinned llama.cpp and sibling revisions. Local validation runs use
+The subsequent ancestor-marker correction, request traces and consumption
+correlation are built against the same pinned llama.cpp. asmodel now uses ABI 8;
+the coordinated manifest and Asper's standalone pin identify the updated contract.
+Local validation runs use
 ASan/UBSan with leak detection disabled. The automatic permission reviewer timed
 out twice when asked to run the current tests outside the sandbox. Current
 LeakSanitizer, HTTP-wire/SDK live and bubblewrap acceptance checks therefore
@@ -205,6 +211,17 @@ Four trace unit cases cover role/correlation metadata, omitted-item hashing,
 framed boundaries, output constraints and invalid structures. Native integration
 also correlates request/result spans and proves context rejection performs no
 inference. Trace failures remain best-effort telemetry, not a task outcome.
+The native integration additionally joins each dispatched generation to exactly
+one durable reservation and settlement, and finds none for context rejection.
+Six accounting cases cover unknown/cancelled usage, immutable correlation, changed
+metadata, duplicate/NUL/unknown fields, arithmetic overflow, uncertain sync,
+interleaved settlement across hash-table growth and failed replay publication.
+Invalid complete frames cannot be joined across record boundaries or discarded
+as an incomplete tail. The component replay comparison and its sanitizer limits
+are documented with [raw measurements](operations.md#component-measurement).
+Standalone Asper passes 30/30 with the updated runtime and ASan/UBSan; asmodel
+passes 6/6 available restricted checks in ordinary and sanitizer builds. Its HTTP
+check remains pending with the other external-sandbox validation.
 
 - Standalone Asper: 30/30; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider

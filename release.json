@@ -10,16 +10,16 @@
     },
     "asper": {
       "repository": "gslf/asterism-asper",
-      "revision": "8c395981676c6052cd004ddf48f7db05f72d682c",
+      "revision": "48f6720c93b7c9beb58f33c3e10b75a7ff094eb5",
       "headers": {
         "include/asper.h": "f9f0ec8c023b7b2eba0a42ab2474c25158fd24bbf641a3858b4355d00139c345"
       }
     },
     "asmodel": {
       "repository": "gslf/asterism-asmodel",
-      "revision": "6627f89217bb31b11e6246521e83fbfa7dda6d0d",
+      "revision": "2d0e3db80da12d5a52a335dec02e25c68d15b06b",
       "headers": {
-        "include/asmodel.h": "d4c7e386dcb10466d4f49ca18f9881c8e586307da7d0f0560093b19a00b09db5",
+        "include/asmodel.h": "2a54a1c9d9ad1ec8647d01c84653390140bb203475efbc2c085291b1f69c291e",
         "include/asmodel_json.h": "2c52a56edc9c558065681a0a181582999bd15c71b457f0b908de531023ba8294"
       }
     },

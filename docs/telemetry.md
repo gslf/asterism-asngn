@@ -39,3 +39,5 @@ are dropped. A telemetry failure never fails the turn that emitted it.
 See [selection trace semantics](evidence-context.md). Consumption reservations
 and settlements are durable operation records; conversation commits and
 best-effort telemetry do not replace that accounting.
+Generation spans correlate with the durable `request_id`, while the accounting
+operation keeps its own identity. See [record and replay semantics](operations.md).

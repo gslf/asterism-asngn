@@ -1,73 +1,69 @@
-/* Reconcile usage by operation identity, not by blindly summing log deltas. */
-#include "asngn_internal.h"
-#include "xcdn.h"
-#include <limits.h>
+/* Stream checked records; retain only identity and settlement state for replay. */
+#include "operation_record.h"
 #include <stdlib.h>
 #include <string.h>
 
 typedef struct {
-  const char *id;
+  char id[37];
+  uint8_t identity[32];
   int64_t day, reserved;
   bool settled;
 } reservation;
+typedef struct {
+  reservation *table;
+  size_t cap, count, frames;
+  int64_t day, spent;
+} replay;
 
 static size_t slot_for(reservation *table, size_t cap, const char *id) {
   size_t h = 2166136261u;
   for (const char *p = id; *p; p++) h = (h ^ (unsigned char)*p) * 16777619u;
   h &= cap - 1;
-  while (table[h].id && strcmp(table[h].id, id)) h = (h + 1) & (cap - 1);
+  while (table[h].id[0] && strcmp(table[h].id,id)) h = (h + 1) & (cap - 1);
   return h;
+}
+static asngn_err grow(replay *p) {
+  size_t cap = p->cap ? p->cap * 2 : 256;
+  reservation *table = calloc(cap,sizeof *table);
+  if (!table) return ASNGN_ERR_NOMEM;
+  for (size_t i = 0; i < p->cap; i++) if (p->table[i].id[0])
+    table[slot_for(table,cap,p->table[i].id)] = p->table[i];
+  free(p->table); p->table = table; p->cap = cap; return ASNGN_OK;
+}
+static asngn_err observe(void *ud, const char *text, size_t bytes) {
+  replay *p = ud;
+  asngn_operation_record row;
+  if (++p->frames > 262144) return ASNGN_ERR_LIMIT;
+  asngn_err e = asngn_operation_decode(text,bytes,&row);
+  if (e != ASNGN_OK) return e;
+  if (row.reserved && p->count >= p->cap/2) {
+    e = grow(p); if (e != ASNGN_OK) return e;
+  }
+  if (!p->cap) return ASNGN_ERR_PARSE;
+  reservation *r = &p->table[slot_for(p->table,p->cap,row.id)];
+  if (row.reserved) {
+    if (r->id[0] || row.delta < 0 || row.known || row.input || row.output) return ASNGN_ERR_PARSE;
+    strcpy(r->id,row.id); memcpy(r->identity,row.identity,sizeof r->identity);
+    r->day = row.day; r->reserved = row.delta; p->count++;
+  } else {
+    if (!r->id[0] || r->settled || r->day != row.day ||
+        memcmp(r->identity,row.identity,sizeof r->identity) ||
+        row.delta != (row.known ? row.input + row.output - r->reserved : 0)) return ASNGN_ERR_PARSE;
+    r->settled = true;
+  }
+  if (row.day == p->day) {
+    if ((row.delta > 0 && p->spent > INT64_MAX-row.delta) ||
+        (row.delta < 0 && p->spent < -row.delta)) return ASNGN_ERR_PARSE;
+    p->spent += row.delta;
+  }
+  return ASNGN_OK;
 }
 
 asngn_err asngn_operations_load(asngn_ctx *c) {
-  xcdn_document_t *doc = NULL;
-  char *path = os_path_join(c->root, "operations.xcdn");
-  reservation *table = NULL;
-  size_t cap = 1;
-  asngn_err e;
-  if (!path) return ASNGN_ERR_NOMEM;
-  e = asngn_wal_load(c, path, &doc);
-  free(path);
-  c->daily_day = asngn_clock_now(&c->clock) / 86400;
-  c->daily_spent = 0;
-  if (e != ASNGN_OK || !doc) goto done;
-  if (doc->values_len > 262144) { e = ASNGN_ERR_LIMIT; goto done; }
-  while (cap < doc->values_len * 2 + 1) cap *= 2;
-  table = calloc(cap, sizeof *table);
-  if (!table) { e = ASNGN_ERR_NOMEM; goto done; }
-  for (size_t i = 0; i < doc->values_len; i++) {
-    int64_t day, delta, schema, ti, to;
-    bool known;
-    const xcdn_value_t *v = doc->values[i]->value;
-    const char *id = asngn_xstr(asngn_xfield(v, "id"));
-    const char *state = asngn_xstr(asngn_xfield(v, "state"));
-    if (!id || !asngn_uuid_valid(id) || !state ||
-        !asngn_xint(asngn_xfield(v, "schema"), &schema) || schema != 1 ||
-        !asngn_xint(asngn_xfield(v, "day"), &day) ||
-        !asngn_xint(asngn_xfield(v, "budget_delta"), &delta) ||
-        !asngn_xint(asngn_xfield(v, "input_tokens"), &ti) || ti < 0 || ti > INT_MAX ||
-        !asngn_xint(asngn_xfield(v, "output_tokens"), &to) || to < 0 || to > INT_MAX ||
-        !asngn_xbool(asngn_xfield(v, "usage_known"), &known)) {
-      e = ASNGN_ERR_PARSE; break;
-    }
-    reservation *r = &table[slot_for(table, cap, id)];
-    if (!strcmp(state, "reserved")) {
-      if (r->id || delta < 0 || known || ti || to) { e = ASNGN_ERR_PARSE; break; }
-      r->id = id; r->day = day; r->reserved = delta;
-    } else if (!strcmp(state, "settled")) {
-      if (!r->id || r->settled || r->day != day ||
-          delta != (known ? ti + to - r->reserved : 0)) { e = ASNGN_ERR_PARSE; break; }
-      r->settled = true;
-    } else { e = ASNGN_ERR_PARSE; break; }
-    if (day == c->daily_day) {
-      if ((delta > 0 && c->daily_spent > INT64_MAX - delta) ||
-          (delta < 0 && c->daily_spent < -delta)) { e = ASNGN_ERR_PARSE; break; }
-      c->daily_spent += delta;
-    }
-  }
-done:
-  free(table);
-  xcdn_document_free(doc);
+  replay p = {.day = asngn_clock_now(&c->clock)/86400};
+  char *path = os_path_join(c->root,"operations.xcdn");
+  asngn_err e = path ? asngn_wal_visit(c,path,4096,observe,&p) : ASNGN_ERR_NOMEM;
+  if (e == ASNGN_OK) { c->daily_day = p.day; c->daily_spent = p.spent; }
   c->usage_recovery_required = e != ASNGN_OK;
-  return e;
+  free(p.table); free(path); return e;
 }

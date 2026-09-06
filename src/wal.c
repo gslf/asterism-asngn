@@ -38,22 +38,20 @@ asngn_err asngn_wal_append(asngn_ctx *c, asngn_stream *st,
   return e;
 }
 
-asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
-                         struct xcdn_document **out) {
+asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t frame_limit,
+                          asngn_wal_record_fn record_fn, void *ud) {
   FILE *f;
-  asngn_buf payload;
   asngn_err e = ASNGN_OK;
   uint64_t file_size = 0;
   long good = 0;
   bool torn = false;
   char header[224];
-  *out = NULL;
+  if (!record_fn || !frame_limit || frame_limit > WAL_FRAME_MAX) return ASNGN_ERR_INVALID;
   if (!os_file_exists(path)) return ASNGN_OK;
   if (os_file_size(path, &file_size) != ASNGN_OK) return ASNGN_ERR_IO;
   if (file_size > WAL_LOG_MAX) return ASNGN_ERR_LIMIT;
   f = os_fopen(path, "rb");
   if (!f) return ASNGN_ERR_IO;
-  asngn_buf_init(&payload);
   while (fgets(header, sizeof header, f)) {
     size_t n = 0, got;
     char expected[65], actual[65], canonical[224], *record;
@@ -81,6 +79,7 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
     }
     digest(canonical, prefix_len, actual);
     if (memcmp(end+66, actual, 64)) { e = ASNGN_ERR_PARSE; break; }
+    if (n > frame_limit) { e = ASNGN_ERR_LIMIT; break; }
     record = malloc(n + 1);
     if (!record) { e = ASNGN_ERR_NOMEM; break; }
     got = fread(record, 1, n, f);
@@ -92,8 +91,7 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
     if (strcmp(expected, actual) || memchr(record, 0, n)) {
       free(record); e = ASNGN_ERR_PARSE; break;
     }
-    e = asngn_buf_append(&payload, record, n);
-    if (e == ASNGN_OK) e = asngn_buf_append(&payload, "\n", 1);
+    e = record_fn(ud,record,n);
     free(record);
     if (e != ASNGN_OK) break;
     good = ftell(f);
@@ -101,10 +99,6 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
   }
   if (ferror(f)) e = ASNGN_ERR_IO;
   fclose(f);
-  if (e == ASNGN_OK) {
-    *out = xcdn_parse_str(payload.data ? payload.data : "", payload.len, NULL);
-    if (!*out) e = ASNGN_ERR_PARSE;
-  }
   if (e == ASNGN_OK && torn) {
     e = os_truncate(path, (uint64_t)good);
     f = e == ASNGN_OK ? os_fopen(path, "ab") : NULL;
@@ -112,7 +106,27 @@ asngn_err asngn_wal_load(asngn_ctx *c, const char *path,
     else if (e == ASNGN_OK) e = ASNGN_ERR_IO;
     if (e == ASNGN_OK) asngn_log(c, ASNGN_LOG_WARN, "storage", "discarded incomplete WAL tail: %s", path);
   }
-  asngn_buf_free(&payload);
-  if (e != ASNGN_OK) { xcdn_document_free(*out); *out = NULL; }
+  return e;
+}
+
+static asngn_err collect(void *ud, const char *record, size_t bytes) {
+  xcdn_document_t *out = ud, *frame = xcdn_parse_str(record,bytes,NULL);
+  if (!frame) return ASNGN_ERR_PARSE;
+  asngn_err e = ASNGN_OK;
+  for (size_t i = 0; e == ASNGN_OK && i < frame->values_len; i++) {
+    if (!asngn_xdoc_push(out,frame->values[i])) e = ASNGN_ERR_NOMEM;
+    else frame->values[i] = NULL;
+  }
+  xcdn_document_free(frame); return e;
+}
+
+asngn_err asngn_wal_load(asngn_ctx *c, const char *path, struct xcdn_document **out) {
+  *out = NULL;
+  if (!os_file_exists(path)) return ASNGN_OK;
+  xcdn_document_t *doc = xcdn_document_new();
+  if (!doc) return ASNGN_ERR_NOMEM;
+  asngn_err e = asngn_wal_visit(c,path,WAL_FRAME_MAX,collect,doc);
+  if (e == ASNGN_OK) *out = doc;
+  else xcdn_document_free(doc);
   return e;
 }

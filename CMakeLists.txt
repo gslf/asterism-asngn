@@ -161,6 +161,7 @@ set(ASNGN_SOURCES
   src/workspace_fingerprint.c
   src/ledger.c
   src/operation_replay.c
+  src/operation_codec.c
   src/operations.c
   src/tokens.c
   src/models.c

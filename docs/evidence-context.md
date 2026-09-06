@@ -81,8 +81,10 @@ A fresh request span links this trace to `model_call`, or `model_not_run` when
 context admission/deadline prevents runtime dispatch. Watched calls also carry
 the session and parent turn; unscoped helpers leave them absent. Dispatch means
 calling the model runtime, not proof that a provider performed inference. These
-spans are not yet the durable consumption operation IDs, and direct Asper calls
-through its manager do not cross this engine boundary.
+spans also populate `request_id` in durable generation reservations/settlements.
+The accounting operation has its own UUID; correlation never deduplicates calls.
+Direct Asper calls through its manager do not cross this engine trace boundary
+and currently record an empty request ID. See [consumption records](operations.md).
 
 Detail covers at most 128 items, prioritizing the active tool contract. Total and
 omitted counts remain explicit. The complete `input_contract_sha256` covers all

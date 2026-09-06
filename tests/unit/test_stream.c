@@ -256,7 +256,29 @@ TEST(wal_corrupt_length_cannot_discard_a_complete_frame) {
   asngn_test_rmtree(dir); bare_ctx_free(c);
 }
 
+TEST(wal_frames_are_complete_values_before_tail_repair) {
+  char dir[256], path[300];
+  asngn_ctx *c = bare_ctx();
+  asngn_stream st;
+  xcdn_document_t *doc = NULL;
+  uint64_t before, after;
+  ASSERT_TRUE(c && asngn_test_tmpdir(dir));
+  snprintf(path,sizeof path,"%s/wal.xcdn",dir);
+  ASSERT_OK(asngn_stream_open(c,&st,path,true));
+  ASSERT_OK(asngn_wal_append(c,&st,"{n:",3));
+  ASSERT_OK(asngn_wal_append(c,&st,"1}",2));
+  asngn_stream_close(&st);
+  FILE *tail = os_fopen(path,"ab");
+  ASSERT_TRUE(tail); ASSERT_TRUE(fputs("// incomplete",tail) >= 0); fclose(tail);
+  ASSERT_OK(os_file_size(path,&before));
+  ASSERT_ERR(asngn_wal_load(c,path,&doc),ASNGN_ERR_PARSE);
+  ASSERT_TRUE(!doc);
+  ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(before,after);
+  asngn_test_rmtree(dir); bare_ctx_free(c);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(wal_frames_are_complete_values_before_tail_repair),
   TEST_ENTRY(wal_corrupt_length_cannot_discard_a_complete_frame),
   TEST_ENTRY(wal_checksum_and_io_faults),
   TEST_ENTRY(wal_only_repairs_incomplete_tail),

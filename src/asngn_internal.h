@@ -196,6 +196,11 @@ asngn_err asngn_stream_append(asngn_ctx *c, asngn_stream *st,
  * frees *out_doc with xcdn_document_free. `what` names the file in logs. */
 asngn_err asngn_wal_append(asngn_ctx *c, asngn_stream *st, const char *record, size_t n);
 asngn_err asngn_wal_load(asngn_ctx *c, const char *path, struct xcdn_document **out);
+/* The consumer validates each complete frame before incomplete-tail repair.
+ * A callback failure leaves the log untouched; callbacks must not reenter it. */
+typedef asngn_err (*asngn_wal_record_fn)(void *ud, const char *record, size_t bytes);
+asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t frame_limit,
+                          asngn_wal_record_fn record_fn, void *ud);
 asngn_err asngn_stream_load(asngn_ctx *c, const char *path, const char *what,
                             struct xcdn_document **out_doc);
 
@@ -326,12 +331,13 @@ void      asngn_config_free(asngn_config *cfg);
 
 typedef struct {
   char id[37];
+  char request_id[ASMODEL_REQUEST_ID_MAX+1];
   const char *model, *kind;
   int64_t reserved, day;
   bool active;
 } asngn_operation;
 asngn_err asngn_operation_begin(asngn_ctx *c, const char *model,
-                                 const char *kind, int64_t reserve,
+                                 const char *kind, const char *request_id, int64_t reserve,
                                  asngn_operation *op);
 asngn_err asngn_operation_end(asngn_ctx *c, asngn_operation *op,
                                int ti, int to, bool known, asngn_err outcome);

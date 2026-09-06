@@ -46,6 +46,9 @@ asngn_err asngn_operation_begin(asngn_ctx *c, const char *model,
   asngn_consumption_roll(&c->consumption,asngn_clock_now(&c->clock)/86400);
   op->day = c->consumption.utc_day;
   if (c->usage_recovery_required) e = ASNGN_ERR_IO;
+  else if (c->consumption.lifetime.calls >= ASNGN_OPERATIONS_MAX)
+    e = asngn_seterr(c,ASNGN_ERR_LIMIT,"consumption journal reached its %u-operation limit",
+                     ASNGN_OPERATIONS_MAX);
   else if (c->cfg.daily_tokens > 0 && op->reserved > c->cfg.daily_tokens - c->consumption.today.charged_tokens)
     e = ASNGN_ERR_LIMIT;
   else e = record(c, op, "reserved", op->reserved, 0, 0, false, ASNGN_OK);

@@ -2,6 +2,7 @@
 #ifndef ASNGN_OPERATION_RECORD_H
 #define ASNGN_OPERATION_RECORD_H
 #include "asngn_internal.h"
+#define ASNGN_OPERATIONS_MAX 131072u /* Reserve and settlement each need one frame. */
 typedef struct {
   char id[37];
   uint8_t identity[32]; /* model, operation kind and host request identity */

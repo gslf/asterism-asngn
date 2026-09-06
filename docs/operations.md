@@ -35,6 +35,10 @@ or monetary measurement. Backend success does not mean that later application
 validation or the task succeeded. A failed turn can have nonzero consumption and
 zero committed conversation tokens.
 
+Reservation rejection returns a per-request diagnostic that the provider was not
+invoked. Generation reports `FINISH_ERROR`, rather than implying an output-token
+truncation; generation and embedding retain known zero usage and no reservation.
+
 MCP schema 1 declares `scope: "engine_store"`, `unit: "tokens"` and
 `time_basis: "reservation_utc_day"`. Token/call counters use canonical decimal
 strings so JavaScript cannot round integers above 2^53. Python converts them to
@@ -71,8 +75,17 @@ outcome is not the task outcome: application validation can still reject output.
 Schema-1 operation stores are not opened or silently upgraded by this version.
 Use a fresh development store; no existing store was converted by this change.
 
-Replay validates one frame at a time, capped at 4 KiB, with at most 262,144 records
-and the shared 256 MiB WAL limit. A growing identity table retains reservation and
+Replay validates one frame at a time, capped at 4 KiB. Both admission and recovery
+limit a store to 131,072 operations, allowing at most 262,144 records. Admission
+reserves a record for each eventual settlement, so accepted operations cannot
+exhaust the replay record limit before their outcomes are recorded. Even a
+zero-token reservation counts; a new day does not reset this storage limit.
+This is a record-count guarantee, not a reservation of disk capacity or a promise
+that a later I/O will succeed. The shared 256 MiB WAL byte limit still applies.
+The limit is store-wide, not per session. Preserve the store and use a new one
+when full; there is no consumption compactor or implicit quota increase. A history
+with more operations is rejected rather than partially loaded or pruned.
+A growing identity table retains reservation and
 settlement state, rather than the complete text and parsed history. Accounting is
 published only after the entire replay succeeds. Complete invalid records leave
 the file intact, even if an incomplete tail follows. Incomplete-tail repair still
@@ -86,12 +99,18 @@ write blocks further inference admission and settlement appends until recovery;
 already consumed inference remains represented by its outstanding reservation.
 This does not certify power-loss behavior or bound a native model loader.
 
-Seven counter tests cover outcomes without commits, zero-usage uncertainty,
+Eight counter tests cover outcomes without commits, zero-usage uncertainty,
 midnight and clock rollback, lifetime overflow, copied identities, uncertain sync
 and four concurrent lanes. Actual worker failure/cancellation retains charges
 after conversational rollback. Both SDKs inspect a checksummed history across
 process restarts without changing its bytes, including counters above 2^53.
 These are contract checks, not real-model cost measurements.
+The quota regression builds an actual 262,142-frame history, admits its final
+operation, rejects another reservation, records the accepted settlement and
+reopens all 262,144 frames. A complete over-quota frame followed by a torn tail
+is rejected without truncating either. Against the earlier runtime the second
+reservation and both settlements succeed, but subsequent recovery fails with
+`ASNGN_ERR_LIMIT`.
 
 ## Component measurement
 

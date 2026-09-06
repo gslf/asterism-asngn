@@ -73,7 +73,12 @@ static int generate(void *ud, const asmodel_input *input, const char *grammar,
     reserve += (int64_t)(strlen(schema->name)+strlen(schema->description)+strlen(schema->parameters)+128);
   }
   e = asngn_operation_begin(b->ctx, b->id, "generate", p->request_id, reserve, &op);
-  if (e != ASNGN_OK) return model_error(e);
+  if (e != ASNGN_OK) {
+    info->finish_reason = ASMODEL_FINISH_ERROR;
+    snprintf(info->error,sizeof info->error,"%s while reserving inference budget; provider not invoked",
+             asngn_err_name(e));
+    return model_error(e);
+  }
   if (p->deadline_ms > 0) params.deadline_ms -= asngn_clock_mono_ms(&b->ctx->clock) - started;
   bool invoked = false;
   if (cancel && *cancel) e = ASNGN_ERR_CANCELLED;
@@ -114,7 +119,11 @@ static int embed(void *ud, const char *const *texts, size_t count, int is_query,
   }
   asngn_err e = asngn_operation_begin(b->ctx,b->id,is_query ? "embed-query" : "embed-document",
       request.request_id,reserve,&op);
-  if (e != ASNGN_OK) return model_error(e);
+  if (e != ASNGN_OK) {
+    snprintf(info->error,sizeof info->error,"%s while reserving inference budget; provider not invoked",
+             asngn_err_name(e));
+    return model_error(e);
+  }
   bool invoked = false;
   if (request.cancel && *request.cancel) e = ASNGN_ERR_CANCELLED;
   else if (request.deadline_ms > 0 &&

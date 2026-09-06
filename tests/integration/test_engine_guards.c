@@ -406,7 +406,46 @@ TEST(cancel_reaches_inflight_provider) {
 
 /* ── runner ───────────────────────────────────────────────────────────── */
 
+TEST(reservation_rejection_preserves_diagnostics_without_inference) {
+  eng_fx f;
+  ASSERT_TRUE(eng_setup(&f,"echo","budgets: {daily_tokens: 1},"));
+  char *answer = NULL;
+  int input = -1, output = -1;
+  int slot = asngn_models_slot_for_id(f.c,"light");
+  ASSERT_ERR(asngn_models_generate(f.c,slot,ASNGN_TASK_ANSWER,"","hello",NULL,NULL,
+      16,0,NULL,NULL,NULL,&answer,&input,&output),ASNGN_ERR_LIMIT);
+  ASSERT_CONTAINS(asngn_last_error(f.c),"reserving inference budget");
+  ASSERT_EQ_INT(f.light.calls,0);
+  ASSERT_EQ_INT(input,0); ASSERT_EQ_INT(output,0);
+  free(answer);
+  asmodel_text_input pair;
+  asmodel_input_pair(&pair,"","hello");
+  asmodel_generation_info generated;
+  asmodel_generate_params params = {.max_tokens=16, .result_info=&generated};
+  answer = NULL;
+  ASSERT_EQ_INT(asmodel_generate(f.c->shared_models,"light",&pair.input,NULL,&params,
+      NULL,NULL,NULL,&answer,&input,&output),ASMODEL_ERR_LIMIT);
+  ASSERT_EQ_INT(generated.finish_reason,ASMODEL_FINISH_ERROR);
+  ASSERT_EQ_INT(generated.usage_known,1);
+  ASSERT_CONTAINS(generated.error,"provider not invoked");
+  free(answer);
+  const char *text = "embedding must also reserve budget";
+  float vector[FAKE_EMBED_DIM];
+  asmodel_embedding_info info;
+  ASSERT_ERR(asngn_models_embed_many(f.c,&text,1,1,vector,&info),ASNGN_ERR_LIMIT);
+  ASSERT_CONTAINS(info.error,"reserving inference budget");
+  ASSERT_EQ_INT(info.usage_known,1);
+  ASSERT_EQ_INT(info.completed,0);
+  ASSERT_EQ_INT(f.embed.embedding_batches,0);
+  ASSERT_EQ_INT(f.light.calls,0);
+  asngn_consumption usage;
+  ASSERT_OK(asngn_get_consumption(f.c,&usage));
+  ASSERT_EQ_INT(usage.lifetime.calls,0);
+  eng_drop(&f);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(reservation_rejection_preserves_diagnostics_without_inference),
   TEST_ENTRY(think_limit),
   TEST_ENTRY(identical_call),
   TEST_ENTRY(identical_call_after_workspace_change),

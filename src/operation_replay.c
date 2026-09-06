@@ -11,7 +11,7 @@ typedef struct {
 } reservation;
 typedef struct {
   reservation *table;
-  size_t cap, count, frames;
+  size_t cap, count;
   asngn_consumption usage;
 } replay;
 
@@ -33,9 +33,9 @@ static asngn_err grow(replay *p) {
 static asngn_err observe(void *ud, const char *text, size_t bytes) {
   replay *p = ud;
   asngn_operation_record row;
-  if (++p->frames > 262144) return ASNGN_ERR_LIMIT;
   asngn_err e = asngn_operation_decode(text,bytes,&row);
   if (e != ASNGN_OK) return e;
+  if (row.reserved && p->count >= ASNGN_OPERATIONS_MAX) return ASNGN_ERR_LIMIT;
   if (row.reserved && p->count >= p->cap/2) {
     e = grow(p); if (e != ASNGN_OK) return e;
   }

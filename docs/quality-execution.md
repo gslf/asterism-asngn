@@ -185,6 +185,24 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
+The operation journal now admits at most 131,072 operations and reserves a
+record slot for every settlement within the 262,144-frame recovery bound.
+The regression against `8e6ffaa` shows two successful final settlements followed
+by failed recovery (`ASNGN_ERR_LIMIT`); its log is
+`/tmp/asterism-operation-quota-baseline-tests.log`. The corrected path rejects
+the excess reservation, permits the already accepted settlement and reopens the
+complete history. Disk capacity and consumption compaction remain separate limits.
+Generation/embedding adapters also preserve a reservation-failure diagnostic;
+generation reports an error instead of output truncation. An integrated check
+confirms known zero usage, no reservation and no fake-provider invocation.
+The complete quota checkpoint passes 57 restricted ASan/UBSan suites without
+LSan, 58 ordinary distribution suites and 53 non-threaded suites. Logs/JUnit are
+`/tmp/asterism-operation-quota-final-{sanitize,native,nothreads}-tests.*`.
+
+The preceding consumption checkpoint `8e6ffaa` passed clean reconstruction at
+`/tmp/asterism-restricted-release-dfq4nwrx`: 57 Asngn, 31 Asper, 6 asmodel and
+35 Astools suites. It predates the live operation-quota correction.
+
 Engine-wide consumption now projects lifetime and reservation-day totals through
 one reducer for live admission and replay. Known usage, settled unknown usage and
 unsettled reservations remain distinct, including zero-token reservations and

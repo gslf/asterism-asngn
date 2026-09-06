@@ -1,6 +1,7 @@
 #include "asngn_internal.h"
 #include "asngn_test.h"
 #include "fakes.h"
+#include "operation_record.h"
 
 typedef struct {
   char root[256];
@@ -31,6 +32,93 @@ static bool consistent(const asngn_consumption_totals *v) {
                                   v->unknown_tokens &&
          v->unsettled_calls + v->unknown_calls <= v->calls &&
          v->failed_calls + v->cancelled_calls <= v->calls - v->unsettled_calls;
+}
+
+/* The fixture uses the real codec/framer with one sync after construction.
+ * Reusing equal-size UUID slots avoids millions of fixture JSON allocations. */
+static asngn_err settled_history(fixture *f, const char *path, size_t calls) {
+  asngn_operation op = {.model = "model", .kind = "generate", .day = 100};
+  strcpy(op.id, "00000000-0000-4000-8000-000000000000");
+  char *begin = asngn_operation_encode(&op, "reserved", 0, 0, 0, false, ASNGN_OK);
+  char *end = asngn_operation_encode(&op, "settled", 0, 0, 0, true, ASNGN_OK);
+  char *begin_id = begin ? strstr(begin, op.id) : NULL;
+  char *end_id = end ? strstr(end, op.id) : NULL;
+  asngn_stream stream = {0};
+  asngn_err e =
+      begin_id && end_id ? asngn_stream_open(f->ctx, &stream, path, false) : ASNGN_ERR_NOMEM;
+  for (size_t i = 0; e == ASNGN_OK && i < calls; i++) {
+    char prefix[9];
+    snprintf(prefix, sizeof prefix, "%08x", (unsigned)i);
+    memcpy(begin_id, prefix, 8);
+    memcpy(end_id, prefix, 8);
+    e = asngn_wal_append(f->ctx, &stream, begin, strlen(begin));
+    if (e == ASNGN_OK)
+      e = asngn_wal_append(f->ctx, &stream, end, strlen(end));
+  }
+  if (e == ASNGN_OK)
+    e = os_fsync(stream.fp);
+  asngn_stream_close(&stream);
+  free(begin);
+  free(end);
+  return e;
+}
+
+TEST(admission_reserves_room_for_the_final_settlement) {
+  fixture f;
+  asngn_operation final, denied;
+  asngn_consumption usage;
+  ASSERT_TRUE(setup(&f));
+  char *path = os_path_join(f.root, "operations.xcdn");
+  ASSERT_TRUE(path);
+  ASSERT_OK(settled_history(&f, path, ASNGN_OPERATIONS_MAX - 1));
+  ASSERT_OK(asngn_operations_load(f.ctx));
+  ASSERT_OK(asngn_operation_begin(f.ctx, "model", "generate", NULL, 10, &final));
+  uint64_t before, after;
+  ASSERT_OK(os_file_size(path, &before));
+  asngn_err e = asngn_operation_begin(f.ctx, "model", "generate", NULL, 0, &denied);
+  if (e != ASNGN_ERR_LIMIT) {
+    if (e == ASNGN_OK) {
+      asngn_err first = asngn_operation_end(f.ctx, &final, 2, 1, true, ASNGN_OK);
+      asngn_err second = asngn_operation_end(f.ctx, &denied, 0, 0, true, ASNGN_OK);
+      asngn_err recovered = asngn_operations_load(f.ctx);
+      fprintf(stderr, "  over-admission: settlements %s/%s, replay %s\n", asngn_err_name(first),
+              asngn_err_name(second), asngn_err_name(recovered));
+    }
+    free(path);
+    drop(&f);
+    ASSERT_ERR(e, ASNGN_ERR_LIMIT);
+  }
+  ASSERT_OK(os_file_size(path, &after));
+  ASSERT_EQ_INT(before, after);
+  ASSERT_OK(asngn_operation_end(f.ctx, &final, 2, 1, true, ASNGN_OK));
+  ASSERT_OK(asngn_operations_load(f.ctx));
+  ASSERT_OK(asngn_get_consumption(f.ctx, &usage));
+  ASSERT_EQ_INT(usage.lifetime.calls, ASNGN_OPERATIONS_MAX);
+  ASSERT_EQ_INT(usage.lifetime.unsettled_calls, 0);
+  ASSERT_EQ_INT(usage.lifetime.charged_tokens, 3);
+  ASSERT_ERR(asngn_operation_begin(f.ctx, "model", "generate", NULL, 0, &denied), ASNGN_ERR_LIMIT);
+
+  /* A complete over-quota record is not a torn tail that recovery may discard. */
+  asngn_uuid_v4(final.id);
+  char *extra = asngn_operation_encode(&final, "reserved", 0, 0, 0, false, ASNGN_OK);
+  asngn_stream stream;
+  ASSERT_TRUE(extra);
+  ASSERT_OK(asngn_stream_open(f.ctx, &stream, path, true));
+  ASSERT_OK(asngn_wal_append(f.ctx, &stream, extra, strlen(extra)));
+  asngn_stream_close(&stream);
+  free(extra);
+  FILE *tail = os_fopen(path, "ab");
+  ASSERT_TRUE(tail);
+  ASSERT_TRUE(fputs("// incomplete", tail) >= 0);
+  ASSERT_OK(os_fsync(tail));
+  fclose(tail);
+  ASSERT_OK(os_file_size(path, &before));
+  ASSERT_ERR(asngn_operations_load(f.ctx), ASNGN_ERR_LIMIT);
+  ASSERT_OK(os_file_size(path, &after));
+  ASSERT_EQ_INT(before, after);
+  ASSERT_EQ_INT(f.ctx->consumption.lifetime.calls, ASNGN_OPERATIONS_MAX);
+  free(path);
+  drop(&f);
 }
 
 TEST(all_outcomes_survive_reopen_without_conversation_commits) {
@@ -227,6 +315,7 @@ TEST(concurrent_lanes_share_one_atomic_consumption_projection) {
 #endif
 
 TEST_LIST = {
+    TEST_ENTRY(admission_reserves_room_for_the_final_settlement),
     TEST_ENTRY(all_outcomes_survive_reopen_without_conversation_commits),
     TEST_ENTRY(midnight_and_clock_rollback_preserve_reservation_days),
     TEST_ENTRY(lifetime_overflow_rejects_admission_across_days),

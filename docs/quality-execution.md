@@ -38,7 +38,12 @@ trials require actual resources. No real-model result has been produced here.
   but cannot alter the protected oracle. Hidden checks are materialized only in
   the verifier workspace. Production evaluation requires Linux bubblewrap with
   read-only fixture/toolchains and isolated networking; deterministic unit tests
-  explicitly bypass isolation only for evaluator-authored fixtures.
+  explicitly bypass isolation only for evaluator-authored fixtures. Schema 3 also
+  requires invocation-bound positive completion with expected test counts: an
+  early zero exit, empty collection or skipped suite cannot certify a repair.
+  Commands/output/patch capture are bounded; dependent checks stop on failure.
+  Public smoke tasks are always labelled `dev`, never `holdout`. These receipts
+  do not make arbitrary in-process test code unable to forge its own output.
 - asmodel owns backend residency and locks. Session lanes borrow the same manager;
   the current embedded wrapper serializes requests to one backend instance.
   This is shared residency, not native multi-sequence decoding. The former
@@ -62,7 +67,7 @@ trials require actual resources. No real-model result has been produced here.
   JSON output metadata survives both shared-runtime adapters. Metadata strings
   preserve quotes/Unicode and reject oversized values instead of truncating intent.
   Message and native tool contracts now preserve roles and correlation IDs;
-  attachments and a response path without a separate generation remain. Embedded text templates
+  attachments remain. Embedded text templates
   reject unsupported blocks instead of silently flattening or switching templates.
 - Embedding batches retain valid leading rows, explicit consumption and cancellation/
   timeout errors. The shared manager owns query/document prefixes for both hosts.
@@ -206,9 +211,11 @@ trials require actual resources. No real-model result has been produced here.
 - An integrated JSON-provider fixture crosses the shared manager, decodes a real
   tool decision and invokes the tool process. Scalar/object corruption cases and
   disabled-tool schema exports are covered.
-- Five oracle regressions passed: changed original tests rejected, cosmetic patch
-  still fails, real recursive repair passes, new tests cannot disable originals,
-  arbitrary startup code additions rejected.
+- Twenty oracle/process regressions pass, including original-test/header tampering,
+  unchanged bugs, real C/Python repairs, early zero exits, disabled/skipped tests,
+  mismatched or duplicate completion records, binary/oversized patches, special
+  input files, output floods, deadlines and orphaned output pipes. Both repaired
+  fixtures and Python early-exit rejection also run inside actual bubblewrap.
 - Both repaired fixtures passed the actual bubblewrap verifier, including hidden
   checks. A verifier-side attempt to write the protected workspace was refused.
 - Actual `project.test` integration exercised a CTest suite that ran, a disabled

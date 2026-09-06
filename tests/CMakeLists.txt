@@ -130,7 +130,8 @@ if(Python3_Interpreter_FOUND)
   endif()
   add_test(NAME test_quality_oracle
     COMMAND ${Python3_EXECUTABLE} -B -m unittest discover
-      -s ${CMAKE_CURRENT_SOURCE_DIR}/quality -p test_oracle.py)
+      -s ${CMAKE_CURRENT_SOURCE_DIR}/quality -p "test_*.py")
+  set_tests_properties(test_quality_oracle PROPERTIES TIMEOUT 120)
   if(TARGET asngn-mcp)
     add_test(NAME test_approval_mcp
       COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/approval_mcp.py

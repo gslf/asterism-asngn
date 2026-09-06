@@ -15,7 +15,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Direct native final responses, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
-| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, complete approval inspection | Durable resume, persistent processes, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
+| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, accurate build/accounting documentation | ACP, SDKs, MCP client, signed packages, editor flows and external user trials |
 
@@ -127,6 +127,12 @@ trials require actual resources. No real-model result has been produced here.
   The TUI scrolls full redacted arguments, and MCP exposes read-only inspection.
   Reopening interrupted approvals never replays actions; durable task resumption
   remains separate work. See [approval contracts](approvals.md).
+- Persistent tool instances retain their own sandbox and scratch directory, use
+  immutable package identity, and recheck queued work before input reaches the
+  process. Instance queues are cancellable and observable; handshake deadlines
+  include request admission. Native libraries reject changed loaded packages and
+  validate response IDs. See [persistent runtime](../../asterism-astools/docs/persistent-runtime.md).
+  This does not yet expose raw shell/REPL sessions or durable process resumption.
 - MCP jobs retain at most 256 events and 32 handles; poll reports cursor gaps.
   Without a host acceptance contract, a committed turn remains `unconfirmed`.
   Process restart does not preserve these event rings.
@@ -139,7 +145,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 38/38 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 38/38 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 38/38 passed.
-- Standalone Asper: 24/24; astools: 25/25; asmodel: 7/7.
+- Standalone Asper: 24/24; astools: 27/27; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -193,6 +199,10 @@ trials require actual resources. No real-model result has been produced here.
 - Approval tests cover expanded draft payloads, changed packages/snapshots,
   immutable records, rejected decision writes, reopen without replay, read-only
   MCP inspection and scrolling through long Unicode review text.
+- Ten persistent-runtime cases and two real-library cases pass. Seven lifecycle
+  regressions also fail against the previous runtime: stale executable reuse,
+  deleted scratch, delayed deadlines/cancellation and surviving descendants. The
+  no-thread Astools build passes 26/26 (persistent execution is unavailable there).
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.

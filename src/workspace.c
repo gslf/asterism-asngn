@@ -12,8 +12,14 @@ static char *find_repository_root(const char *workspace) {
   char *cur = asngn_strdup(workspace);
   if (cur == NULL) return NULL;
   for (;;) {
-    char *marker = os_path_join(cur, ".git");
-    int found = marker != NULL && os_file_exists(marker);
+    char *marker = NULL;
+    size_t len = 0;
+    /* An empty ancestor .git directory is not repository metadata. Probe only
+     * presence here; the identity reader validates content after discovery. */
+    asngn_err e = asngn_workspace_read(cur, ".git", 1, &marker, &len);
+    if (e == ASNGN_ERR_DENIED)
+      e = asngn_workspace_read(cur, ".git/HEAD", 1, &marker, &len);
+    bool found = e != ASNGN_ERR_NOT_FOUND;
     char *a, *b, *slash;
     free(marker);
     if (found) return cur;

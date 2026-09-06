@@ -60,7 +60,8 @@ As with the source walk, this is not an atomic snapshot or protection against AB
 changes. A syntactically valid OID is an observation, not proof of the commit's
 existence, authenticity or object contents.
 
-Ordinary `.git` directories and registered linked worktrees are supported. A
+Ordinary `.git` directories and registered linked worktrees are supported. An
+ancestor's empty `.git` directory does not establish a repository boundary. A
 linked worktree's back-pointer must identify this checkout, and its `commondir`
 must match the parent of `worktrees/<id>`. Common and per-worktree references follow
 the [Git repository layout](https://git-scm.com/docs/gitrepository-layout).
@@ -71,8 +72,8 @@ reftable storage return `UNSUPPORTED` instead of guessing. Git environment
 overrides are not inherited, and the reader does not run Git, hooks or config.
 Submodule source inside a selected parent checkout still uses normal tree scanning.
 
-Eight Linux metadata cases cover aliases, a FIFO, traversal references, binary and
-oversized data, cycles, duplicate refs and damaged worktree registration. A real
+Nine Linux metadata cases cover aliases, a FIFO, traversal references, binary and
+oversized data, cycles, duplicate refs, empty ancestor markers and damaged worktree registration. A real
 Git integration compares observed IDs for SHA-1 and SHA-256 repositories through
 worktree commits, packing and detached HEAD. A probe against `22a8101` returned
 external fixture bytes as a commit and produced a fingerprint for

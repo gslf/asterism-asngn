@@ -218,12 +218,14 @@ trials require actual resources. No real-model result has been produced here.
   fixtures and Python early-exit rejection also run inside actual bubblewrap.
 - Both repaired fixtures passed the actual bubblewrap verifier, including hidden
   checks. A verifier-side attempt to write the protected workspace was refused.
-- Eight Git metadata regressions and real SHA-1/SHA-256 worktree checks pass.
+- Nine Git metadata regressions and real SHA-1/SHA-256 worktree checks pass.
   Traversal references, symlinked metadata, special files and invalid OIDs cannot
   produce identity or a fingerprint. Common-store refs and private worktree refs
   remain distinct. The same probe against `22a8101` demonstrates the previous
   external-file read; see [snapshot boundaries](workspace-tree.md) for supported
   layouts and the remaining filesystem race and platform limits.
+  A later sandbox regression also ensures an empty `.git` directory in an
+  ancestor cannot be mistaken for the selected repository root.
 - Actual `project.test` integration exercised a CTest suite that ran, a disabled
   suite and an empty suite. This exposed and fixed multiline JUnit parsing that
   the initial synthetic test did not cover.

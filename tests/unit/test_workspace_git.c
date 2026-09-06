@@ -53,6 +53,30 @@ TEST(loose_packed_unborn_and_detached_identity) {
   ASSERT_EQ_INT(strlen(w.head), 64);
   asngn_test_rmtree(f.root);
 }
+TEST(empty_ancestor_marker_does_not_claim_a_repository) {
+  fixture f;
+  asngn_workspace_info w;
+  ASSERT_TRUE(setup(&f));
+  ASSERT_OK(put(&f, ".git/placeholder", "not a repository"));
+  ASSERT_OK(put(&f, "loose/code/source.c", "source"));
+  char *nested = os_path_join(f.root, "loose/code");
+  asngn_ctx *c = calloc(1, sizeof *c);
+  ASSERT_TRUE(c && nested);
+  os_mutex_init(&c->err_mu);
+  ASSERT_OK(asngn_workspace_info_init(c, nested, &w));
+  ASSERT_EQ_STR(w.repository_root, nested);
+  ASSERT_TRUE(!w.head[0] && !w.branch[0] && w.fingerprint[0]);
+  free(nested);
+  ASSERT_OK(put(&f, "main/src/source.c", "source"));
+  nested = os_path_join(f.root, "main/src");
+  ASSERT_TRUE(nested);
+  ASSERT_OK(asngn_workspace_info_init(c, nested, &w));
+  ASSERT_EQ_STR(w.head, oid);
+  ASSERT_EQ_STR(w.branch, "feature/review");
+  os_mutex_destroy(&c->err_mu);
+  free(c); free(nested);
+  asngn_test_rmtree(f.root);
+}
 TEST(reference_paths_and_oid_payloads_are_strict) {
   const char *invalid[] = {"ref: ../secret\n", "ref: refs/heads/../../secret\n",
     "ref: /etc/secret\n", "ref: refs/heads/name.lock\n", "ref: refs//head\n",
@@ -200,6 +224,7 @@ TEST(metadata_aliases_and_special_files_are_never_read) {
 #endif
 TEST_LIST = {
   TEST_ENTRY(loose_packed_unborn_and_detached_identity),
+  TEST_ENTRY(empty_ancestor_marker_does_not_claim_a_repository),
   TEST_ENTRY(reference_paths_and_oid_payloads_are_strict),
   TEST_ENTRY(symbolic_chain_is_bounded),
   TEST_ENTRY(binary_metadata_and_long_branch_names_do_not_get_truncated),

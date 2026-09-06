@@ -49,7 +49,7 @@ asngn_err asngn_generate_input(asngn_ctx *c, asngn_turn_state *t, int slot, asng
   os_mutex_unlock(&c->q_mu);
   e = asngn_models_generate_input(c, slot, task, input, gbnf, schema, tools, max_tokens,
                                   t->deadline_mono, watch_token_cb, &w, &c->call_cancel, out_text,
-                                  out_in, out_out);
+                                  out_in, out_out, t);
   os_mutex_lock(&c->q_mu);
   bool stalled = c->call_stalled;
   c->call_active = 0;

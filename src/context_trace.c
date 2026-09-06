@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static asmodel_json_value *fingerprint(const char *text) {
+asmodel_json_value *asngn_context_fingerprint(const char *text) {
   size_t len = text ? strlen(text) : 0;
   uint8_t hash[32];
   char hex[65];
@@ -51,7 +51,7 @@ asngn_err asngn_context_trace_init(asngn_context_trace *trace, asngn_ctx *c, asn
 asngn_err asngn_context_trace_item(asngn_context_trace *trace, const char *zone, size_t index,
                                    const char *text, const char *decision, const char *reason) {
   if (trace->seen++ >= ASNGN_CONTEXT_TRACE_ITEMS) return ASNGN_OK;
-  asmodel_json_value *v = fingerprint(text);
+  asmodel_json_value *v = asngn_context_fingerprint(text);
   if (!v) return ASNGN_ERR_NOMEM;
   int bad = asmodel_json_object_set(v, "zone", asmodel_json_string(zone)) ||
             asmodel_json_object_set(v, "index", asmodel_json_int((long long)index)) ||
@@ -82,8 +82,8 @@ asngn_err asngn_context_trace_finish(asngn_context_trace *trace, asngn_prompt *p
     return ASNGN_ERR_NOMEM;
   }
   bad = asmodel_json_object_set(trace->root, "zone_tokens", zones) ||
-        asmodel_json_object_set(trace->root, "system", fingerprint(prompt->system_text)) ||
-        asmodel_json_object_set(trace->root, "user", fingerprint(prompt->user_text)) ||
+        asmodel_json_object_set(trace->root, "system", asngn_context_fingerprint(prompt->system_text)) ||
+        asmodel_json_object_set(trace->root, "user", asngn_context_fingerprint(prompt->user_text)) ||
         asmodel_json_object_set(trace->root, "items_total",
                                 asmodel_json_int((long long)trace->seen)) ||
         asmodel_json_object_set(

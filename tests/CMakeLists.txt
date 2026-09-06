@@ -23,6 +23,7 @@ set(ASNGN_TEST_PROGRAMS
   test_operations
   test_ledger
   test_context_golden
+  test_request_trace
   test_cache
   test_toolcache
   test_telemetry

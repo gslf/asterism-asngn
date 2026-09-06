@@ -13,13 +13,15 @@ and unknown `data` fields (forward compatibility).
 | `classify`    | `class`, `detail`, `mode`, `task`, `tools`, `repo_files`, `escalated`, `unreliable`, `eval` (success rate or null), `source` ("heuristic" \| "model" \| "hybrid") |
 | `route`       | `class`, `detail`, `mode`, `task`, `tier`; or `escalated: true` when the judge ladder moves the generator up a tier; or `start: "up"/"down"` when the evidence-gated initial tier moves |
 | `cache_probe` | `outcome` ("hit" \| "adapt" \| "miss"), `cos`          |
-| `model_call`  | `model` (pool id), `task` (classify \| decide \| draft \| answer \| compress \| adapt \| judge), `tokens_in`, `tokens_out`, `ms`, `tps` |
+| `model_call`  | `model` (pool id), `task`, `tokens_in`, `tokens_out`, `ms` (runtime attempt), `outcome`, `usage_known`, `finish_reason`, `runtime_dispatch_attempted: true`; span links adapter request and result |
+| `model_not_run` | Same outcome shape, with `runtime_dispatch_attempted: false` and known zero inference usage; context/deadline rejected the request before runtime dispatch |
 | `tool_call`   | `tool`, `command`, `ok`, `ms`; or `cached: true` for a tool-result-cache hit |
 | `step`        | `action` (call \| discover \| recall \| open \| think \| clarify \| answer), `why` — the model's declared rationale (redacted, flattened, truncated) |
 | `recall`      | (empty) — the recall step ran                          |
 | `fold`        | `mode` ("compressor" \| "extractive")                  |
 | `evidence_selection` | `schema`, `policy`, `source` (object hash), `source_bytes`, `selected_bytes`, `diagnostic_markers`, `excerpt_budget_bytes`, `compressor_used`, `spans` (`start`, `end`, `reason`) |
 | `context_selection` | `schema`, `policy`, `scope`, `model`, `phase`, `observed_snapshot`, `memory_owner`, `count_basis`, budgets, `zone_tokens` (attribution quality unknown), prompt hashes, fragment decisions and `items_omitted`; no source text |
+| `request_context` | `scope: model_adapter_input`, `model`, `task`, `phase`, `admission`, context budgets (null if unmeasured), sampling/reasoning settings, output-contract fingerprints, `input_contract_sha256`, message/tool counts, at most 128 item fingerprints and explicit omissions; no original payloads |
 | `retrieval_scan` | `schema`, `policy`, `entries`, `files`, `excluded`, `ignored`, `chunks`, `complete`, `error`; completeness describes traversal, not semantic evidence coverage |
 | `judge`       | `score` (0–10), `tokens`                               |
 | `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated), `arguments_sha256`, `package_sha256`, `snapshot` — inspect full redacted arguments via `asngn_approval_get`, answer via `asngn_confirm` |

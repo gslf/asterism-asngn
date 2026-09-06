@@ -2,6 +2,7 @@
  * residency, request serialization and eviction across all session lanes. */
 
 #include "asngn_internal.h"
+#include "context.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -159,7 +160,7 @@ asngn_err asngn_models_generate_input(asngn_ctx *c, int slot, asngn_task_kind ta
     const asmodel_input *input, const char *grammar, const char *schema,
     const asmodel_tools *tools, int max_tokens,
     int64_t deadline, asngn_token_fn fn, void *ud, volatile int *cancel,
-    char **out, int *in, int *gen) {
+    char **out, int *in, int *gen, const asngn_turn_state *turn) {
   asmodel_generate_params p = {0};
   asmodel_generation_info info = {0};
   generation_stream stream = {fn, ud};
@@ -186,11 +187,23 @@ asngn_err asngn_models_generate_input(asngn_ctx *c, int slot, asngn_task_kind ta
       extra += strlen(v->name)+strlen(v->description)+strlen(v->parameters)+128;
     }
   }
-  e=asngn_context_validate_input(c,slot,input,p.max_tokens,extra);
-  if (e!=ASNGN_OK) return e;
+  asngn_context_diagnostics budget = {0};
+  char request[37];
+  asngn_uuid_v4(request);
+  e=asngn_context_validate_input(c,slot,input,p.max_tokens,extra,&budget);
+  char *trace = asngn_request_trace(c,turn,slot,task,input,grammar,&p,&budget,e);
+  if (trace) asngn_tele_emit(c,"request_context",request,turn ? turn->led.turn_id : NULL,
+      turn && turn->s ? turn->s->slug : NULL,turn ? turn->led.turn : 0,trace);
+  free(trace);
   if (deadline > 0) {
     p.deadline_ms=deadline-asngn_clock_mono_ms(&c->clock);
-    if (p.deadline_ms<=0) return asngn_seterr(c,ASNGN_ERR_TIMEOUT,"deadline expired before inference");
+    if (e==ASNGN_OK && p.deadline_ms<=0)
+      e=asngn_seterr(c,ASNGN_ERR_TIMEOUT,"deadline expired before inference");
+  }
+  if (e!=ASNGN_OK) {
+    info.usage_known=1;
+    asngn_request_result(c,turn,request,slot,task,&info,e,0,false);
+    return e;
   }
   char *text = NULL;
   int ti=0, to=0;
@@ -205,11 +218,9 @@ asngn_err asngn_models_generate_input(asngn_ctx *c, int slot, asngn_task_kind ta
   if (in) *in=ti;
   if (gen) *gen=to;
   if (out) *out=text; else free(text);
-  char data[256];
-  snprintf(data,sizeof data,"{model: \"%s\", task: \"%s\", tokens_in: %d, tokens_out: %d, ms: %lld, usage_known: %s}",
-      c->models[slot].cfg.id,asngn_task_name(task),ti,to,
-      (long long)(asngn_clock_mono_ms(&c->clock)-started),info.usage_known ? "true" : "false");
-  asngn_tele_emit(c,"model_call",NULL,NULL,NULL,0,data);
+  info.input_tokens=ti; info.output_tokens=to;
+  asngn_request_result(c,turn,request,slot,task,&info,e,
+      asngn_clock_mono_ms(&c->clock)-started,true);
   if (e!=ASNGN_OK) return asngn_seterr(c,e,"%s: %s",
       e==ASNGN_ERR_TIMEOUT ? "deadline expired" : asngn_err_name(e), info.error);
   return ASNGN_OK;
@@ -222,7 +233,7 @@ asngn_err asngn_models_generate(asngn_ctx *c, int slot, asngn_task_kind task,
     char **out, int *in, int *gen) {
   asmodel_text_input pair; asmodel_input_pair(&pair,sys,user);
   return asngn_models_generate_input(c,slot,task,&pair.input,grammar,schema,NULL,max_tokens,
-      deadline,fn,ud,cancel,out,in,gen);
+      deadline,fn,ud,cancel,out,in,gen,NULL);
 }
 
 int asngn_models_count_tokens(asngn_ctx *c, int slot, const char *text) {

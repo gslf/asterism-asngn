@@ -3,10 +3,12 @@
 #include <string.h>
 
 static asngn_err context_check(asngn_ctx *c, int slot, const asmodel_input *input,
-                               int output_reserve, const asngn_prompt *zones, size_t extra_tokens) {
+                               int output_reserve, const asngn_prompt *zones, size_t extra_tokens,
+                               asngn_context_diagnostics *observed) {
   asngn_context_diagnostics d;
   size_t attributed;
   int measured;
+  if (observed) memset(observed, 0, sizeof *observed);
   if (c == NULL || slot < 0 || (size_t)slot >= c->models_n) return ASNGN_ERR_INVALID;
   memset(&d, 0, sizeof d);
   d.n_ctx = c->models[slot].cfg.ctx > 0 ? (size_t)c->models[slot].cfg.ctx : 32768u;
@@ -39,6 +41,7 @@ static asngn_err context_check(asngn_ctx *c, int slot, const asmodel_input *inpu
   }
   attributed = d.system + d.memory + d.catalog + d.summary + d.verbatim + d.working;
   d.overhead = d.prompt_total > attributed ? d.prompt_total - attributed : 0;
+  if (observed) *observed = d;
   if (d.prompt_total <= d.prompt_budget) return ASNGN_OK;
 
   os_mutex_lock(&c->err_mu);
@@ -58,19 +61,20 @@ asngn_err asngn_context_validate(asngn_ctx *c, int count_slot, const asngn_promp
   if (prompt == NULL) return ASNGN_ERR_INVALID;
   asmodel_text_input pair;
   asmodel_input_pair(&pair, prompt->system_text, prompt->user_text);
-  return context_check(c, count_slot, &pair.input, output_reserve, prompt, 0);
+  return context_check(c, count_slot, &pair.input, output_reserve, prompt, 0, NULL);
 }
 
 asngn_err asngn_context_validate_text(asngn_ctx *c, int count_slot, const char *system_text,
                                       const char *user_text, int output_reserve) {
   asmodel_text_input pair;
   asmodel_input_pair(&pair, system_text, user_text);
-  return context_check(c, count_slot, &pair.input, output_reserve, NULL, 0);
+  return context_check(c, count_slot, &pair.input, output_reserve, NULL, 0, NULL);
 }
 
 asngn_err asngn_context_validate_input(asngn_ctx *c, int slot, const asmodel_input *input,
-                                       int output_reserve, size_t extra_tokens) {
-  return context_check(c, slot, input, output_reserve, NULL, extra_tokens);
+                                       int output_reserve, size_t extra_tokens,
+                                       asngn_context_diagnostics *observed) {
+  return context_check(c, slot, input, output_reserve, NULL, extra_tokens, observed);
 }
 
 /* Count tokens of a zone snippet; empty text is zero. */

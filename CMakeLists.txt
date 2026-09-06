@@ -169,6 +169,7 @@ set(ASNGN_SOURCES
   src/models_shared.c
   src/context.c
   src/context_trace.c
+  src/request_trace.c
   src/context_budget.c
   src/context_history.c
   src/retrieval.c

@@ -13,7 +13,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, bounded Git identity and registered worktree resolution, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots/ignore syntax, other Git metadata layouts, durable task recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
-| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper/native-request traces, fine-grained dependencies and task hypotheses |
+| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper traces, durable operation/trace correlation, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts and explicit partial-outcome reconciliation | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
@@ -177,10 +177,27 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
-- Native CPU build against the pinned llama.cpp submodule compiles the actual
-  adapters and passes 48/48 tests with scripted model peers; no weights were loaded.
-- Integrated no-llama suite: 48/48 CTest executables passed.
-- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 48/48 passed.
+The last complete external-sandbox checkpoint was `7e62625`: 48/48 integrated
+tests passed in native CPU and ASan/UBSan/LeakSanitizer builds, and all four
+components passed from clean clones. No weights were loaded.
+
+The subsequent ancestor-marker correction and request traces are built against
+the same pinned llama.cpp and sibling revisions. Local validation runs use
+ASan/UBSan with leak detection disabled. The automatic permission reviewer timed
+out twice when asked to run the current tests outside the sandbox. Current
+LeakSanitizer, HTTP-wire/SDK live and bubblewrap acceptance checks therefore
+remain open; do not inherit their earlier passes as validation of new changes.
+The current restricted run passes 45 executables in both native CPU and ASan/UBSan
+builds. Three HTTP live tests were excluded. The remaining oracle executable
+passes 19 of its 20 cases; its production-sandbox case cannot create a netlink
+socket under the outer sandbox. No acceptance check was weakened to hide that
+infrastructure failure. There are now 49 integrated executables.
+
+Four trace unit cases cover role/correlation metadata, omitted-item hashing,
+framed boundaries, output constraints and invalid structures. Native integration
+also correlates request/result spans and proves context rejection performs no
+inference. Trace failures remain best-effort telemetry, not a task outcome.
+
 - Standalone Asper: 30/30; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,

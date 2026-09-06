@@ -60,7 +60,7 @@ omitted counts. Identical inputs produce identical prompt and trace bytes.
 With Asper enabled, historical selection belongs to Asper. The trace identifies
 the materialized memory blocks and marks local duplicates as delegated; it does
 not pretend to explain Asper's individual event decisions. Native action history
-and additional per-request schemas are also outside the assembled-zone trace.
+and additional per-request schemas are covered by `request_context`, below.
 This is selection observability, not yet the full repository evidence compiler.
 
 Zone token attribution uses the configured text counter; its quality is not
@@ -68,6 +68,32 @@ preserved by that integer interface and the trace labels it unknown. Counts of
 fragments are not additive. The complete request passes a separate model admission
 check with conservative uncertainty reserves. The observed snapshot is a version reference, not an atomic claim that
 every source was read at that instant.
+
+`request_context` observes the IR reaching model-adapter admission, including
+native roles, block positions, hashed call/result correlation IDs, output schema,
+grammar and tool schemas. It records sampling/reasoning settings and the actual
+context admission result and totals without performing another tokenization or
+inference. A successful admission says the context fits the engine's reserve;
+provider capability checks, manager admission and generation can still fail.
+Requests rejected before reaching this boundary are outside its scope.
+
+A fresh request span links this trace to `model_call`, or `model_not_run` when
+context admission/deadline prevents runtime dispatch. Watched calls also carry
+the session and parent turn; unscoped helpers leave them absent. Dispatch means
+calling the model runtime, not proof that a provider performed inference. These
+spans are not yet the durable consumption operation IDs, and direct Asper calls
+through its manager do not cross this engine boundary.
+
+Detail covers at most 128 items, prioritizing the active tool contract. Total and
+omitted counts remain explicit. The complete `input_contract_sha256` covers all
+messages, block boundaries, roles, IDs, tool definitions, tool-choice policy,
+grammar and output schema, even when item details are omitted. Length and presence
+framing distinguish absent fields, empty fields and different concatenations.
+Sampling and model identity are separate trace fields: the digest alone is not a
+request cache key. Hashes match adapter text, not provider-rendered wire bytes or
+token IDs. The trace contains no source text or original call arguments. Its
+60,000-byte ceiling fits the event sink; allocation/telemetry failures may drop it.
+This adds hashing/serialization work; real-model overhead and benefit are unmeasured.
 
 Telemetry retains at most 8 MiB of event payload in the ring and batches at most
 256 KiB before flushing. Events larger than 64 KiB are dropped. Existing rotation

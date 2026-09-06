@@ -1,6 +1,53 @@
 #include "asngn_test.h"
 #include "engine_fx.h"
 #include "native.h"
+#include "xcdn.h"
+
+static void inspect_request_events(eng_fx *f, bool rejected) {
+  char **events = NULL, requests[32][37];
+  size_t count = 0, request_n = 0, outcomes = 0, native = 0;
+  ASSERT_OK(asngn_telemetry_tail(f->c, 256, &events, &count));
+  for (size_t i = 0; i < count; i++) {
+    xcdn_error_t error = {0};
+    xcdn_document_t *doc = xcdn_parse(events[i], &error);
+    ASSERT_TRUE(doc && doc->values_len == 1);
+    const xcdn_value_t *v = doc->values[0]->value, *data = asngn_xfield(v, "data");
+    const char *kind = asngn_xstr(asngn_xfield(v, "kind"));
+    ASSERT_TRUE(kind);
+    if (!strcmp(kind, "request_context")) {
+      ASSERT_TRUE(request_n < 32);
+      ASSERT_TRUE(asngn_xuuid(asngn_xfield(v, "span"), requests[request_n++]));
+      ASSERT_EQ_STR(asngn_xstr(asngn_xfield(data, "admission")),
+                    rejected ? "ASNGN_ERR_CONTEXT" : "ASNGN_OK");
+      int64_t tools = 0, messages = 0;
+      ASSERT_TRUE(asngn_xint(asngn_xfield(data, "tools"), &tools));
+      ASSERT_TRUE(asngn_xint(asngn_xfield(data, "messages"), &messages));
+      if (tools) {
+        native++;
+        ASSERT_TRUE(messages >= 3);
+        ASSERT_EQ_STR(asngn_xstr(asngn_xfield(v, "session")), f->s->slug);
+      }
+      ASSERT_NOT_CONTAINS(events[i], "first observation");
+      ASSERT_NOT_CONTAINS(events[i], "second observation");
+    } else if (!strcmp(kind, "model_call") || !strcmp(kind, "model_not_run")) {
+      char span[37]; bool dispatched = false;
+      ASSERT_TRUE(asngn_xuuid(asngn_xfield(v, "span"), span));
+      size_t j = 0;
+      while (j < request_n && strcmp(span, requests[j])) j++;
+      ASSERT_TRUE(j < request_n && requests[j][0]);
+      requests[j][0] = 0; /* A second outcome cannot match an already closed span. */
+      ASSERT_TRUE(asngn_xbool(asngn_xfield(data, "runtime_dispatch_attempted"), &dispatched));
+      ASSERT_EQ_INT(dispatched, !rejected);
+      ASSERT_EQ_STR(asngn_xstr(asngn_xfield(data, "outcome")),
+                    rejected ? "ASNGN_ERR_CONTEXT" : "ASNGN_OK");
+      outcomes++;
+    }
+    xcdn_document_free(doc);
+  }
+  ASSERT_EQ_INT(outcomes, request_n);
+  ASSERT_TRUE(rejected ? outcomes == 1 : outcomes >= 4 && native == 2);
+  asngn_strings_free(events, count);
+}
 
 static int queue_lookup(eng_fx *f, const char *calls) {
   return fake_model_push(&f->nano, "CLASS MODERATE | DETAIL NORMAL | MODE PLAN | TASK LOOKUP\n") &&
@@ -31,7 +78,24 @@ TEST(native_calls_keep_correlated_results_and_use_the_generator) {
   asngn_stats stats;
   ASSERT_OK(asngn_get_stats(f.c, &stats));
   ASSERT_EQ_INT(stats.tool_calls, 2);
+  inspect_request_events(&f, false);
   asngn_turn_result_free(&r);
+  eng_drop(&f);
+}
+
+TEST(request_admission_failure_is_traced_without_inference) {
+  eng_fx f;
+  ASSERT_TRUE(eng_setup(&f, "echo", NULL));
+  f.c->models[2].cfg.ctx = 64;
+  asngn_turn_state turn = {.s=f.s, .phase=ASNGN_PHASE_ACTION};
+  asmodel_text_input input;
+  asmodel_input_pair(&input, "Instructions", "Request exceeding the available budget");
+  char *out = NULL;
+  ASSERT_ERR(asngn_generate_input(f.c, &turn, 2, ASNGN_TASK_ANSWER, &input.input,
+      NULL, NULL, NULL, 128, NULL, NULL, &out, NULL, NULL), ASNGN_ERR_CONTEXT);
+  ASSERT_TRUE(!out);
+  ASSERT_EQ_INT(f.stdm.calls, 0);
+  inspect_request_events(&f, true);
   eng_drop(&f);
 }
 
@@ -217,6 +281,7 @@ TEST(native_contracts_preserve_profiles_and_artifact_gates) {
 }
 
 TEST_LIST = {TEST_ENTRY(native_calls_keep_correlated_results_and_use_the_generator),
+             TEST_ENTRY(request_admission_failure_is_traced_without_inference),
              TEST_ENTRY(native_final_text_reuses_the_observation_round_without_a_response_call),
              TEST_ENTRY(native_final_text_still_passes_the_response_protocol_gate),
              TEST_ENTRY(native_final_respects_the_response_budget_and_optional_reviewer),

@@ -1,0 +1,10 @@
+{
+  "name": "@asterism/sdk",
+  "version": "0.1.0",
+  "description": "Async local host SDK for the Asterism coding engine",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "exports": { ".": { "types": "./src/index.d.mts", "import": "./src/index.mjs" } },
+  "files": ["src", "README.md", "LICENSE"]
+}

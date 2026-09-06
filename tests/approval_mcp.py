@@ -20,3 +20,12 @@ with tempfile.TemporaryDirectory(prefix="asngn-approval-mcp-") as root:
         assert replies[index]["result"]["isError"] is False, replies
         value = json.loads(replies[index]["result"]["content"][0]["text"])
         assert value == {"status": "none"}, value
+
+with tempfile.TemporaryDirectory(prefix="asngn-frame-mcp-") as root:
+    oversized = '"' + "x" * (8 * 1024 * 1024) + '"\n'
+    later = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n"
+    proc = subprocess.run([sys.argv[1], "--root", root], input=oversized + later,
+        capture_output=True, text=True, encoding="utf-8", timeout=30, check=True)
+    replies = [json.loads(line) for line in proc.stdout.splitlines()]
+    assert len(replies) == 1 and replies[0]["error"]["code"] == -32600, replies
+    assert "8 MiB" in replies[0]["error"]["message"], replies

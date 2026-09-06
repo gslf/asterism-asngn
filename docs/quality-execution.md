@@ -17,7 +17,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
-| 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, accurate build/accounting documentation | ACP, SDKs, MCP client, signed packages, editor flows and external user trials |
+| 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, Python and JavaScript/TypeScript host SDKs, tested local packages, accurate build/accounting documentation | ACP, general MCP client, signed packages, editor flows and external user trials |
 
 No experimental routing or procedure promotion is enabled on the strength of
 fake-model tests. Paid APIs, signing credentials, hardware measurements and user
@@ -150,15 +150,23 @@ trials require actual resources. No real-model result has been produced here.
 - MCP jobs retain at most 256 events and 32 handles; poll reports cursor gaps.
   Without a host acceptance contract, a committed turn remains `unconfirmed`.
   Process restart does not preserve these event rings.
+- Python and JavaScript/TypeScript SDKs negotiate Asterism wire contract 1 and
+  expose live tasks, cursor pages, cancellation, acceptance revisions and read-only
+  approvals. They preserve terminal failure/incomplete states and late-reply IDs;
+  message, pending-request and stderr quotas bound payload retention. They own
+  and close the local server process. No automatic effect retry or durable task
+  resume is implied. See [SDK contracts](../sdk/README.md) for platform and lifecycle
+  limits. Both archives install and work outside the checkout; no runtime package
+  dependencies or registry publication are implied.
 - `--doctor` reads inputs only. Remote connectivity and model loading are explicitly
   unprobed; missing weights/configuration/credentials and ABI mismatches are visible.
 
 ## Validation at this checkpoint
 
 - Native CPU build against the pinned llama.cpp submodule compiles the actual
-  adapters and passes 40/40 fake-based tests; no weights were loaded.
-- Integrated no-llama suite: 40/40 CTest executables passed.
-- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 40/40 passed.
+  adapters and passes 45/45 fake-based tests; no weights were loaded.
+- Integrated no-llama suite: 45/45 CTest executables passed.
+- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 45/45 passed.
 - Standalone Asper: 24/24; astools: 27/27; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
@@ -228,6 +236,16 @@ trials require actual resources. No real-model result has been produced here.
   cap. A separate probe against the previous committed build reproduces the flat
   directory bug: 264 MiB was accepted despite the 256 MiB limit; the new snapshot
   fails with no fingerprint. The Windows handle walker remains unvalidated here.
+- SDK checks include nine Python and eight JavaScript transport/lifecycle cases,
+  TypeScript compilation, and actual MCP/HTTP integration in each language. They
+  cover Unicode, event truncation, local timeout versus engine cancellation,
+  pending approvals over 4 KiB with exact hashes, denied self-approval, persisted
+  interruption, stale work revisions and process-local task handles. The server
+  rejects oversized requests; malformed peers, late replies and remaining process
+  group members cannot silently corrupt client state. Python wheel and npm archive
+  checks use isolated installs, live MCP calls and installed TypeScript exports.
+  Local interpreters were Python 3.14.7/3.12 and Node 26.7.0; the compiler was 7.0.2.
+  CI requests Node 22 and locks its test tooling; other platform runs are not claimed.
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.

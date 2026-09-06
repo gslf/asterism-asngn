@@ -1,0 +1,3 @@
+*.egg-info/
+node_modules/
+*.tgz

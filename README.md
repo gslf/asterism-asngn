@@ -275,6 +275,13 @@ Mode changes select a safe default profile; `/profile` can then choose one of
 missing authorization is reported in the workflow instead of being hidden;
 switching profile or granting the tool permission enables the action.
 
+## Host SDKs
+
+[Python and JavaScript/TypeScript SDKs](sdk/README.md) expose asynchronous tasks,
+cursor events, cancellation, acceptance criteria and read-only approval inspection
+over the local MCP server. They ship without runtime dependencies and distinguish
+committed turns from verified task success. Task handles remain process-local.
+
 ## Shared model runtime and API providers
 
 asngn and embedded Asper share one `asmodel` runtime. Asper's curator

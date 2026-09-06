@@ -152,3 +152,7 @@ endif()
 if(TARGET test_work)
   target_sources(test_work PRIVATE ../mcp/work.c)
 endif()
+
+if(Python3_Interpreter_FOUND)
+  add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../sdk/tests ${CMAKE_CURRENT_BINARY_DIR}/sdk)
+endif()

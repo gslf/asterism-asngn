@@ -77,6 +77,7 @@ static const char OOM_RESPONSE[] =
 
 #define MCP_LEGACY_VERSION "2025-06-18"
 #define MCP_MODERN_VERSION "2026-07-28"
+#define MCP_REQUEST_BYTES (8u * 1024u * 1024u)
 static int mcp_modern_response;
 
 /* ═══════════════════════ server state ═══════════════════════ */
@@ -1049,6 +1050,11 @@ static asmodel_json_value *initialize_result(void) {
   ok &= asmodel_json_object_set(res, "protocolVersion", asmodel_json_string(MCP_LEGACY_VERSION)) == 0;
   caps = asmodel_json_object();
   ok &= asmodel_json_object_set(caps, "tools", asmodel_json_object()) == 0;
+  asmodel_json_value *experimental = NULL;
+  ok &= asmodel_json_parse("{\"dev.asterism/asngn\":{\"contractVersion\":1}}",
+                           strlen("{\"dev.asterism/asngn\":{\"contractVersion\":1}}"),
+                           &experimental) == 0;
+  ok &= asmodel_json_object_set(caps, "experimental", experimental) == 0;
   ok &= asmodel_json_object_set(res, "capabilities", caps) == 0;
   si = asmodel_json_object();
   ok &= asmodel_json_object_set(si, "name", asmodel_json_string("asngn-mcp")) == 0;
@@ -1269,7 +1275,7 @@ static void handle_request(server_state *st, asmodel_json_value *req) {
 /* ═══════════════════════ stdin line reader ═══════════════════════ */
 
 /* 1 = line read (*out malloc'd, trailing \n/\r stripped), 0 = EOF with no
- * data, -1 = allocation failure (rest of the line drained). */
+ * data, -1 = allocation failure, -2 = request limit exceeded. */
 static int read_line(FILE *f, char **out, size_t *out_len) {
   size_t cap = 256, n = 0;
   char *buf = malloc(cap);
@@ -1279,6 +1285,7 @@ static int read_line(FILE *f, char **out, size_t *out_len) {
     return -1;
   }
   while ((ch = getc(f)) != EOF && ch != '\n') {
+    if (n == MCP_REQUEST_BYTES) { free(buf); return -2; }
     if (n + 2 > cap) {
       char *nb;
       if (cap > (size_t)-1 / 2) {
@@ -1394,6 +1401,10 @@ int main(int argc, char **argv) {
     size_t llen = 0;
     int rst = read_line(stdin, &line, &llen);
     if (rst == 0) break;
+    if (rst == -2) {
+      send_error(1, NULL, -32600, "request exceeds 8 MiB; connection closed", NULL);
+      break;
+    }
     if (rst < 0) {
       emit_line(OOM_RESPONSE);
       continue;

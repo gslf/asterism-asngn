@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "asterism-sdk"
+version = "0.1.0"
+description = "Async local host SDK for the Asterism coding engine"
+requires-python = ">=3.11"
+license = "MIT"
+readme = "README.md"
+license-files = ["LICENSE"]
+
+[tool.setuptools.package-data]
+asterism = ["py.typed"]

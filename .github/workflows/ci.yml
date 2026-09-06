@@ -83,6 +83,11 @@ jobs:
       - name: Build and test astools
         working-directory: asterism-astools
         run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Install SDK check tools
+        working-directory: asterism-asngn/sdk
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Configure asngn
         working-directory: asterism-asngn
         env:
@@ -95,6 +100,13 @@ jobs:
       - name: Test asngn
         working-directory: asterism-asngn
         run: ctest --test-dir build -C Release --output-on-failure
+      - name: Install wheel builder
+        if: matrix.name == 'linux-gcc'
+        run: python -m pip install setuptools==84.0.0
+      - name: Build and import SDK archives
+        if: matrix.name == 'linux-gcc'
+        working-directory: asterism-asngn
+        run: python sdk/tests/package_smoke.py build/asngn-mcp "$(command -v node)" sdk/node_modules/typescript/bin/tsc
 
   linux-sanitizers:
     runs-on: ubuntu-latest
@@ -126,6 +138,11 @@ jobs:
           repository: gslf/asterism-asmodel
           ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
+      - uses: actions/setup-node@v4
+        with: { node-version: '22' }
+      - name: Install SDK check tools
+        working-directory: asterism-asngn/sdk
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - run: cmake -B build -DASNGN_WITH_LLAMA=OFF -DASNGN_SANITIZERS=ON
         working-directory: asterism-asngn
       - run: cmake --build build -j 4

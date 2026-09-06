@@ -15,7 +15,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, generation trace/consumption correlation, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper and embedding traces, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts and explicit partial-outcome reconciliation | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
-| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
+| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime, instrumented shared JSON/provider fuzz targets | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, storage/process fuzzing and TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, Python and JavaScript/TypeScript host SDKs, tested local packages, accurate build/accounting documentation | ACP, general MCP client, signed packages, editor flows and external user trials |
 
@@ -206,6 +206,13 @@ I/O errors. Failed startup now retains its output/exit code but is explicitly
 `infrastructure_error`; it previously appeared to be a failing candidate command.
 This change has not yet passed successful production isolation outside the outer
 sandbox. The earlier complete oracle run remains evidence for the earlier code.
+
+The shared runtime adds optional Clang/libFuzzer targets for strict JSON semantic
+round trips and provider/embedding decoding, instrumenting the actual library.
+A local seed-1 run completed 2,049,489 JSON and 305,386 provider executions, with
+30 seconds requested per target and no finding. ASan/UBSan were active, leak
+detection was disabled; this is bounded parser testing, not a security audit.
+The CI jobs are defined but have not run remotely. See the [fuzzing record](../../asterism-asmodel/docs/fuzzing.md).
 
 Four trace unit cases cover role/correlation metadata, omitted-item hashing,
 framed boundaries, output constraints and invalid structures. Native integration

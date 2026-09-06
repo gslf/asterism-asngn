@@ -29,6 +29,7 @@ set(ASNGN_TEST_PROGRAMS
   test_engine_guards
   test_tool_selection
   test_native_actions
+  test_approvals
 )
 
 foreach(test_name ${ASNGN_TEST_PROGRAMS})
@@ -100,7 +101,7 @@ target_link_libraries(asngn_fake_tool PRIVATE xcdn)
 
 # The engine integration tests use the fixture writers (fixtures.c) and
 # invoke the fake tool by absolute path.
-foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions)
+foreach(t test_engine_turns test_engine_guards test_tool_selection test_native_actions test_approvals)
   if(TARGET ${t})
     target_sources(${t} PRIVATE fixtures.c)
     target_compile_definitions(${t} PRIVATE
@@ -111,10 +112,18 @@ endforeach()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  if(TARGET asngn)
+    add_test(NAME test_confirmation_tui
+      COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/confirmation_tui.py
+        $<TARGET_FILE:asngn>)
+  endif()
   add_test(NAME test_quality_oracle
     COMMAND ${Python3_EXECUTABLE} -B -m unittest discover
       -s ${CMAKE_CURRENT_SOURCE_DIR}/quality -p test_oracle.py)
   if(TARGET asngn-mcp)
+    add_test(NAME test_approval_mcp
+      COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/approval_mcp.py
+        $<TARGET_FILE:asngn-mcp>)
     add_test(NAME test_work_mcp
       COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/work_smoke.py
         $<TARGET_FILE:asngn-mcp>)

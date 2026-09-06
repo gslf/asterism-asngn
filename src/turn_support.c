@@ -94,7 +94,8 @@ char *asngn_context_text(asngn_session *s, const char *text) {
   if (s->redact_context) {
     char *masked = NULL;
     size_t n = 0;
-    if (asngn_redact(text, strlen(text), &masked, &n) == ASNGN_OK && masked != NULL) return masked;
+    if (asngn_redact(text, strlen(text), &masked, &n) != ASNGN_OK) return NULL;
+    if (masked != NULL) return masked;
   }
   return asngn_strdup(text);
 }

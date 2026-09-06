@@ -298,11 +298,17 @@ asngn_err asngn_call_execute(asngn_ctx *c, asngn_turn_state *t, const char *line
   /* action gate: annotation-driven confirmation */
   {
     const char *deny_code = NULL;
-    if (!asngn_call_confirm(c, t, ref, cmd, args, &note, &deny_code)) {
+    bool allowed = false;
+    e = asngn_call_confirm(c, t, selected, exec_args, &note, &allowed, &deny_code);
+    if (e != ASNGN_OK) goto out;
+    if (!allowed) {
       char notice[192];
       char auth_data[128];
       t->authorization_blocked = true;
-      snprintf(notice, sizeof notice,
+      if (strcmp(deny_code,"asngn/approval-stale") == 0)
+        snprintf(notice,sizeof notice,
+            "The workspace or tool changed while approval was pending. A new request needs review before execution.");
+      else snprintf(notice, sizeof notice,
                "Authorization required: %s.%s was not approved. Change the "
                "security profile or confirmation policy to continue.",
                ref, cmd);

@@ -46,6 +46,7 @@ asngn_err asngn_turn_journal(asngn_turn_state *t, const char *state,
     return ASNGN_ERR_NOMEM;
   if (!asngn_xobj_put(v, "schema", xcdn_value_int(1)) ||
       !asngn_xobj_put(v, "action_id", xcdn_value_string(t->action_id)) ||
+      !asngn_xobj_put(v, "approval_id", xcdn_value_string(t->approval_id)) ||
       !asngn_xobj_put(v, "verification_snapshot", xcdn_value_string(t->verification_snapshot)) ||
       !asngn_xobj_put(v, "verification_ok", xcdn_value_bool(t->verification_ok)) ||
       !asngn_xobj_put(v, "at",

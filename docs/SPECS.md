@@ -224,7 +224,8 @@ Safety is layered around the model:
 1. Input validation rejects invalid encoding and impossible request state.
 2. The decision schema restricts the action language.
 3. astools validates arguments, canonicalizes paths and enforces grants.
-4. Destructive operations can require explicit human confirmation.
+4. Interactive approvals durably bind effective arguments, package and snapshot;
+   changes during review invalidate the request. See [approval contracts](approvals.md).
 5. Secret redaction prevents known credentials from entering prompts or output.
 6. Loop guards limit repeated or non-progressing behavior.
 7. Output validation and the optional judge compare claims with evidence.
@@ -376,7 +377,8 @@ The implementation must preserve these rules:
 `include/asngn.h` is the authoritative C99 host API. It covers engine and
 workspace lifecycle, persistent modes and profiles, asynchronous turns, rich
 output/reasoning/notice streams,
-cancellation and confirmation, transcripts, feedback, projects, tools, recall,
+cancellation, durable approval inspection and confirmation, transcripts, feedback,
+projects, tools, recall,
 exports, telemetry, model information and statistics.
 
 The terminal client uses the same task lifecycle and exposes live streaming,

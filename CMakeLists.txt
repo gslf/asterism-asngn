@@ -188,6 +188,9 @@ set(ASNGN_SOURCES
   src/draft.c
   src/tool_outcome.c
   src/confirmation.c
+  src/approval_codec.c
+  src/approval_store.c
+  src/approval_request.c
   src/tool_action.c
   src/action_instruction.c
   src/action_loop.c
@@ -294,6 +297,7 @@ if(ASNGN_BUILD_TUI)
     tui/input.c
     tui/panes.c
     tui/modal.c
+    tui/confirmation.c
     tui/chat.c
   )
   target_include_directories(asngn PRIVATE
@@ -306,7 +310,7 @@ endif()
 
 # ── asngn-mcp ───────────────────────────────────────────────────────────────
 if(ASNGN_BUILD_MCP)
-  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c)
+  add_executable(asngn-mcp mcp/main.c mcp/tasks.c mcp/work.c mcp/approval.c)
   target_include_directories(asngn-mcp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/src

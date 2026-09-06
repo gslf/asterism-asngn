@@ -154,7 +154,7 @@ static void eng_sink_cb(const char *piece, void *ud) {
 
 /* Submit one message and wait for its result (60 s real-time budget —
  * the fakes answer instantly; only the tool subprocess takes real time). */
-static asngn_err eng_turn(eng_fx *f, const char *msg,
+static inline asngn_err eng_turn(eng_fx *f, const char *msg,
                           const asngn_submit_opts *opts, eng_sink *sink,
                           asngn_turn_result *out) {
   asngn_task *t = NULL;

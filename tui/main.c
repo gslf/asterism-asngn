@@ -410,6 +410,7 @@ static void check_task(tui_app *a) {
   if (e == ASNGN_ERR_BUSY) return;
   asngn_task_free(a->task);
   a->task = NULL;
+  tui_confirm_clear(a);
   /* Task completion is the authoritative lifecycle boundary.  The
    * terminal telemetry event normally clears this too, but the status bar
    * must never remain stuck if an event is dropped or malformed. */
@@ -984,13 +985,6 @@ static void complete(tui_app *a) {
 
 /* ── key handling ─────────────────────────────────────────────────────── */
 
-static void resolve_confirm(tui_app *a, int allow, int session_wide) {
-  if (!a->confirm.active) return;
-  asngn_confirm(a->ctx, a->confirm.id, allow, session_wide);
-  a->confirm.active = 0;
-  a->dirty = a->structural = 1;
-}
-
 static void submit_editor(tui_app *a) {
   char text[TUI_ED_MAX];
   int cx, cy;
@@ -1059,18 +1053,7 @@ static void cancel_running_turn(tui_app *a) {
 static void handle_key(tui_app *a, const tui_key *k) {
   a->dirty = 1;
 
-  if (a->confirm.active) { /* y / n / a / Esc */
-    if (k->kind == TK_CHAR) {
-      char c = k->utf8[0];
-      if (c == 'y' || c == 'Y') resolve_confirm(a, 1, 0);
-      else if (c == 'n' || c == 'N') resolve_confirm(a, 0, 0);
-      else if (c == 'a' || c == 'A') resolve_confirm(a, 1, 1);
-    } else if (k->kind == TK_ESC || k->kind == TK_CTRL_C ||
-               k->kind == TK_CTRL_D) {
-      resolve_confirm(a, 0, 0); /* escape hatches deny */
-    }
-    return;
-  }
+  if (a->confirm.active) { tui_confirm_key(a,k); return; }
   if (a->sess.active) { /* arrows move, Enter switches, n new, d d deletes */
     tui_sess *p = &a->sess;
     switch (k->kind) {
@@ -1348,7 +1331,7 @@ static void welcome(tui_app *a) {
 
 /* ── --frame-dump: golden-frame hook ─────────────────────────────────── */
 
-static int run_frame_dump(void) {
+static int run_frame_dump(int confirmation) {
   tui_app a;
   tui_frame f;
   int cx, cy, x, y;
@@ -1366,8 +1349,25 @@ static int run_frame_dump(void) {
   tui_queue_init(&a.q, NULL);
   welcome(&a);
 
+  if (confirmation) {
+    a.confirm.review = calloc(1,sizeof *a.confirm.review);
+    if (!a.confirm.review) return 1;
+    asngn_buf args; asngn_buf_init(&args);
+    for (int i = 0; i < 120; i++)
+      if (asngn_buf_printf(&args,"Review line %03d: café 日本語\n",i) != ASNGN_OK) return 1;
+    if (asngn_buf_appends(&args,"PAYLOAD_END") != ASNGN_OK) return 1;
+    a.confirm.review->arguments = asngn_buf_detach(&args); asngn_buf_free(&args);
+    snprintf(a.confirm.review->tool_ref,sizeof a.confirm.review->tool_ref,"edit@1.0.0");
+    snprintf(a.confirm.review->command,sizeof a.confirm.review->command,"patch");
+    a.confirm.active = 1;
+  }
   if (tui_frame_alloc(&f, 80, 24) != 0) return 1;
   tui_render_frame(&a, &f, &cx, &cy);
+  if (confirmation) {
+    tui_key end = {0}; end.kind = TK_END;
+    tui_confirm_key(&a,&end);
+    tui_render_frame(&a,&f,&cx,&cy);
+  }
 
   for (y = 0; y < f.h; y++) {
     char line[80 * 4 + 1];
@@ -1388,6 +1388,7 @@ static int run_frame_dump(void) {
   chat_free(&a.chat);
   ed_free(&a.ed);
   tui_queue_free(&a.q);
+  tui_confirm_clear(&a);
   return 0;
 }
 
@@ -1682,6 +1683,7 @@ static int run_interactive(const char *root, const char *config,
     size_t i;
     for (i = 0; i < a.pending_n; i++) free(a.pending[i]);
   }
+  tui_confirm_clear(&a);
   asngn_free(a.perms.tools);
   free(a.sess.rows);
   chat_free(&a.chat);
@@ -1775,6 +1777,8 @@ int main(int argc, char **argv) {
       doctor = 1;
     } else if (strcmp(argv[i], "--frame-dump") == 0) {
       frame_dump = 1; /* hidden: golden-frame hook */
+    } else if (strcmp(argv[i], "--frame-dump-confirm") == 0) {
+      frame_dump = 2;
     } else if (strcmp(argv[i], "--version") == 0) {
       printf("asngn %s\n", asngn_version());
       return 0;
@@ -1798,7 +1802,7 @@ int main(int argc, char **argv) {
     asngn_free(report);
     return e == ASNGN_OK ? 0 : 1;
   }
-  if (frame_dump) return run_frame_dump();
+  if (frame_dump) return run_frame_dump(frame_dump == 2);
   if (once != NULL)
     return run_once(root, config, workspace, allow_degraded,
                     session, detail, confirm_override,

@@ -501,7 +501,8 @@ struct asngn_session {
   asngn_stream journal_st;
   bool recovery_required;
   size_t interrupted_turns, uncertain_actions;
-  /* session allowlist: "tool.command" entries confirmed "always"    */
+  struct asngn_approval_store *approvals;
+  /* Process-local grants bound to package, workspace and security profile. */
   char      **allow;
   size_t      allow_n;
   /* resident ledger (small; drives stats, QpT, feedback, export) */
@@ -1047,6 +1048,7 @@ typedef struct asngn_turn_state {
   bool           wrote_workspace; /* a non-read_only call succeeded     */
   bool           artifact_written; /* fs.write/edit content landed       */
   char           action_id[37];
+  char           approval_id[37]; /* consumed one-shot approval; empty for policy grants */
   char           verification_snapshot[65];
   char           verification_action_id[37];
   bool           verification_attempted; /* build/test/run after mutation */
@@ -1100,9 +1102,9 @@ struct asngn_task {
 
 typedef struct {
   char id[64];          /* confirm_id (uuid)                         */
-  char ref[64], cmd[64];
   int  decided;         /* 0 pending, 1 decided                      */
   int  allow, session_wide;
+  asngn_session *session; /* borrowed while the worker waits */
   os_mutex mu;
   os_cond  cv;
 } asngn_confirm_slot;

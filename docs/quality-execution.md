@@ -11,11 +11,11 @@ astools efa6d22. Local source changes are included in the tested builds.
 |---|---|---|---|
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations | Published pins, calibrated remote tokenizer margins |
-| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests | Incremental snapshots, durable approval recovery, explicit data conversion, cross-process workspace coordination |
+| 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Descriptor-relative reads, bounded snapshots, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots, durable task recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Direct native final responses, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, safe reopen reads, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/LSP, incremental repo map, evidence selection trace, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
-| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues | Durable resume, approvals, persistent processes, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
+| 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, complete approval inspection | Durable resume, persistent processes, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, accurate build/accounting documentation | ACP, SDKs, MCP client, signed packages, editor flows and external user trials |
 
@@ -122,6 +122,11 @@ trials require actual resources. No real-model result has been produced here.
   Selection quality is lexical and uncalibrated; file-check/spawn is not atomic.
   Obsolete catalog/grammar/annotation caches and catalog-level configuration were
   removed. See [tool selection](tool-selection.md).
+- Interactive approvals bind effective arguments, package, workspace and profile.
+  Decisions are durable before execution; changed snapshots invalidate review.
+  The TUI scrolls full redacted arguments, and MCP exposes read-only inspection.
+  Reopening interrupted approvals never replays actions; durable task resumption
+  remains separate work. See [approval contracts](approvals.md).
 - MCP jobs retain at most 256 events and 32 handles; poll reports cursor gaps.
   Without a host acceptance contract, a committed turn remains `unconfirmed`.
   Process restart does not preserve these event rings.
@@ -131,9 +136,9 @@ trials require actual resources. No real-model result has been produced here.
 ## Validation at this checkpoint
 
 - Native CPU build against the pinned llama.cpp submodule compiles the actual
-  adapters and passes 35/35 fake-based tests; no weights were loaded.
-- Integrated no-llama suite: 35/35 CTest executables passed.
-- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 35/35 passed.
+  adapters and passes 38/38 fake-based tests; no weights were loaded.
+- Integrated no-llama suite: 38/38 CTest executables passed.
+- Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 38/38 passed.
 - Standalone Asper: 24/24; astools: 25/25; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
@@ -185,6 +190,9 @@ trials require actual resources. No real-model result has been produced here.
   session reopen, I/O failure and MCP revision/status transport. An integrated
   async turn includes mandatory criteria and remains incomplete after committing.
   A real stdio MCP process defines, reads and invalidates contracts across restart.
+- Approval tests cover expanded draft payloads, changed packages/snapshots,
+  immutable records, rejected decision writes, reopen without replay, read-only
+  MCP inspection and scrolling through long Unicode review text.
 - Fault cases cover stale snapshots, external symlinks, stale edit versions,
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.
@@ -202,6 +210,6 @@ behavior have not been validated by these Linux no-llama runs.
    loader interruption remains backend-dependent.
 2. Extend acceptance state with file/toolchain dependencies and task hypotheses;
    add retention/export/delete and explicit owner authorization to memory.
-3. Add resumable approvals, controlled processes and editor protocols.
+3. Add durable task resumption, controlled processes and editor protocols.
 4. Run the real-model matrix with supplied configuration before admitting learned
    routing, reusable procedures, alternative patches or offline policy promotion.

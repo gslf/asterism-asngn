@@ -20,7 +20,7 @@ and unknown `data` fields (forward compatibility).
 | `fold`        | `mode` ("compressor" \| "extractive")                  |
 | `digest`      | `label` (tool.command or "recall"), `bytes` (full size)|
 | `judge`       | `score` (0–10), `tokens`                               |
-| `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated) — answer via `asngn_confirm` |
+| `confirm`     | `confirm_id` (UUID), `tool`, `command`, `destructive`, `read_only`, `args` (truncated), `arguments_sha256`, `package_sha256`, `snapshot` — inspect full redacted arguments via `asngn_approval_get`, answer via `asngn_confirm` |
 | `authorization` | `granted`, `profile` — a profile denied an action; the turn may continue and report the required grant |
 | `guard`       | `guard` — one of `stall`, `identical_call`, `oscillation`, `step_budget`, `think_limit`, `recall_limit`, `futile_steps`, `tool_cap`, `working_trim`, `budget_pressure`, `outcome_gate`, `response_protocol` |
 | `answer`      | `tokens`, `capped`                                     |

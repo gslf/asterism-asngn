@@ -226,17 +226,7 @@ void tui_events_ingest(tui_app *a, const char *line_xcdn) {
     snprintf(e->kind, sizeof e->kind, "%s", kind);
     snprintf(e->name, sizeof e->name, "confirm");
     snprintf(e->tier, sizeof e->tier, "%.11s", js(data, "tool", ""));
-    /* raise the modal; keys resolve it via asngn_confirm */
-    snprintf(a->confirm.id, sizeof a->confirm.id, "%s",
-             js(data, "confirm_id", ""));
-    snprintf(a->confirm.tool, sizeof a->confirm.tool, "%s",
-             js(data, "tool", "?"));
-    snprintf(a->confirm.cmd, sizeof a->confirm.cmd, "%s",
-             js(data, "command", "?"));
-    snprintf(a->confirm.args, sizeof a->confirm.args, "%s",
-             js(data, "args", "{}"));
-    a->confirm.destructive = jb(data, "destructive", 0);
-    a->confirm.active = a->confirm.id[0] != '\0';
+    tui_confirm_open(a,js(data,"confirm_id",""),jb(data,"destructive",0));
   } else if (strcmp(kind, "phase") == 0) {
     /* live "now" marker — no trace row of its own; the matching
      * completion event (model_call / tool_call / fold) makes the row */

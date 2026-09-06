@@ -359,10 +359,13 @@ void panes_draw(struct tui_app *a, tui_frame *f, int x, int y,
 typedef struct {
   int  active;
   char id[40];
-  char tool[64], cmd[64];
-  char args[512];
+  asngn_approval *review;
+  int top, rows;
   int  destructive;
 } tui_confirm;
+void tui_confirm_open(struct tui_app *a, const char *id, int destructive);
+void tui_confirm_clear(struct tui_app *a);
+void tui_confirm_key(struct tui_app *a, const tui_key *key);
 
 typedef struct {
   int              active;

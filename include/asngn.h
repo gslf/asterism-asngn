@@ -315,9 +315,31 @@ void      asngn_task_free  (asngn_task *t);
 
 /* ---- confirmations ---------------------------------------------- */
 
+typedef enum {
+  ASNGN_APPROVAL_PENDING = 0, ASNGN_APPROVAL_APPROVED, ASNGN_APPROVAL_DENIED,
+  ASNGN_APPROVAL_CONSUMED, ASNGN_APPROVAL_INVALIDATED, ASNGN_APPROVAL_INTERRUPTED
+} asngn_approval_status;
+typedef struct {
+  unsigned long long sequence;
+  char id[37], turn_id[37];
+  char tool_ref[128], command[64];
+  char arguments_sha256[65], package_sha256[65], snapshot[65];
+  char workspace[4096];
+  asngn_security_profile profile;
+  asngn_approval_status status;
+  int session_wide;
+  char *arguments; /* owned, complete redacted display; execution uses its bound hash */
+} asngn_approval;
+/* Latest durable approval for this session; NOT_FOUND before the first request.
+ * Reopening an interrupted process never replays the associated action. */
+asngn_err asngn_approval_get(asngn_session *s, asngn_approval **out);
+void asngn_approval_free(asngn_approval *approval);
+
 /* An event of kind "confirm" carries data.confirm_id; the agent worker
  * blocks until asngn_confirm answers it (or the turn is cancelled).
- * session_wide != 0 adds tool.command to the session allowlist. */
+ * Decisions are durable before the worker wakes. Conflicting repeats fail.
+ * session_wide != 0 permits the same tool package/workspace/profile for this
+ * process's session lifetime; a changed package or profile needs a new decision. */
 asngn_err asngn_confirm(asngn_ctx *c, const char *confirm_id,
                         int allow, int session_wide);
 

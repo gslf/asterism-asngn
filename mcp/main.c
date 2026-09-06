@@ -41,6 +41,7 @@
 #include "asmodel_json.h"
 #include "tasks.h"
 #include "work.h"
+#include "approval.h"
 
 /* ═══════════════════════ usage / help ═══════════════════════ */
 
@@ -355,6 +356,18 @@ static int tool_session_work(server_state *st, const asmodel_json_value *args,
   int rc = state_session(st,slug,&s,out);
   if (rc != TOOL_OK) return rc;
   asngn_err e = mcp_work_request(s,args,out);
+  return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
+}
+
+static int tool_session_approval(server_state *st, const asmodel_json_value *args,
+                                 asmodel_json_value **out, const char **msg) {
+  const char *slug = NULL;
+  asngn_session *s = NULL;
+  if (arg_str(args,"session",&slug,msg) < 0 ||
+      asmodel_json_object_count(args) > (size_t)(slug ? 1 : 0)) BADP("only session is accepted");
+  int rc = state_session(st,slug,&s,out);
+  if (rc != TOOL_OK) return rc;
+  asngn_err e = mcp_approval_read(s,out);
   return e == ASNGN_OK ? TOOL_OK : engine_fail(st,e,out);
 }
 
@@ -914,6 +927,8 @@ typedef struct {
 } tool_def;
 
 static const tool_def TOOLS[] = {
+    {"session_approval", "Inspect the latest durable confirmation and complete redacted arguments. Read-only; never grants permission.",
+     "{\"type\":\"object\",\"properties\":{\"session\":{\"type\":\"string\"}},\"additionalProperties\":false}", tool_session_approval},
     {"session_work", "Read or define host acceptance criteria; revisions prevent stale updates. Only the runtime records proof.",
      MCP_WORK_SCHEMA, tool_session_work},
     {"agent_submit", "Submit asynchronously; returns a task ID.",

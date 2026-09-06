@@ -39,8 +39,9 @@ tool to settle before the turn can release its state.
 Package identity covers manifests and package-relative entry artifacts; external
 toolchains and interpreter dependencies require independent version policies.
 The check and OS process creation are not atomic against an external writer.
-Metadata annotations narrow host policy but cannot grant OS capabilities. Existing
-confirmation decisions are not yet durable across restart.
+Metadata annotations narrow host policy but cannot grant OS capabilities.
+[Approval records](approvals.md) persist independently of turns. Restart marks
+unconsumed approvals interrupted and never replays their actions.
 
 Contract tests cover consistent schemas/grammar/catalog, explicit version lookup,
 read-only filtering, revocation, actual invocation and a full turn that discovers

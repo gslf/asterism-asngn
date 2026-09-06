@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "asngn_internal.h"
+#include "approval.h"
 #include "astools.h"
 #include "work_state.h"
 
@@ -950,7 +951,7 @@ asngn_err asngn_confirm(asngn_ctx *c, const char *confirm_id, int allow,
   if (!c->owner && c->lanes_n>1) {
     for (size_t i=0;i<c->lanes_n;i++) {
       asngn_err e=asngn_confirm(c->lanes[i],confirm_id,allow,session_wide);
-      if (e==ASNGN_OK) return e;
+      if (e!=ASNGN_ERR_NOT_FOUND) return e;
     }
     return ASNGN_ERR_NOT_FOUND;
   }
@@ -961,9 +962,22 @@ asngn_err asngn_confirm(asngn_ctx *c, const char *confirm_id, int allow,
     return asngn_seterr(c, ASNGN_ERR_NOT_FOUND,
                         "no pending confirmation %s", confirm_id);
   }
+  if (c->confirm.decided) {
+    bool same = c->confirm.allow == (allow != 0) &&
+        c->confirm.session_wide == (allow && session_wide);
+    os_mutex_unlock(&c->confirm.mu);
+    return same ? ASNGN_OK : ASNGN_ERR_BUSY;
+  }
+  asngn_session *s = c->confirm.session;
+  if (!s) { os_mutex_unlock(&c->confirm.mu); return ASNGN_ERR_NOT_FOUND; }
+  os_rwlock_wrlock(&s->lock);
+  asngn_err saved = asngn_approval_transition(s,
+      allow ? ASNGN_APPROVAL_APPROVED : ASNGN_APPROVAL_DENIED, allow && session_wide);
+  os_rwlock_wrunlock(&s->lock);
+  if (saved != ASNGN_OK) { os_mutex_unlock(&c->confirm.mu); return saved; }
   c->confirm.decided = 1;
   c->confirm.allow = allow ? 1 : 0;
-  c->confirm.session_wide = session_wide ? 1 : 0;
+  c->confirm.session_wide = allow && session_wide;
   os_cond_broadcast(&c->confirm.cv);
   os_mutex_unlock(&c->confirm.mu);
   return ASNGN_OK;

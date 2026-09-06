@@ -261,6 +261,21 @@ Its 2,628,136 bytes have SHA-256
 the adjacent build receipt, JUnit and log record clean pins, relocation and
 extracted-archive checks. That archive predates the task-recovery extension.
 
+The task-recovery checkpoint has also passed clean reconstruction at
+`/tmp/asterism-restricted-release-9a7y85y_`: Asngn `fe0e127`, Asper `6cfb137`,
+asmodel `f097e33` and Astools `aa8c418`; 48/31/6/35 executable suites passed.
+
+Astools `0174cfa` fixes the POSIX local timeout after early standard-pipe closure,
+keeps spawn/capture/reaping under one local deadline, and reports `timed_out`
+separately from exit status. One integer duration parser preserves milliseconds
+in manifests, type validation, configuration and execution; period bounds exclude
+Windows' infinite-wait sentinel. Shared output encoding retains NUL/invalid UTF-8
+bytes as base64 with explicit byte counts in proc results and project steps.
+Astools passes 35 ordinary, 35 ASan/UBSan (without LSan) and 29 non-threaded
+executables; the updated integrated engine passes 48 restricted ASan/UBSan suites.
+These are one-shot process contracts, not interactive process persistence or
+new Windows enforcement claims. See [process results](../../asterism-astools/docs/process-results.md).
+
 The preceding clean restricted checkpoint at
 `/tmp/asterism-restricted-release-x_4_t5zu` verified Asngn `623ecad`, Asper
 `6cfb137`, asmodel `f097e33` and the earlier Astools `228ec5c` with respectively

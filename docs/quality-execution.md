@@ -14,7 +14,7 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals | Incremental snapshots/ignore syntax, durable task recovery, explicit data conversion, cross-process workspace coordination |
 | 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Direct native final responses, attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
 | 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection traces, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper/native-request traces, fine-grained dependencies and task hypotheses |
-| 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, single-writer store, granular source ranges, dependency validity, support/conflict/correction links and retained revision history | Inverted text index, curator-proposed spans, retention/export/delete, owner authorization |
+| 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, fuzzing/TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
 | 9. Adoption | INTEROP-01, PRODUCT-01, ADOPTION-01 | Read-only `--doctor`, Python and JavaScript/TypeScript host SDKs, tested local packages, accurate build/accounting documentation | ACP, general MCP client, signed packages, editor flows and external user trials |
@@ -175,7 +175,7 @@ trials require actual resources. No real-model result has been produced here.
   adapters and passes 45/45 fake-based tests; no weights were loaded.
 - Integrated no-llama suite: 45/45 CTest executables passed.
 - Integrated TUI/MCP build with ASan/UBSan/LeakSanitizer: 45/45 passed.
-- Standalone Asper: 24/24; astools: 32/32; asmodel: 7/7.
+- Standalone Asper: 25/25; astools: 32/32; asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
   non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
@@ -216,6 +216,18 @@ trials require actual resources. No real-model result has been produced here.
 - Exact memory tests cover deleted/corrupt offset indices, late cursor pages,
   payload corruption and altered lengths that must not trigger truncation,
   in both memory event frames and the action/consumption WAL.
+- Source objects now hash the complete content while allocating only the requested
+  range. Corruption outside that range, oversized/empty objects, aliased buffers,
+  symlinked blobs and FIFOs are covered. This reduces slice allocation but adds
+  complete hashing per read; no end-to-end speedup is claimed.
+- Linux offline store maintenance adds 15 cases for physical export/verification,
+  real MCP lock contention in both directions, restore of records/source events,
+  stale snapshot rejection, malformed metadata, copy corruption, external changes,
+  quotas, aliases, mount-identity checks, interrupted erasure and uncertain sync.
+  The runtime checks a persistent erasure guard before recovery or file logging.
+  Erasure includes every derivative and backup inside the root; selective retention,
+  stores/logs outside it and authenticated multi-user APIs remain separate. See
+  [data governance](../../asterism-asper/docs/data-governance.md).
 - Grounding tests cover bad UTF-8 ranges, stale hashes/revisions, support cycles,
   partial coverage, changed dependencies, missing source events, contradictory
   claims, revocations, history cursors, uncertain writes and complete corruption.

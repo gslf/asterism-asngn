@@ -10,9 +10,9 @@
     },
     "asper": {
       "repository": "gslf/asterism-asper",
-      "revision": "56279c1d7d8196c311a30414d78e901c3fca80a1",
+      "revision": "68281adb0788cd9a72fabdc52c98fae7d47ca379",
       "headers": {
-        "include/asper.h": "f18a8e76641bb336efce938c60aef9a274b105f8f82f765cbec30c1efcdb9ae4"
+        "include/asper.h": "d2c58eee916c1a8abfbc0c8ac04bff1fbcf48eeceea4bdd209e41a42c1bdda1a"
       }
     },
     "asmodel": {

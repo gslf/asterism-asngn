@@ -3,10 +3,10 @@
 #define _POSIX_C_SOURCE 200809L
 #endif
 #include "asngn_internal.h"
+#include <errno.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef _WIN32
-#include <errno.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -63,6 +63,7 @@ asngn_err asngn_workspace_read(const char *root, const char *relative,
     if (size) rh = CreateFileW(wr, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                               NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
     f = path ? os_fopen(path, "rb") : NULL;
+    if (path && !f && errno == ENOENT) e = ASNGN_ERR_NOT_FOUND;
     if (rh != INVALID_HANDLE_VALUE && f) {
       DWORD rn = GetFinalPathNameByHandleW(rh, wr, 32768, FILE_NAME_NORMALIZED);
       DWORD fn = GetFinalPathNameByHandleW((HANDLE)_get_osfhandle(_fileno(f)), wf,

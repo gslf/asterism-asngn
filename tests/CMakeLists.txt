@@ -13,6 +13,7 @@ set(ASNGN_TEST_PROGRAMS
   test_redact
   test_verification
   test_workspace_tree
+  test_workspace_git
   test_work
   test_steps
   test_grammar
@@ -120,6 +121,13 @@ endforeach()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_executable(asngn_workspace_probe workspace_probe.c)
+  target_include_directories(asngn_workspace_probe PRIVATE ../src)
+  target_link_libraries(asngn_workspace_probe PRIVATE asngn_static)
+  add_test(NAME test_workspace_git_live
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/workspace_git.py
+      $<TARGET_FILE:asngn_workspace_probe>)
+  set_tests_properties(test_workspace_git test_workspace_git_live PROPERTIES TIMEOUT 120)
   add_test(NAME test_release_admission
     COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test_release.py)
   set_tests_properties(test_release_admission PROPERTIES TIMEOUT 120)

@@ -44,6 +44,41 @@ The active file follows the same background indexing ignore policy.
 patterns are **not yet interpreted**. The workspace metadata states this limited
 policy explicitly. Full ignore syntax and incremental reconciliation remain work.
 
+## Git metadata
+
+Snapshot identity now uses a separate bounded reader for `HEAD`, loose references
+and `packed-refs`. On POSIX, every path component is opened without following
+symlinks, including ancestors of metadata outside a linked worktree. Special
+files are rejected. Reference names are validated before opening them; binary,
+multiline and invalid object-ID data cannot become a reported commit. Branch names
+retain their hierarchy and are rejected beyond 127 bytes instead of truncated.
+
+Metadata lines admit 1 KiB, packed references 4 MiB and symbolic reference chains
+eight hops. Duplicate packed entries for the selected reference fail. Git identity
+is read before and after the source walk; an observed change rejects the snapshot.
+As with the source walk, this is not an atomic snapshot or protection against ABA
+changes. A syntactically valid OID is an observation, not proof of the commit's
+existence, authenticity or object contents.
+
+Ordinary `.git` directories and registered linked worktrees are supported. A
+linked worktree's back-pointer must identify this checkout, and its `commondir`
+must match the parent of `worktrees/<id>`. Common and per-worktree references follow
+the [Git repository layout](https://git-scm.com/docs/gitrepository-layout).
+These registration checks deliberately constrain external metadata access; they
+are not multi-user access control. Arbitrary `gitdir` redirects, separate Git
+directories, selected submodule Git files, unregistered common directories and
+reftable storage return `UNSUPPORTED` instead of guessing. Git environment
+overrides are not inherited, and the reader does not run Git, hooks or config.
+Submodule source inside a selected parent checkout still uses normal tree scanning.
+
+Eight Linux metadata cases cover aliases, a FIFO, traversal references, binary and
+oversized data, cycles, duplicate refs and damaged worktree registration. A real
+Git integration compares observed IDs for SHA-1 and SHA-256 repositories through
+worktree commits, packing and detached HEAD. A probe against `22a8101` returned
+external fixture bytes as a commit and produced a fingerprint for
+`HEAD = ref: ../../external`; the corrected reader returns `PARSE` with no identity
+or fingerprint. Windows metadata behavior has not been executed in this run.
+
 ## Retrieval evidence
 
 Retrieval keeps its separate content budget: at most 1,024 chunks, about 2 KiB

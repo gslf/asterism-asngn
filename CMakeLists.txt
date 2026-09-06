@@ -154,6 +154,8 @@ set(ASNGN_SOURCES
   src/session.c
   src/turn_journal.c
   src/workspace.c
+  src/workspace_git.c
+  src/workspace_git_paths.c
   src/workspace_read.c
   src/workspace_tree.c
   src/workspace_fingerprint.c

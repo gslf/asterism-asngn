@@ -6,13 +6,7 @@
 
 #include "asngn_internal.h"
 #include "workspace_tree.h"
-
-static void copy_trimmed(char *dst, size_t cap, const char *src) {
-  size_t n = src != NULL ? strcspn(src, "\r\n") : 0;
-  if (n >= cap) n = cap - 1;
-  memcpy(dst, src != NULL ? src : "", n);
-  dst[n] = '\0';
-}
+#include "workspace_git.h"
 
 static char *find_repository_root(const char *workspace) {
   char *cur = asngn_strdup(workspace);
@@ -32,83 +26,6 @@ static char *find_repository_root(const char *workspace) {
   }
   free(cur);
   return asngn_strdup(workspace);
-}
-
-static char *resolve_git_dir(const char *repository_root) {
-  char *marker = os_path_join(repository_root, ".git");
-  char *text = NULL, *path = NULL, *real = NULL;
-  size_t len = 0;
-  if (marker == NULL) return NULL;
-  if (os_read_file(marker, &text, &len) == ASNGN_OK &&
-      strncmp(text, "gitdir:", 7) == 0) {
-    char *value = text + 7;
-    char *end;
-    while (*value == ' ' || *value == '\t') value++;
-    end = value + strcspn(value, "\r\n");
-    *end = '\0';
-    path = os_path_is_abs(value) ? asngn_strdup(value)
-                                 : os_path_join(repository_root, value);
-    if (path != NULL) real = os_realpath(path);
-  }
-  free(path);
-  free(text);
-  if (real != NULL) { free(marker); return real; }
-  return marker;
-}
-
-static void packed_ref(const char *git, const char *ref, char *out,
-                       size_t out_cap) {
-  char *path = os_path_join(git, "packed-refs");
-  char *text = NULL, *line;
-  if (path == NULL || os_read_file(path, &text, NULL) != ASNGN_OK) {
-    free(path); free(text); return;
-  }
-  line = text;
-  while (*line != '\0') {
-    char *end = strpbrk(line, "\r\n");
-    char *space = strchr(line, ' ');
-    if (end == NULL) end = line + strlen(line);
-    if (space != NULL && space < end &&
-        (size_t)(end - space - 1) == strlen(ref) &&
-        memcmp(space + 1, ref, strlen(ref)) == 0) {
-      size_t n = (size_t)(space - line);
-      if (n >= out_cap) n = out_cap - 1;
-      memcpy(out, line, n); out[n] = '\0';
-      break;
-    }
-    line = end;
-    while (*line == '\r' || *line == '\n') line++;
-  }
-  free(text); free(path);
-}
-
-static void git_identity(asngn_workspace_info *w) {
-  char *git = resolve_git_dir(w->repository_root);
-  char *headp = git != NULL ? os_path_join(git, "HEAD") : NULL;
-  char *text = NULL;
-  size_t len = 0;
-  if (headp != NULL && os_read_file(headp, &text, &len) == ASNGN_OK) {
-    if (strncmp(text, "ref: ", 5) == 0) {
-      const char *ref = text + 5;
-      const char *slash = strrchr(ref, '/');
-      char refbuf[512];
-      copy_trimmed(w->branch, sizeof w->branch, slash != NULL ? slash + 1 : ref);
-      copy_trimmed(refbuf, sizeof refbuf, ref);
-      {
-        char *rp = os_path_join(git, refbuf);
-        char *oid = NULL;
-        if (rp != NULL && os_read_file(rp, &oid, NULL) == ASNGN_OK)
-          copy_trimmed(w->head, sizeof w->head, oid);
-        else
-          packed_ref(git, refbuf, w->head, sizeof w->head);
-        free(oid); free(rp);
-      }
-    } else {
-      copy_trimmed(w->head, sizeof w->head, text);
-      snprintf(w->branch, sizeof w->branch, "detached");
-    }
-  }
-  free(text); free(headp); free(git);
 }
 
 static void hash_optional_file(asngn_sha256_ctx *h, const char *root,
@@ -164,10 +81,10 @@ asngn_err asngn_workspace_snapshot(asngn_workspace_info *workspace,
   if (stats) memset(stats, 0, sizeof *stats);
   if (workspace) workspace->fingerprint[0] = '\0';
   if (workspace == NULL ||
-      workspace->canonical_root[0] == '\0')
+      workspace->canonical_root[0] == '\0' || workspace->repository_root[0] == '\0')
     return ASNGN_ERR_INVALID;
-  workspace->head[0] = workspace->branch[0] = '\0';
-  git_identity(workspace);
+  asngn_err e = asngn_git_identity(workspace);
+  if (e != ASNGN_OK) return e;
   asngn_sha256_init(&h);
   asngn_sha256_update(&h, "asngn-workspace-v2", 18);
   asngn_sha256_update(&h, workspace->canonical_root,
@@ -185,15 +102,29 @@ asngn_err asngn_workspace_snapshot(asngn_workspace_info *workspace,
                       strlen(workspace->build_adapter) + 1);
   hash_optional_file(&h, workspace->repository_root, ".gitignore");
   hash_optional_file(&h, workspace->canonical_root, ".asterismignore");
-  asngn_err e = asngn_workspace_tree_hash(workspace->canonical_root, &h, stats);
+  e = asngn_workspace_tree_hash(workspace->canonical_root, &h, stats);
   if (e != ASNGN_OK) { workspace->fingerprint[0] = 0; return e; }
+  asngn_workspace_info after = *workspace;
+  e = asngn_git_identity(&after);
+  if (e == ASNGN_OK && (strcmp(workspace->head, after.head) ||
+                       strcmp(workspace->branch, after.branch))) e = ASNGN_ERR_BUSY;
+  if (e != ASNGN_OK) {
+    if (stats) memset(stats, 0, sizeof *stats);
+    return e;
+  }
   asngn_sha256_final(&h, digest);
   asngn_sha256_hex(digest, sizeof digest, workspace->fingerprint);
   return ASNGN_OK;
 }
 
 asngn_err asngn_workspace_info_refresh(asngn_ctx *c, asngn_workspace_info *workspace) {
-  return c ? asngn_workspace_snapshot(workspace, &c->repo_stats) : ASNGN_ERR_INVALID;
+  if (!c) return ASNGN_ERR_INVALID;
+  asngn_err e = asngn_workspace_snapshot(workspace, &c->repo_stats);
+  if (e == ASNGN_ERR_UNSUPPORTED)
+    return asngn_seterr(c, e, "workspace Git identity supports loose/packed refs in ordinary checkouts and registered linked worktrees; other metadata layouts need an adapter");
+  if (e == ASNGN_ERR_PARSE)
+    return asngn_seterr(c, e, "workspace Git metadata is malformed or its worktree registration is incomplete");
+  return e;
 }
 
 asngn_err asngn_workspace_refresh(asngn_ctx *c) {

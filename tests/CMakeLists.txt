@@ -16,6 +16,7 @@ set(ASNGN_TEST_PROGRAMS
   test_retrieval
   test_workspace_git
   test_work
+  test_work_replay
   test_steps
   test_grammar
   test_route
@@ -207,6 +208,12 @@ endif()
 if(TARGET test_work)
   target_sources(test_work PRIVATE ../mcp/work.c)
 endif()
+
+foreach(target test_stream test_operations test_native_actions)
+  if(TARGET ${target})
+    target_sources(${target} PRIVATE wal_fixture.c)
+  endif()
+endforeach()
 
 if(TARGET test_task_record)
   target_sources(test_task_record PRIVATE ../mcp/recovery.c ../mcp/work.c)

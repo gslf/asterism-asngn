@@ -183,6 +183,25 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
+Acceptance-state replay now uses the same canonical byte check as approval
+replay and a 256 KiB frame bound. Production WAL consumers all stream records;
+the whole-document collector moved into test support. Regressions against
+`7b3040f` reproduce accepted duplicate fields and premature torn-tail repair
+before semantic rejection. Four cases also cover lossy strings, multiple states
+in one frame, quota admission and the maximum 16-criterion definition over an
+8 MiB/257-record history. See [state replay](state-replay.md).
+The complete updated runs pass 55 restricted ASan/UBSan suites without LSan,
+56 ordinary distribution suites and 51 non-threaded suites. Logs/JUnit are
+`/tmp/asterism-state-final-{sanitize,native,nothreads}-tests.*`.
+
+The approval checkpoint `7b3040f` passed clean reconstruction at
+`/tmp/asterism-restricted-release-guqjcud8`: 54 Asngn, 31 Asper, 6 asmodel and
+35 Astools suites. Its unsigned runtime archive at
+`/tmp/asterism-runtime-approval-20260906/asterism-0.1.0-linux-x86_64.tar.gz`
+contains 3,226,897 bytes with SHA-256
+`f00aa909fa3a6b82cec5d4e102c15ba0e45b8873a11a0299a7b569f3bdab7e20`.
+This artifact includes ACP and approval recovery, but predates acceptance replay.
+
 Approval recovery now streams one canonical record per frame under a 2 MiB bound.
 Checks run before torn-tail repair and before the recovered state is published.
 Initial regressions against `6a737e8` reproduce accepted extra fields and multiple

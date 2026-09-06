@@ -1,4 +1,5 @@
 #include "asngn_test.h"
+#include "wal_fixture.h"
 #include "asngn_internal.h"
 #include "xcdn.h"
 #include "operation_record.h"
@@ -36,7 +37,7 @@ TEST(reservations_survive_failure_and_reopen) {
   char *path = os_path_join(root,"operations.xcdn");
   xcdn_document_t *doc = NULL;
   ASSERT_TRUE(path);
-  ASSERT_OK(asngn_wal_load(c,path,&doc));
+  ASSERT_OK(asngn_test_wal_load(c,path,&doc));
   ASSERT_TRUE(doc && doc->values_len == 5);
   const char *expected[] = {"cancelled-request","cancelled-request","judge-request","judge-request",""};
   for (size_t i = 0; i < 5; i++)

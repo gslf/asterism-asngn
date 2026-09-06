@@ -1,4 +1,5 @@
 #include "asngn_test.h"
+#include "wal_fixture.h"
 #include "engine_fx.h"
 #include "native.h"
 #include "xcdn.h"
@@ -50,7 +51,7 @@ static void inspect_request_events(eng_fx *f, bool rejected) {
   char *path = os_path_join(f->c->root,"operations.xcdn");
   xcdn_document_t *operations = NULL;
   ASSERT_TRUE(path);
-  ASSERT_OK(asngn_wal_load(f->c,path,&operations));
+  ASSERT_OK(asngn_test_wal_load(f->c,path,&operations));
   for (size_t i = 0; i < request_n; i++) {
     size_t reserved = 0, settled = 0;
     char operation_id[37] = {0};

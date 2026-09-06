@@ -8,6 +8,7 @@
  */
 
 #include "asngn_test.h"
+#include "wal_fixture.h"
 
 #include <string.h>
 
@@ -196,7 +197,7 @@ TEST(wal_checksum_and_io_faults) {
   c->fault = NULL;
   ASSERT_ERR(asngn_wal_append(c, &st, "{n:3}", 5), ASNGN_ERR_IO);
   asngn_stream_close(&st);
-  ASSERT_OK(asngn_wal_load(c, path, &doc));
+  ASSERT_OK(asngn_test_wal_load(c, path, &doc));
   ASSERT_EQ_INT(doc->values_len, 2);
   xcdn_document_free(doc); doc = NULL;
   char *text = asngn_test_read_file(path, NULL);
@@ -205,7 +206,7 @@ TEST(wal_checksum_and_io_faults) {
   changed[3] = '9'; /* Still valid xCDN: only the checksum detects this. */
   ASSERT_OK(asngn_write_atomic(c, path, text, strlen(text)));
   free(text);
-  ASSERT_ERR(asngn_wal_load(c, path, &doc), ASNGN_ERR_PARSE);
+  ASSERT_ERR(asngn_test_wal_load(c, path, &doc), ASNGN_ERR_PARSE);
   ASSERT_TRUE(doc == NULL);
   asngn_test_rmtree(dir); bare_ctx_free(c);
 }
@@ -225,7 +226,7 @@ TEST(wal_only_repairs_incomplete_tail) {
   FILE *f = fopen(path, "ab");
   ASSERT_TRUE(f != NULL);
   fputs("// asngn-wal-v2 5 aaaa", f); fclose(f);
-  ASSERT_OK(asngn_wal_load(c, path, &doc));
+  ASSERT_OK(asngn_test_wal_load(c, path, &doc));
   ASSERT_EQ_INT(doc->values_len, 1);
   xcdn_document_free(doc);
   ASSERT_OK(os_file_size(path, &after));
@@ -250,7 +251,7 @@ TEST(wal_corrupt_length_cannot_discard_a_complete_frame) {
   ASSERT_TRUE(length != NULL); length[1] = '9';
   ASSERT_OK(asngn_write_atomic(c,path,text,strlen(text))); free(text);
   ASSERT_OK(os_file_size(path,&before));
-  ASSERT_ERR(asngn_wal_load(c,path,&doc),ASNGN_ERR_PARSE);
+  ASSERT_ERR(asngn_test_wal_load(c,path,&doc),ASNGN_ERR_PARSE);
   ASSERT_TRUE(doc == NULL);
   ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(before,after);
   asngn_test_rmtree(dir); bare_ctx_free(c);
@@ -271,7 +272,7 @@ TEST(wal_frames_are_complete_values_before_tail_repair) {
   FILE *tail = os_fopen(path,"ab");
   ASSERT_TRUE(tail); ASSERT_TRUE(fputs("// incomplete",tail) >= 0); fclose(tail);
   ASSERT_OK(os_file_size(path,&before));
-  ASSERT_ERR(asngn_wal_load(c,path,&doc),ASNGN_ERR_PARSE);
+  ASSERT_ERR(asngn_test_wal_load(c,path,&doc),ASNGN_ERR_PARSE);
   ASSERT_TRUE(!doc);
   ASSERT_OK(os_file_size(path,&after)); ASSERT_EQ_INT(before,after);
   asngn_test_rmtree(dir); bare_ctx_free(c);

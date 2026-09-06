@@ -1,7 +1,6 @@
 /* Versioned, checksummed WAL frames. Only an incomplete final frame is
  * repairable; a complete frame with a bad checksum is corruption. */
 #include "asngn_internal.h"
-#include "xcdn.h"
 #include <stdlib.h>
 #include <errno.h>
 #include <ctype.h>
@@ -115,26 +114,4 @@ asngn_err asngn_wal_visit(asngn_ctx *c, const char *path, size_t cap, asngn_wal_
 }
 asngn_err asngn_wal_inspect(asngn_ctx *c, const char *path, size_t cap, asngn_wal_record_fn fn, void *ud) {
   return scan(c,path,cap,fn,ud,false);
-}
-
-static asngn_err collect(void *ud, const char *record, size_t bytes) {
-  xcdn_document_t *out = ud, *frame = xcdn_parse_str(record,bytes,NULL);
-  if (!frame) return ASNGN_ERR_PARSE;
-  asngn_err e = ASNGN_OK;
-  for (size_t i = 0; e == ASNGN_OK && i < frame->values_len; i++) {
-    if (!asngn_xdoc_push(out,frame->values[i])) e = ASNGN_ERR_NOMEM;
-    else frame->values[i] = NULL;
-  }
-  xcdn_document_free(frame); return e;
-}
-
-asngn_err asngn_wal_load(asngn_ctx *c, const char *path, struct xcdn_document **out) {
-  *out = NULL;
-  if (!os_file_exists(path)) return ASNGN_OK;
-  xcdn_document_t *doc = xcdn_document_new();
-  if (!doc) return ASNGN_ERR_NOMEM;
-  asngn_err e = asngn_wal_visit(c,path,WAL_FRAME_MAX,collect,doc);
-  if (e == ASNGN_OK) *out = doc;
-  else xcdn_document_free(doc);
-  return e;
 }

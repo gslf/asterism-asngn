@@ -209,6 +209,7 @@ set(ASNGN_SOURCES
   src/work_definition.c
   src/work_codec.c
   src/work_store.c
+  src/work_replay.c
   src/work_api.c
   src/work_observe.c
   src/loop.c

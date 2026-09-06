@@ -1,7 +1,6 @@
 /* Validate complete frames before repairing a torn tail or exposing approval state. */
 #include "approval.h"
 #include <stdlib.h>
-#include <string.h>
 
 static asngn_err replay(void *userdata, const char *record, size_t bytes) {
   asngn_approval_store *store = userdata;
@@ -14,17 +13,7 @@ static asngn_err replay(void *userdata, const char *record, size_t bytes) {
   if (e == ASNGN_OK) {
     /* The pinned parser replaces duplicate keys and stores strings as C strings.
      * Require the exact writer form before accepting that potentially lossy DOM. */
-    asngn_buf canonical = {0};
-    xcdn_value_t *value = asngn_approval_encode(next);
-    xcdn_node_t *node = value ? xcdn_node_new(value) : NULL;
-    e = node ? asngn_xnode_write(node, false, &canonical) : ASNGN_ERR_NOMEM;
-    if (node)
-      xcdn_node_free(node);
-    else
-      xcdn_value_free(value);
-    if (e == ASNGN_OK && (canonical.len != bytes || memcmp(canonical.data, record, bytes)))
-      e = ASNGN_ERR_PARSE;
-    asngn_buf_free(&canonical);
+    e = asngn_xcanonical_match(asngn_approval_encode(next), record, bytes);
   }
   xcdn_document_free(doc);
   if (e == ASNGN_OK && !asngn_approval_follows(store->current, next))

@@ -184,11 +184,21 @@ bool asngn_xuuid(const xcdn_value_t *v, char out[37]) {
   return true;
 }
 
-/* ---- borrowed-node serialization ----------------------------------------
- * Wrap the node in a throwaway document (1-slot values array), serialize,
- * then drop the borrow before freeing the document so the node survives
- * (the store_node_pretty trick of the siblings). */
+/* ---- checked serialization --------------------------------------------- */
 
+asngn_err asngn_xcanonical_match(xcdn_value_t *encoded, const char *record, size_t bytes) {
+  xcdn_node_t *node = encoded ? xcdn_node_new(encoded) : NULL;
+  if (!node) { xcdn_value_free(encoded); return ASNGN_ERR_NOMEM; }
+  asngn_buf canonical = {0};
+  asngn_err e = asngn_xnode_write(node, false, &canonical);
+  xcdn_node_free(node);
+  if (e == ASNGN_OK && (canonical.len != bytes || memcmp(canonical.data, record, bytes)))
+    e = ASNGN_ERR_PARSE;
+  asngn_buf_free(&canonical);
+  return e;
+}
+
+/* The temporary document borrows one node; serialization never consumes it. */
 asngn_err asngn_xnode_write(const xcdn_node_t *node, bool pretty,
                             asngn_buf *out) {
   xcdn_document_t *doc;

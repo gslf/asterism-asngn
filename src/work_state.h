@@ -3,6 +3,7 @@
 #define ASNGN_WORK_STATE_H
 #include "asngn_internal.h"
 #include "xcdn.h"
+#define ASNGN_WORK_FRAME_MAX (256u * 1024u)
 typedef struct asngn_work_store {
   asngn_work_state state;
   asngn_stream stream;

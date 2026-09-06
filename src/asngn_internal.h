@@ -170,6 +170,8 @@ bool asngn_xuuid(const struct xcdn_value *v, char out[37]);    /* UUID     */
 /* Serialize one node (borrowed) wrapped in a temporary document. */
 asngn_err asngn_xnode_write(const struct xcdn_node *node, bool pretty,
                             asngn_buf *out);
+/* Consume a codec's newly encoded value and compare its canonical record bytes. */
+asngn_err asngn_xcanonical_match(struct xcdn_value *encoded, const char *record, size_t bytes);
 
 /* ── append streams with the torn-tail rule (stream.c) ────────────────── */
 
@@ -189,13 +191,8 @@ void      asngn_stream_close(asngn_stream *st);
 asngn_err asngn_stream_append(asngn_ctx *c, asngn_stream *st,
                               const char *line, size_t len);
 
-/* Read a whole stream file applying the torn-tail rule: on a parse
- * failure confined to the final value the file is truncated to the last
- * good offset with a WARN; a parse error before the tail is fatal
- * (ASNGN_ERR_PARSE). Missing file: *out_doc = NULL, ASNGN_OK. Caller
- * frees *out_doc with xcdn_document_free. `what` names the file in logs. */
+/* Append one versioned, checksummed record. Runtime replay streams checked frames. */
 asngn_err asngn_wal_append(asngn_ctx *c, asngn_stream *st, const char *record, size_t n);
-asngn_err asngn_wal_load(asngn_ctx *c, const char *path, struct xcdn_document **out);
 /* The consumer validates each complete frame before incomplete-tail repair.
  * A callback failure leaves the log untouched; callbacks must not reenter it. */
 typedef asngn_err (*asngn_wal_record_fn)(void *ud, const char *record, size_t bytes);

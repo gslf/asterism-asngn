@@ -1,5 +1,9 @@
 # Coordinated component builds
 
+For a checked local runtime archive and relocation test, see
+[Linux distribution](distribution.md). These artifacts remain unsigned until a
+separate publisher signing step is configured.
+
 `release.json` pins sibling revisions and hashes their public headers. The engine
 revision is the checked-out commit; `scripts/release.py` emits that exact revision
 in the resolved manifest. Engine CI and the real-model smoke workflow consume

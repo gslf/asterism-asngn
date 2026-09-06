@@ -216,6 +216,10 @@ action, and every request is answered chat-only.
 
 ## Running
 
+For a local Linux runtime archive built from checked component pins, see
+[distribution and relocation checks](docs/distribution.md). The current package
+uses remote providers and is an unsigned development artifact.
+
 POSIX (binaries in `build/`):
 
 ```bash

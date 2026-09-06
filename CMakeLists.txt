@@ -11,6 +11,12 @@ option(ASNGN_BUILD_TESTS "Build unit/integration tests"           ON)
 option(ASNGN_NO_THREADS  "Single-threaded build (asngn_tick)"     OFF)
 option(ASNGN_SANITIZERS  "Enable ASan/UBSan"                      OFF)
 option(ASNGN_WITH_LLAMA  "Build the llama.cpp inference backend"  ON)
+option(ASNGN_BUILD_DISTRIBUTION "Build the Linux remote-provider runtime package" OFF)
+if(ASNGN_BUILD_DISTRIBUTION AND (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
+    ASNGN_WITH_LLAMA OR ASNGN_SANITIZERS OR ASNGN_NO_THREADS OR
+    NOT ASNGN_BUILD_TUI OR NOT ASNGN_BUILD_MCP))
+  message(FATAL_ERROR "Distribution requires Linux, threaded TUI/MCP, ASNGN_WITH_LLAMA=OFF and sanitizers disabled")
+endif()
 
 # Sibling working trees (pinned deps). By default
 # they are expected next to this repository, as in the asterism workspace.
@@ -76,7 +82,7 @@ endif()
 # libasper: memory sibling. Its guarded CMakeLists skips its own
 # xcdn-c because the target already exists; it still adds llama.cpp, which
 # asngn's model runtime links as well.
-set(ASPER_BUILD_MCP   OFF)
+set(ASPER_BUILD_MCP   ${ASNGN_BUILD_DISTRIBUTION})
 set(ASPER_BUILD_TESTS OFF)
 set(ASPER_NO_THREADS  ${ASNGN_NO_THREADS})
 set(ASPER_WITH_LLAMA  ${ASNGN_WITH_LLAMA})
@@ -98,9 +104,9 @@ add_subdirectory("${ASNGN_ASPER_DIR}" deps-build/asper EXCLUDE_FROM_ALL)
 
 # libastools: tools sibling. The std tool suite builds so the engine
 # has a ready registry (build/packages); server/CLI/plugin extras stay off.
-set(ASTOOLS_BUILD_MCP    OFF)
+set(ASTOOLS_BUILD_MCP    ${ASNGN_BUILD_DISTRIBUTION})
 set(ASTOOLS_BUILD_TESTS  OFF)
-set(ASTOOLS_BUILD_CHECK  OFF)
+set(ASTOOLS_BUILD_CHECK  ${ASNGN_BUILD_DISTRIBUTION})
 set(ASTOOLS_BUILD_PLUGIN OFF)
 set(ASTOOLS_BUILD_STD    ON)
 set(ASTOOLS_NO_THREADS   ${ASNGN_NO_THREADS})
@@ -332,6 +338,10 @@ if(ASNGN_BUILD_MCP)
 endif()
 
 # ── Tests ───────────────────────────────────────────────────────────────────
+if(ASNGN_BUILD_DISTRIBUTION)
+  include(packaging/runtime.cmake)
+endif()
+
 if(ASNGN_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)

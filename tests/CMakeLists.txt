@@ -122,6 +122,14 @@ endforeach()
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
+  add_test(NAME test_runtime_archive COMMAND ${Python3_EXECUTABLE} -B
+    ${CMAKE_CURRENT_SOURCE_DIR}/test_runtime_archive.py)
+  set_tests_properties(test_runtime_archive PROPERTIES TIMEOUT 30)
+  if(ASNGN_BUILD_DISTRIBUTION)
+    add_test(NAME test_distribution COMMAND ${Python3_EXECUTABLE} -B
+      ${CMAKE_CURRENT_SOURCE_DIR}/distribution.py --build ${CMAKE_BINARY_DIR})
+    set_tests_properties(test_distribution PROPERTIES TIMEOUT 90)
+  endif()
   add_executable(asngn_operation_replay_probe operation_replay_probe.c)
   target_include_directories(asngn_operation_replay_probe PRIVATE ../src)
   target_link_libraries(asngn_operation_replay_probe PRIVATE asngn_static)

@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -70,27 +71,36 @@ jobs:
       - name: Require HTTP conformance coverage
         working-directory: asterism-asmodel
         run: cmake --build build --config Release --target asmodel-openai-smoke -j 4
-      - name: Build and test asmodel
+      - name: Build asmodel
         working-directory: asterism-asmodel
-        run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure
+        run: cmake --build build --config Release -j 4
+      - name: Test asmodel
+        working-directory: asterism-asmodel
+        run: ctest --test-dir build -C Release --output-on-failure
       - name: Configure Asper
         working-directory: asterism-asper
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASPER_WITH_LLAMA=OFF -DASPER_BUILD_MCP=ON
-      - name: Build and test Asper
+      - name: Build Asper
         working-directory: asterism-asper
-        run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure
+        run: cmake --build build --config Release -j 4
+      - name: Test Asper
+        working-directory: asterism-asper
+        run: ctest --test-dir build -C Release --output-on-failure
       - name: Configure astools
         working-directory: asterism-astools
         env:
           CC: ${{ matrix.cc }}
           CXX: ${{ matrix.cxx }}
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DASTOOLS_BUILD_MCP=ON
-      - name: Build and test astools
+      - name: Build astools
         working-directory: asterism-astools
-        run: cmake --build build --config Release -j 4 && ctest --test-dir build -C Release --output-on-failure
+        run: cmake --build build --config Release -j 4
+      - name: Test astools
+        working-directory: asterism-astools
+        run: ctest --test-dir build -C Release --output-on-failure
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - name: Install SDK check tools
@@ -115,6 +125,13 @@ jobs:
         if: matrix.name == 'linux-gcc'
         working-directory: asterism-asngn
         run: python sdk/tests/package_smoke.py build/asngn-mcp "$(command -v node)" sdk/node_modules/typescript/bin/tsc
+      - name: Preserve test failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-${{ matrix.name }}
+          path: '**/build/Testing/Temporary/*.log'
+          if-no-files-found: ignore
 
   linux-sanitizers:
     runs-on: ubuntu-latest
@@ -148,6 +165,8 @@ jobs:
           repository: gslf/asterism-asmodel
           ref: ${{ steps.pins.outputs.asmodel }}
           path: asterism-asmodel
+      - name: Verify component contracts
+        run: python asterism-asngn/scripts/release.py --root .
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - name: Install SDK check tools
@@ -161,3 +180,10 @@ jobs:
         working-directory: asterism-asngn
       - run: ctest --test-dir build --output-on-failure
         working-directory: asterism-asngn
+      - name: Preserve sanitizer failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-linux-sanitizers
+          path: '**/build/Testing/Temporary/*.log'
+          if-no-files-found: ignore

@@ -2,6 +2,10 @@
 #include "workspace_git.h"
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
 
 asngn_err asngn_git_read(const char *directory, const char *name, size_t cap, char **out) {
   size_t len = 0;
@@ -38,13 +42,45 @@ static char *canonical(const char *base, const char *value) {
   if (real) for (char *p = real; *p; p++) if (*p == '\\') *p = '/';
   return real;
 }
+#ifdef _WIN32
+static bool path_identity(const char *path, BY_HANDLE_FILE_INFORMATION *info) {
+  int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
+  if (!n) return false;
+  wchar_t *wide = malloc((size_t)n * sizeof *wide);
+  if (!wide) return false;
+  if (!MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, n)) {
+    free(wide);
+    return false;
+  }
+  HANDLE handle = CreateFileW(wide, 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              NULL, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS, NULL);
+  free(wide);
+  if (handle == INVALID_HANDLE_VALUE) return false;
+  bool ok = GetFileInformationByHandle(handle, info) != 0;
+  CloseHandle(handle);
+  return ok;
+}
+#endif
+static bool same_path(const char *actual, const char *expected) {
+#ifdef _WIN32
+  /* GetFullPathName does not expand 8.3 aliases or normalize path casing.
+   * Compare the opened objects, so a Git-written long path can match TEMP's
+   * short spelling without accepting a different worktree registration. */
+  BY_HANDLE_FILE_INFORMATION a, b;
+  return path_identity(actual, &a) && path_identity(expected, &b) &&
+         a.dwVolumeSerialNumber == b.dwVolumeSerialNumber &&
+         a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow;
+#else
+  return !strcmp(actual, expected);
+#endif
+}
 static asngn_err points_to(const char *directory, const char *name, const char *expected) {
   char *text = NULL, *actual = NULL;
   asngn_err e = asngn_git_read(directory, name, ASNGN_GIT_LINE_MAX, &text);
   if (e == ASNGN_OK) e = asngn_git_line(text);
   if (e == ASNGN_OK) {
     actual = canonical(directory, text);
-    if (!actual || strcmp(actual, expected)) e = ASNGN_ERR_DENIED;
+    if (!actual || !same_path(actual, expected)) e = ASNGN_ERR_DENIED;
   }
   free(actual);
   free(text);

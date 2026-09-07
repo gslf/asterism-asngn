@@ -178,6 +178,22 @@ TEST(linked_worktree_uses_the_registered_common_store) {
   ASSERT_OK(snapshot(&f, "job", &w));
   ASSERT_EQ_STR(w.head, oid);
   ASSERT_EQ_STR(w.branch, "feature/review");
+#ifdef _WIN32
+  /* Git writes long absolute paths even when the caller uses a TEMP 8.3 alias. */
+  char short_root[256], registration_text[512];
+  wchar_t wide_root[256], wide_short[256];
+  ASSERT_TRUE(MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, f.root, -1,
+                                 wide_root, 256) > 0);
+  DWORD short_n = GetShortPathNameW(wide_root, wide_short, 256);
+  ASSERT_TRUE(short_n > 0 && short_n < 256);
+  ASSERT_TRUE(WideCharToMultiByte(CP_UTF8, 0, wide_short, -1, short_root,
+                                 sizeof short_root, NULL, NULL) > 0);
+  snprintf(registration_text, sizeof registration_text, "%s/job/.git\n", short_root);
+  ASSERT_OK(put(&f, "main/.git/worktrees/job/gitdir", registration_text));
+  ASSERT_OK(snapshot(&f, "job", &w));
+  ASSERT_EQ_STR(w.head, oid);
+  ASSERT_OK(put(&f, "main/.git/worktrees/job/gitdir", "../../../../job/.git\n"));
+#endif
   ASSERT_OK(put(&f, "main/.git/worktrees/job/HEAD", "ref: refs/worktree/isolated\n"));
   ASSERT_OK(put(&f, "main/.git/worktrees/job/refs/worktree/isolated", oid));
   ASSERT_OK(put(&f, "main/.git/refs/worktree/isolated", "WRONG_STORE"));

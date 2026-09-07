@@ -687,7 +687,30 @@ TEST(uncertain_commit_blocks_until_reopen) {
   asngn_session_close(session);fx_drop(&f);
 }
 
+TEST(model_introspection_bounds_shared_manager_stats) {
+  fx f;
+  asngn_model_info models[4];
+  size_t count = 0;
+  ASSERT_TRUE(fx_setup(&f, NULL));
+  /* A shared manager can include models beyond the engine's pool. */
+  for (size_t i = 0; i <= ASNGN_MAX_POOL; i++) {
+    asmodel_spec spec;
+    char id[32];
+    memset(&spec, 0, sizeof spec);
+    snprintf(id, sizeof id, "extra-%zu", i);
+    spec.id = id;
+    ASSERT_EQ_INT(asmodel_manager_register(f.c->shared_models, &spec), ASMODEL_OK);
+  }
+  ASSERT_TRUE(asmodel_manager_stats(f.c->shared_models, NULL, 0) > ASNGN_MAX_POOL);
+  ASSERT_OK(asngn_get_models(f.c, models, 4, &count));
+  ASSERT_EQ_INT(count, 4);
+  ASSERT_EQ_STR(models[0].id, "nano");
+  ASSERT_EQ_STR(models[3].id, "embed");
+  fx_drop(&f);
+}
+
 TEST_LIST = {
+  TEST_ENTRY(model_introspection_bounds_shared_manager_stats),
   TEST_ENTRY(uncertain_commit_blocks_until_reopen),
   TEST_ENTRY(contextual_code_retrieval_refreshes_evidence),
   TEST_ENTRY(empty_repository_does_not_spend_embedding_calls),

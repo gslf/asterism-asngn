@@ -2,6 +2,10 @@
 #ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #endif
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+/* Darwin hides O_NOFOLLOW in its strict POSIX namespace. */
+#define _DARWIN_C_SOURCE 1
+#endif
 #include "asngn_internal.h"
 #include <errno.h>
 #include <stdlib.h>

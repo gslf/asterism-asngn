@@ -18,9 +18,11 @@ if(ASNGN_NODE)
   add_test(NAME test_sdk_javascript COMMAND ${CMAKE_COMMAND} -E env
     "ASTERISM_TEST_PYTHON=${Python3_EXECUTABLE}" ${ASNGN_NODE} ${CMAKE_CURRENT_SOURCE_DIR}/test_javascript.mjs)
   set_tests_properties(test_sdk_javascript PROPERTIES TIMEOUT 60)
-  find_program(ASNGN_TSC NAMES tsc tsc.cmd HINTS ${CMAKE_CURRENT_SOURCE_DIR}/../node_modules/.bin)
-  if(ASNGN_TSC)
-    add_test(NAME test_sdk_types COMMAND ${ASNGN_TSC} --noEmit --strict --module nodenext
+  # npm's extensionless .bin/tsc shim is not a Windows executable. Use the
+  # installed JavaScript entry point through the Node executable on every OS.
+  set(ASNGN_TSC_JS "${CMAKE_CURRENT_SOURCE_DIR}/../node_modules/typescript/bin/tsc")
+  if(EXISTS "${ASNGN_TSC_JS}")
+    add_test(NAME test_sdk_types COMMAND ${ASNGN_NODE} ${ASNGN_TSC_JS} --noEmit --strict --module nodenext
       --target es2022 --lib es2022,dom,esnext.disposable ${CMAKE_CURRENT_SOURCE_DIR}/types.mts)
   else()
     message(STATUS "SDK TypeScript check skipped: install sdk dev dependencies to enable it")

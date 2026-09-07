@@ -94,6 +94,9 @@ asngn_err asngn_get_models(asngn_ctx *c, asngn_model_info *out,
                    p->id, "embedder");
     asmodel_model_stats states[ASNGN_MAX_POOL];
     size_t count=asmodel_manager_stats(c->shared_models,states,ASNGN_MAX_POOL);
+    /* The manager returns its total slot count, including entries that did
+     * not fit in states. Only inspect the entries actually written. */
+    if (count > ASNGN_MAX_POOL) count = ASNGN_MAX_POOL;
     m->resident=0;
     for (size_t j=0;j<count;j++) if (!strcmp(states[j].id,p->id)) m->resident=states[j].resident;
   }

@@ -1,5 +1,9 @@
 /* Enumerate through directory descriptors; never traverse a path alias. */
 #define _POSIX_C_SOURCE 200809L
+#if defined(__APPLE__) && !defined(_DARWIN_C_SOURCE)
+/* Keep descriptor traversal's no-symlink protection available on Darwin. */
+#define _DARWIN_C_SOURCE 1
+#endif
 #include "workspace_tree.h"
 #include <dirent.h>
 #include <errno.h>

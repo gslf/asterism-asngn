@@ -83,7 +83,7 @@ class Transport:
                 message = decode(line.decode("utf-8"))
                 if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
                     raise ProtocolError("invalid JSON-RPC envelope")
-                # Asterism currently sends no notifications. Ignore valid future ones.
+                # ⁂ asterism currently sends no notifications. Ignore valid future ones.
                 if "id" not in message and isinstance(message.get("method"), str):
                     continue
                 identity = message.get("id")

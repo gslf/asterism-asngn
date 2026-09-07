@@ -60,7 +60,7 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s, asngn_turn_state *t,
   *out = NULL;
   if (!c || !s || !label || !text) return ASNGN_ERR_INVALID;
   if (len <= (size_t)c->cfg.digest_threshold_chars) return ASNGN_OK;
-  /* Lossless large-result storage belongs to Asper.  In explicitly
+  /* Lossless large-result storage belongs to ⁂ asper.  In explicitly
    * degraded mode keep the original result in the current turn instead of
    * creating an ASNGN-owned blob or silently throwing bytes away. */
   if (!c->asper_ok) return ASNGN_OK;

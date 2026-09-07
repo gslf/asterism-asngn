@@ -4,7 +4,7 @@
 journal and shared model manager as the TUI and MCP server. The initial profile
 implements ACP v1 session turns on threaded POSIX systems. It is **not full ACP
 conformance**: editor-supplied MCP servers are rejected explicitly; ACP requires
-stdio MCP support. Preconfigured, reviewed Astools packages remain available.
+stdio MCP support. Preconfigured, reviewed ⁂ astools packages remain available.
 No third-party editor interoperability or real-model quality run is claimed.
 
 ## Start
@@ -57,7 +57,7 @@ No persistent permission is inferred from a suggested option or remote annotatio
 Permission tool-call IDs use the approval UUID. Actual dispatch and observation
 events join that ID to the journal's action UUID. Unconfirmed read-only dispatches
 use their action UUID directly. Tool statuses report execution, not task correctness;
-`completed` does not certify an artifact. The Asterism `_meta` namespace records
+`completed` does not certify an artifact. The ⁂ asterism `_meta` namespace records
 `action_id`, `journaled` and the dispatch error. `journaled:false` means an external
 result was observed but its journal write was not confirmed. Full observations
 remain in the task journal rather than being copied into telemetry. Cache hits do
@@ -89,7 +89,7 @@ EOF cancels all active lanes before joining them. Cancellation latency still
 depends on backend/tool cancellation behavior; EOF does not erase persistent state.
 
 Tests use real pipes, the production executable with unavailable weights, and a
-separate driver linking the production host to scripted models and actual Astools
+separate driver linking the production host to scripted models and actual ⁂ astools
 dispatch. They cover framing, output quotas/stalls, session bounds, Unicode prefix
 recovery, permission replay, stale snapshots, cancellation, EOF and independent
 session IDs. They test contracts, not model quality or third-party compatibility.

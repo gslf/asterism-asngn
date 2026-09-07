@@ -1,5 +1,5 @@
-/* asmodel owns residency and serialization. These adapters own one backend
- * instance; engine lanes and Asper borrow the same manager. */
+/* ⁂ asmodel owns residency and serialization. These adapters own one backend
+ * instance; engine lanes and ⁂ asper borrow the same manager. */
 #include "asngn_internal.h"
 #include <stdlib.h>
 #include <string.h>

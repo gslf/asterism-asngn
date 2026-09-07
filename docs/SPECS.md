@@ -1,35 +1,43 @@
-# asngn — Architecture and Design
+# ⁂ asngn — Architecture and Design
 
 ## 1. Why this project exists
 
-A small language model can write useful code, but it is unreliable when one
-prompt asks it to understand a project, remember a long session, choose tools,
-produce valid calls, inspect outcomes, manage safety and compose a final answer
+A language model can interpret requests and propose useful actions, but it is
+unreliable when one prompt asks it to manage an entire real-world workflow,
+remember a long session, choose tools, produce valid calls, inspect outcomes,
+manage safety and compose a final answer
 at the same time. More prompt text does not solve that problem; it often makes
 the model less focused and consumes the context it needs for the task.
 
-asngn is an outcome-gated agent harness. It decomposes a turn into narrow model
-passes and deterministic operations, then requires evidence before accepting a
-claim of success.
+⁂ asngn is a general-purpose, outcome-gated agent harness for workflows and
+automations. Coding is one supported application domain. It decomposes a turn
+into narrow model passes and deterministic operations, then requires evidence
+before accepting a claim of success.
 
 Its central idea is:
 
 > Let the model reason about the task. Move memory, syntax, validation, safety,
 > resource control and success checks into systems that do not have to guess.
 
-The harness is designed primarily for local small language models, while the
-same contracts support larger and remote models.
+The harness is SLM-friendly and local-first, while the same architecture supports
+larger models and remote inference. Any LLM/provider can be integrated through
+an adapter that satisfies its role's contracts; built-in profiles are not a
+universal compatibility guarantee. Capability grows through orchestration,
+memory and tools, without requiring changes to model weights.
 
-## 2. The Asterism system
+For the decisions and value across all four components, start with
+[⁂ asterism architecture](ARCHITECTURE.md).
 
-asngn is the orchestrator of four independent projects:
+## 2. The ⁂ asterism system
 
-- **asmodel** owns model providers, shared residency, tokenization and inference.
-- **Asper** owns exact events, semantic memory, checkpoints and large objects.
-- **astools** owns typed tool contracts, permissions and supervised execution.
-- **asngn** owns turn state, routing, action policy, guards, judging and clients.
+⁂ asngn is the orchestrator of four independent projects:
 
-The boundaries matter. asngn does not implement its own durable memory, provider
+- **⁂ asmodel** owns model providers, shared residency, tokenization and inference.
+- **⁂ asper** owns exact events, semantic memory, checkpoints and large objects.
+- **⁂ astools** owns typed tool contracts, permissions and supervised execution.
+- **⁂ asngn** owns turn state, routing, action policy, guards, judging and clients.
+
+The boundaries matter. ⁂ asngn does not implement its own durable memory, provider
 protocol or shell abstraction. This keeps each source of truth singular and
 makes failures attributable to the correct layer.
 
@@ -37,8 +45,8 @@ makes failures attributable to the correct layer.
 
 A submitted turn becomes an asynchronous task. Its main path is:
 
-1. **Ingest:** validate and normalize the user input, then append it to Asper.
-2. **Context:** ask Asper for a bounded view using the selected model's tokenizer.
+1. **Ingest:** validate and normalize the user input, then append it to ⁂ asper.
+2. **Context:** ask ⁂ asper for a bounded view using the selected model's tokenizer.
 3. **Cache probe:** look for safe reusable work without bypassing outcome rules.
 4. **Route:** classify the task and select direct or planned execution and a
    suitable model tier.
@@ -63,7 +71,7 @@ The decision pass emits one object with one action:
 ```
 
 Supported actions are `call`, `discover`, `recall`, `open`, `think`, `clarify` and `answer`.
-The exact schema is grammar-constrained through asmodel. The pass is short,
+The exact schema is grammar-constrained through ⁂ asmodel. The pass is short,
 reasoning is disabled, and the output ceiling is explicit because its purpose is
 selection, not prose generation.
 
@@ -78,14 +86,14 @@ not automatically proof that the task succeeded.
 
 ## 5. Action and evidence
 
-`call` selects a typed astools command. astools validates its arguments and
-permissions before execution and returns a structured result. asngn records the
+`call` selects a typed ⁂ astools command. ⁂ astools validates its arguments and
+permissions before execution and returns a structured result. ⁂ asngn records the
 invocation, exit status, diagnostics and changed-world signal.
 
 `discover` replaces the turn's command shortlist by matching a tool name or purpose.
 The same snapshot supplies prompt/schema/grammar and checked invocation.
 
-`recall` asks Asper for a focused memory answer. `open` reads a range from a
+`recall` asks ⁂ asper for a focused memory answer. `open` reads a range from a
 previously stored exact object. `think` allows one bounded private reasoning
 step. `clarify` stops for information that cannot safely be inferred. `answer`
 enters response production only when the current outcome policy permits it.
@@ -100,10 +108,10 @@ not accept fluent prose as a substitute for observable state.
 Long-form output and code artifacts use a separate draft phase. The draft is
 private working state, not a prematurely published answer.
 
-If generation reaches its output-token ceiling, asmodel returns the partial
-bytes instead of discarding them. asngn then:
+If generation reaches its output-token ceiling, ⁂ asmodel returns the partial
+bytes instead of discarding them. ⁂ asngn then:
 
-1. preserves the exact partial draft as an Asper object and checkpoint;
+1. preserves the exact partial draft as an ⁂ asper object and checkpoint;
 2. records its full byte count and SHA-256;
 3. supplies an exact UTF-8-safe suffix as continuation context;
 4. requests only the continuation;
@@ -122,19 +130,19 @@ the active generation and clears drafting state.
 
 ## 7. Memory and context ownership
 
-All durable memory belongs to Asper. For every model pass, asngn supplies the
+All durable memory belongs to ⁂ asper. For every model pass, ⁂ asngn supplies the
 scope, query, base instructions and zone budgets to
-`asper_context_materialize`. Asper returns:
+`asper_context_materialize`. ⁂ asper returns:
 
 - semantic identity, user context and active-project memory;
 - the current working checkpoint;
 - selected pinned and recent exact events.
 
-Selection uses the tokenizer of the model that will consume the prompt. asngn
+Selection uses the tokenizer of the model that will consume the prompt. ⁂ asngn
 validates the final assembled context once more before inference.
 
-There is no independent folding summary in asngn. It stores no alternate durable
-transcript, compressed-history file or private large-result archive. If Asper is
+There is no independent folding summary in ⁂ asngn. It stores no alternate durable
+transcript, compressed-history file or private large-result archive. If ⁂ asper is
 disabled, the engine is explicitly ephemeral; it does not create a weaker hidden
 memory system with different semantics.
 
@@ -145,8 +153,8 @@ for later retrieval and continuation.
 ## 8. Large tool results
 
 A compiler, search or file tool can return more text than the next model call can
-use. asngn digests such a result into a short view and stores the complete bytes
-as a content-addressed Asper object.
+use. ⁂ asngn digests such a result into a short view and stores the complete bytes
+as a content-addressed ⁂ asper object.
 
 The model receives a short view and an object hash, with diagnostic byte ranges.
 The `open` input `{"blob":1,"offset":80000}` can jump directly to a late range
@@ -160,7 +168,7 @@ traces, size limits and diagnostic coverage limits.
 The model pool assigns explicit roles such as router, planner, generator,
 compressor and embedder. Entries may use embedded GGUF inference or explicit
 remote profiles for llama.cpp server, LM Studio, vLLM and generic endpoints.
-asmodel hides their protocol differences while exposing their actual
+⁂ asmodel hides their protocol differences while exposing their actual
 capabilities.
 
 Routing is task-aware:
@@ -195,7 +203,7 @@ activity invalidates this cache through the same world-state boundary. A cache
 hit preserves the original structured evidence and avoids both process work and
 the tokens needed to interpret duplicate output.
 
-Provider-side prompt/KV caching is separate and handled by asmodel.
+Provider-side prompt/KV caching is separate and handled by ⁂ asmodel.
 
 ## 11. Guards and stopping rules
 
@@ -225,7 +233,7 @@ Safety is layered around the model:
 
 1. Input validation rejects invalid encoding and impossible request state.
 2. The decision schema restricts the action language.
-3. astools validates arguments, canonicalizes paths and enforces grants.
+3. ⁂ astools validates arguments, canonicalizes paths and enforces grants.
 4. Interactive approvals durably bind effective arguments, package and snapshot;
    changes during review invalidate the request. See [approval contracts](approvals.md).
 5. Secret redaction prevents known credentials from entering prompts or output.
@@ -263,7 +271,7 @@ cost.
 - **Checkpoints:** current state replaces repeated reconstruction of old work.
 - **Progressive evidence:** large results become short digests plus exact reopen
   handles.
-- **Prompt/KV reuse:** stable prefixes are reused by asmodel where supported.
+- **Prompt/KV reuse:** stable prefixes are reused by ⁂ asmodel where supported.
 - **Safe caches:** unchanged answers and read-only tool results avoid duplicate
   work without crossing mutation boundaries.
 - **Continuation:** partial drafts continue from the valid prefix instead of
@@ -284,7 +292,7 @@ exist.
 
 ### Limited context
 
-Asper supplies durable, query-directed memory and exact reopenable sources. The
+⁂ asper supplies durable, query-directed memory and exact reopenable sources. The
 model sees a focused working set instead of a growing transcript.
 
 ### Fragile structured output
@@ -294,7 +302,7 @@ syntax from decoding. Deterministic parsers still validate the result.
 
 ### Weak long-horizon planning
 
-The model chooses one action at a time. asngn preserves state, checks progress
+The model chooses one action at a time. ⁂ asngn preserves state, checks progress
 and supplies the next bounded problem.
 
 ### Hallucinated success
@@ -304,7 +312,7 @@ evidence. An optional judge inspects the final claim against that evidence.
 
 ### Limited tool knowledge
 
-astools provides a compact catalog, typed arguments, examples and semantic
+⁂ astools provides a compact catalog, typed arguments, examples and semantic
 software operations. The model need not memorize platform-specific shell usage.
 
 ### Limited compute
@@ -323,7 +331,7 @@ Independent sessions can progress concurrently subject to model and tool
 resource limits.
 
 Cancellation is cooperative across layers but observable as one task result. It
-reaches active asmodel generation and astools execution, preserves already
+reaches active ⁂ asmodel generation and ⁂ astools execution, preserves already
 committed source events and partial artifacts, and returns the session to an idle
 state. UI status is derived from task lifecycle rather than a detached timer.
 
@@ -346,10 +354,10 @@ detectable; the architecture forbids the former and accounts for the latter.
 
 Subsystem failure is explicit:
 
-- without Asper, sessions are ephemeral and durable recall is unavailable;
+- without ⁂ asper, sessions are ephemeral and durable recall is unavailable;
 - without embeddings, semantic memory and cache operations degrade while exact
   source storage continues;
-- without astools, the engine can converse but cannot claim tool-backed work;
+- without ⁂ astools, the engine can converse but cannot claim tool-backed work;
 - without a required provider capability, the affected model request fails
   before inference;
 - without a judge, outcome gates and deterministic validation still apply.
@@ -362,9 +370,9 @@ same success label.
 The implementation must preserve these rules:
 
 1. Each model pass has one narrow, validated responsibility.
-2. Durable memory, compaction, checkpoints and exact objects belong to Asper.
-3. Model execution and provider compatibility belong to asmodel.
-4. Tool syntax, permission and process policy belong to astools.
+2. Durable memory, compaction, checkpoints and exact objects belong to ⁂ asper.
+3. Model execution and provider compatibility belong to ⁂ asmodel.
+4. Tool syntax, permission and process policy belong to ⁂ astools.
 5. A claim of success requires observable evidence.
 6. Required model constraints are never silently weakened.
 7. Token-limit output is preserved and continued, never automatically retried.

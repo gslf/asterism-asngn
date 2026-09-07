@@ -70,7 +70,7 @@
 /* llama.cpp logs to stderr by default. The library must never write to
  * stdout/stderr on its own initiative, and this global callback has no
  * asngn_ctx to forward into asngn_log, so it deliberately drops every
- * record. asngn reports load/inference failures through its own error
+ * record. ⁂ asngn reports load/inference failures through its own error
  * and log channels. */
 static void mll_log_silent(enum ggml_log_level level, const char *text,
                            void *ud) {

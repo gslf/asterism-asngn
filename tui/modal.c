@@ -1,6 +1,6 @@
 /*
  * modal.c — confirmation modal, tool-permissions overlay, and help
- * overlay of the asngn TUI.
+ * overlay of the ⁂ asngn TUI.
  *
  * Confirmation review lives in confirmation.c. The help overlay lists the keymap and the
  * slash commands; both render through the same cell-buffer path so

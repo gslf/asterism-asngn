@@ -201,7 +201,9 @@ FILE *os_store_lock(const char *path) {
     int fd;
     FILE *f;
     if (!w) return NULL;
-    h = CreateFileW(w, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_ALWAYS,
+    /* Readers may fingerprint an engine-root workspace. Other writers and
+     * deletion remain excluded for the lifetime of this handle. */
+    h = CreateFileW(w, GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ, NULL, OPEN_ALWAYS,
                     FILE_ATTRIBUTE_NORMAL, NULL);
     free(w);
     if (h == INVALID_HANDLE_VALUE) return NULL;

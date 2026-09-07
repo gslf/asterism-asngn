@@ -6,7 +6,7 @@
 static const char *string(const xcdn_value_t *v, const char *key) {
   return asngn_xstr(asngn_xfield(v, key));
 }
-static bool boolean(const xcdn_value_t *v, const char *key) {
+static bool bool_field(const xcdn_value_t *v, const char *key) {
   bool value = false;
   return asngn_xbool(asngn_xfield(v, key), &value) && value;
 }
@@ -60,14 +60,14 @@ TEST(action_events_bind_actual_dispatch_without_claiming_verification) {
       ASSERT_TRUE(asngn_xfield(data, "verification_ok") == NULL);
       if (actions++ == 0) {
         ASSERT_EQ_STR(string(data, "state"), "dispatching");
-        ASSERT_TRUE(boolean(data, "journaled"));
+        ASSERT_TRUE(bool_field(data, "journaled"));
         ASSERT_TRUE(asngn_xfield(data, "tool_ok") == NULL);
         snprintf(action_id, sizeof action_id, "%s", string(data, "action_id"));
       } else {
         ASSERT_EQ_STR(string(data, "state"), "observed");
         ASSERT_EQ_STR(string(data, "action_id"), action_id);
-        ASSERT_EQ_INT(boolean(data, "journaled"), mode != 2);
-        ASSERT_EQ_INT(boolean(data, "tool_ok"), mode != 1);
+        ASSERT_EQ_INT(bool_field(data, "journaled"), mode != 2);
+        ASSERT_EQ_INT(bool_field(data, "tool_ok"), mode != 1);
         ASSERT_EQ_INT(!strcmp(string(data, "dispatch_error"), "ASTOOLS_OK"), mode != 1);
         snprintf(observation_hash, sizeof observation_hash, "%s",
                  string(data, "observation_sha256"));

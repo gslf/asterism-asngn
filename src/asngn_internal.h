@@ -7,12 +7,12 @@
  * Locking protocol:
  *   - c->lock      rwlock: sessions table, stats, budgets.
  *   - s->lock      rwlock: one per session (transcript, summary, pins).
- *   - asmodel owns model residency and per-provider serialization.
+ *   - ⁂ asmodel owns model residency and per-provider serialization.
  *   - c->cache_mu  rwlock for the semantic + tool caches.
  *   - c->tele_mu   telemetry ring; never held while taking other locks.
  *   - c->log_mu, c->err_mu as in the siblings.
  *   Registry lock is released before taking session locks. Commit accounting
- *   may take c->lock under s->lock; Model provider serialization belongs to asmodel. tele_mu/log_mu
+ *   may take c->lock under s->lock; Model provider serialization belongs to ⁂ asmodel. tele_mu/log_mu
  *   are leaves.
  *
  * MIT License — per aspera ad astra.
@@ -130,7 +130,7 @@ asngn_err asngn_seterr(asngn_ctx *c, asngn_err e, const char *fmt, ...);
 asngn_err asngn_log_open(asngn_ctx *c);  /* no-op when logging.path unset */
 void      asngn_log_close(asngn_ctx *c);
 /* subsys: session context cache route loop model safety judge telemetry
- * tui mcp asper astools. Callback sink gets every record; the file
+ * tui mcp ⁂ asper ⁂ astools. Callback sink gets every record; the file
  * sink is gated by cfg.log_level. Never fails the caller. */
 void asngn_log(asngn_ctx *c, int level, const char *subsys,
                const char *fmt, ...);
@@ -177,7 +177,7 @@ asngn_err asngn_xcanonical_match(struct xcdn_value *encoded, const char *record,
 
 /* An append stream is a FILE* opened "ab" plus its path; every append is
  * one compact single-line value + '\n', flushed, with offset rollback on
- * partial writes (the asper journal discipline). */
+ * partial writes (the ⁂ asper journal discipline). */
 typedef struct {
   FILE *fp;
   char *path;
@@ -462,7 +462,7 @@ typedef struct {
   size_t      n;          /* turn ordinal, 1-based                  */
   char        workspace[1024], commit[65], project[65];
   char        turn_id[37]; /* transaction UUID, shared by user and assistant */
-  char        event_id[37]; /* authoritative Asper source event id */
+  char        event_id[37]; /* authoritative ⁂ asper source event id */
   char        role[10];   /* "user" | "assistant"                   */
   char       *text;       /* owned                                  */
   asngn_time  at;
@@ -475,7 +475,7 @@ typedef struct {
 typedef struct {
   char   *id;        /* invocation id (uuid), owned                 */
   char   *label;     /* "fs.read" etc., owned                       */
-  char    object_ref[72]; /* authoritative Asper sha256 reference    */
+  char    object_ref[72]; /* authoritative ⁂ asper sha256 reference    */
   size_t  size;      /* full text size in bytes                     */
 } asngn_blob;
 
@@ -491,16 +491,16 @@ struct asngn_session {
   asngn_time  created_at;
   size_t      turns;        /* committed turn pairs counter          */
   uint64_t    world_epoch;
-  char       *project;      /* active Asper project or NULL          */
+  char       *project;      /* active ⁂ asper project or NULL          */
   asngn_workspace_info workspace; /* immutable session binding       */
   bool        workspace_loaded;
   bool        redact_context;
   asngn_usage_mode usage_mode;
   asngn_security_profile security_profile;
-  /* process-local view of Asper source events */
+  /* process-local view of ⁂ asper source events */
   asngn_turn *log;
   size_t      log_n, log_cap;
-  /* turn-local handles for Asper content-addressed objects */
+  /* turn-local handles for ⁂ asper content-addressed objects */
   asngn_blob *blobs;
   size_t      blobs_n, blobs_cap;
   /* appenders */
@@ -530,7 +530,7 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
 asngn_err asngn_session_workspace_activate(asngn_session *s);
 void      asngn_session_free(asngn_session *s);
 asngn_err asngn_session_save_manifest(asngn_session *s);
-/* Append one turn to Asper and the in-memory operational view. */
+/* Append one turn to ⁂ asper and the in-memory operational view. */
 asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t);
 asngn_err asngn_session_add_blob(asngn_session *s, const char *invocation_id,
                                  const char *label, const char *text,
@@ -658,7 +658,7 @@ asngn_err asngn_digest_item(asngn_ctx *c, asngn_session *s,
                             char **out);
 /* ── embedding cache (embedcache.c) ───────────────────────────────────── */
 /* cache/embeddings.bin — magic "ASNG", little-endian, layout identical to
- * Asper's: u32 version=1, u32 dim, u64 count, 32 B model hash, then per
+ * ⁂ asper's: u32 version=1, u32 dim, u64 count, 32 B model hash, then per
  * entry 16 B uuid + u64 content fnv + dim f32 (L2-normalized). */
 
 #define ASNGN_EMBED_MAGIC   "ASNG"
@@ -765,7 +765,7 @@ typedef enum {
   ASNGN_RTASK_DEBUG      /* diagnose and fix a failure               */
 } asngn_route_task;
 
-/* astools tool families the message implies (bitmask). */
+/* ⁂ astools tool families the message implies (bitmask). */
 enum {
   ASNGN_TOOLF_FS   = 1u << 0,
   ASNGN_TOOLF_GREP = 1u << 1,
@@ -888,7 +888,7 @@ void asngn_step_free(asngn_step *st);
 /* Parse one action-object line (defense in depth over the grammar). */
 asngn_err asngn_step_parse(asngn_ctx *c, const char *line, asngn_step *out);
 
-/* Merge the per-turn GBNF: asngn productions + astools call production
+/* Merge the per-turn GBNF: ⁂ asngn productions + ⁂ astools call production
  * (grafted, renamed to avoid rule collisions) + concrete blob handles.
  * with_call/with_recall reflect sibling availability and turn options;
  * with_think supports the one-pass consecutive-thinking guard. */

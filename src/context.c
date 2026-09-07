@@ -4,8 +4,8 @@
  * The assembled prompt is a fixed sequence of zones, split across the
  * (system, user) message pair every backend consumes:
  *
- *   system_text: [1 system+directive] [2 Asper semantic memory] [3 catalog]
- *   user_text:   [4 Asper scoped context] [5 current operational turn]
+ *   system_text: [1 system+directive] [2 ⁂ asper semantic memory] [3 catalog]
+ *   user_text:   [4 ⁂ asper scoped context] [5 current operational turn]
  *
  * Assembly is a pure function of session state, configuration, and turn
  * state: identical inputs produce byte-identical prompts (golden-tested).
@@ -102,7 +102,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s, asngn_turn_stat
                                  catalog_used ? "included" : "excluded", "phase_and_policy");
   if (e != ASNGN_OK) goto fail;
 
-  /* Asper owns every persistent/historical memory zone. */
+  /* ⁂ asper owns every persistent/historical memory zone. */
   if (c->asper_ok && s != NULL && t != NULL) {
     e = asngn_siblings_context(c, s, base,
                                t->retrieval_query ? t->retrieval_query
@@ -136,7 +136,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s, asngn_turn_stat
     out->tok_system = asngn_context_tokens(c, count_slot, base);
   }
 
-  /* zone 3: tool catalog (astools renders its own "## Tools" heading) */
+  /* zone 3: tool catalog (⁂ astools renders its own "## Tools" heading) */
   if (catalog_used) {
     e = asngn_buf_appends(&sys, "\n\n");
     if (e == ASNGN_OK) e = asngn_buf_appends(&sys, t->catalog);
@@ -144,7 +144,7 @@ asngn_err asngn_context_assemble(asngn_ctx *c, asngn_session *s, asngn_turn_stat
     out->tok_catalog = asngn_context_tokens(c, count_slot, t->catalog);
   }
 
-  /* zone 4: in-process turns when Asper is disabled */
+  /* zone 4: in-process turns when ⁂ asper is disabled */
   if (!c->asper_ok && s != NULL) {
     e = asngn_context_verbatim(c, s, t, count_slot, &verb_text, &verb_tokens, &trace);
     if (e != ASNGN_OK) goto fail;

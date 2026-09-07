@@ -1,8 +1,8 @@
 /*
- * session.c — the asngn session store.
+ * session.c — the ⁂ asngn session store.
  *
  * Operational data lives under <root>/sessions/<slug>/. Conversation memory
- * is authoritative in Asper.
+ * is authoritative in ⁂ asper.
  *
  * One directory per session contains:
  *   session.xcdn      #asngn_session manifest (atomic replace)
@@ -160,7 +160,7 @@ static asngn_err turn_from_object(asngn_ctx *c, const char *object_ref,
       !asngn_turn_parse(doc->values[0], out)) {
     if (doc) xcdn_document_free(doc);
     return asngn_seterr(c, ASNGN_ERR_PARSE,
-                        "session: invalid Asper turn object");
+                        "session: invalid asper turn object");
   }
   xcdn_document_free(doc);
   return ASNGN_OK;
@@ -360,8 +360,8 @@ asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t) {
                                              : ASNGN_MEM_USER,
           t->text ? t->text : "", object_ref, t->pinned, event_id);
   } else {
-    /* Asper-disabled operation is intentionally ephemeral.  The in-memory
-     * turn remains usable for this process, but ASNGN never becomes a second
+    /* asper-disabled operation is intentionally ephemeral.  The in-memory
+     * turn remains usable for this process, but ⁂ asngn never becomes a second
      * persistent memory owner. */
     e = ASNGN_OK;
   }
@@ -380,7 +380,7 @@ asngn_err asngn_session_append_turn(asngn_session *s, const asngn_turn *t) {
   return ASNGN_OK;
 }
 
-/* Load the authoritative transcript view from Asper. Every conversation event
+/* Load the authoritative transcript view from ⁂ asper. Every conversation event
  * must refer to the complete serialized turn object. */
 static asngn_err sess_load_asper(asngn_session *s) {
   asngn_memory_event *events = NULL;
@@ -566,7 +566,7 @@ asngn_err asngn_session_load(asngn_ctx *c, const char *slug,
 
   /* The manifest is a projection and may be ahead after an interrupted write. */
   s->turns=0;
-  /* Authoritative source is Asper. */
+  /* Authoritative source is ⁂ asper. */
   if (c->asper_ok) {
     e = sess_load_asper(s);
     if (e != ASNGN_OK) goto fail;

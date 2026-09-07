@@ -1,4 +1,4 @@
-/* Engine role policy and embedding identity. asmodel exclusively owns backend
+/* Engine role policy and embedding identity. ⁂ asmodel exclusively owns backend
  * residency, request serialization and eviction across all session lanes. */
 
 #include "asngn_internal.h"
@@ -149,7 +149,7 @@ int asngn_models_slot_for_id(asngn_ctx *c, const char *id) {
   return -1;
 }
 
-/* Request policy belongs to the engine; model lifetime belongs to asmodel. */
+/* Request policy belongs to the engine; model lifetime belongs to ⁂ asmodel. */
 typedef struct { asngn_token_fn fn; void *ud; } generation_stream;
 static void generation_token(const char *text, size_t len, void *ud) {
   generation_stream *s = ud;

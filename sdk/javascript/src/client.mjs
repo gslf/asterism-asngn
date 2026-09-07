@@ -17,7 +17,7 @@ export class Client {
       }, options);
       if (reply?.protocolVersion !== '2025-06-18' || reply.serverInfo?.name !== 'asngn-mcp' || typeof reply.serverInfo?.version !== 'string' ||
           reply.capabilities?.experimental?.['dev.asterism/asngn']?.contractVersion !== 1) {
-        throw new ProtocolError('unsupported Asterism contract; version 1 required');
+        throw new ProtocolError('unsupported asterism contract; version 1 required');
       }
       client.serverInfo = reply.serverInfo;
       client.rpc.initialized();

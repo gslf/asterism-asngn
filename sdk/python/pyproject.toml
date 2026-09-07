@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "asterism-sdk"
 version = "0.1.0"
-description = "Async local host SDK for the Asterism coding engine"
+description = "Async local host SDK for the asngn workflow and automation harness"
 requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"

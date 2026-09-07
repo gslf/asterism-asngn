@@ -1,5 +1,5 @@
 /*
- * sha256.c — SHA-256 per FIPS 180-4. Written for asngn from the published
+ * sha256.c — SHA-256 per FIPS 180-4. Written for ⁂ asngn from the published
  * specification; streaming, one-shot, file and hex helpers.
  */
 

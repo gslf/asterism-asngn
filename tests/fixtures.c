@@ -1,6 +1,6 @@
 /*
- * fixtures.c — sibling-fixture writers for the asngn integration tests
- * (fixtures.h). Modeled on astools' tests/fakes.c fake_registry_write /
+ * fixtures.c — sibling-fixture writers for the ⁂ asngn integration tests
+ * (fixtures.h). Modeled on ⁂ astools' tests/fakes.c fake_registry_write /
  * fake_config_write.
  *
  * Links asngn_static for asngn_buf / os_* only; the emitted text is
@@ -15,7 +15,7 @@
 
 #include "asngn_internal.h"
 
-/* Current platform, matching astools' registry.c compile-time values. */
+/* Current platform, matching ⁂ astools' registry.c compile-time values. */
 static const char *fix_plat_os(void) {
 #if defined(_WIN32)
   return "windows";
@@ -156,7 +156,7 @@ done:
   return ok;
 }
 
-/* ---- astools config ------------------------------------------------------ */
+/* ---- ⁂ astools config ------------------------------------------------------ */
 
 int asngn_fix_astools_config(const char *path, const char *registry_root,
                              const char *workspace) {

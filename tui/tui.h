@@ -1,5 +1,5 @@
 /*
- * tui.h — internal contracts of the asngn terminal application.
+ * tui.h — internal contracts of the ⁂ asngn terminal application.
  *
  * One header for the whole TUI: terminal layer (term.c), palette and
  * glyphs (theme.c), cell-buffer drawing (draw.c), chat pane (chat.c),

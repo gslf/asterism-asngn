@@ -5,7 +5,7 @@ that call's usage, including failure and cancellation. An unknown result retains
 the reservation; neither a conversation rollback nor a missing trace refunds it.
 One projection now serves live admission, restart recovery and public inspection,
 with separate lifetime and reservation-day totals for the entire engine store.
-It includes generation and embedding through the shared manager, including Asper.
+It includes generation and embedding through the shared manager, including ⁂ asper.
 Complete session attribution, monetary pricing, loader costs and external
 reconciliation remain separate work. Missing session identity is never guessed
 from whichever foreground task happens to be running.
@@ -59,12 +59,12 @@ Lifetime limits and arithmetic remain checked even when daily counters reset.
 
 ## Durable records
 
-Generation request spans travel through asmodel ABI 8 to both durable records as
+Generation request spans travel through ⁂ asmodel ABI 8 to both durable records as
 `request_id`. The accounting `id` is a separate, runtime-generated UUID. Repeated
 host correlation labels cannot merge operations or trigger replay. Engine context
 rejection creates no inference reservation. Manager/load rejection may likewise
 occur before the backend reaches reservation. An empty `request_id` means that
-the caller supplied no trace identity, as with current direct Asper/embedding
+the caller supplied no trace identity, as with current direct ⁂ asper/embedding
 calls. These operations are still accounted for individually.
 
 `operations.xcdn` contains schema-2 JSON payloads in version-2 checksummed WAL

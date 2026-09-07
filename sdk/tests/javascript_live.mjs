@@ -23,7 +23,7 @@ try {
   const result = pages.at(-1);
   assert.equal(result.outcome, 'ASNGN_OK');
   assert.equal(result.task_state, 'incomplete');
-  assert.equal(result.answer, 'Asterism α 日本語 '.repeat(400));
+  assert.equal(result.answer, 'asterism α 日本語 '.repeat(400));
   assert.ok(pages.some(page => page.events.some(event => event.truncated)));
   assert.deepEqual((await client.task(task.id).poll(result.next_cursor)).events, []);
   await session.invalidateWork(1);

@@ -29,7 +29,7 @@ class Client:
             except (KeyError, TypeError):
                 valid = False
             if not valid:
-                raise ProtocolError("unsupported Asterism contract; version 1 required")
+                raise ProtocolError("unsupported asterism contract; version 1 required")
             client.server_info = reply["serverInfo"]
             await client._rpc.initialized()
             return client

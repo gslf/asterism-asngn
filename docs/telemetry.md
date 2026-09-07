@@ -1,4 +1,4 @@
-# asngn telemetry events
+# ⁂ asngn telemetry events
 
 One event shape everywhere: an xCDN value tagged `#asngn_event`
 with `at` (RFC 3339 UTC wall clock, display only), `kind`, optional

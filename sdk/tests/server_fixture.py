@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 
-ANSWER = "Asterism α 日本語 " * 400
+ANSWER = "asterism α 日本語 " * 400
 REVIEW = "Review α 日本語 " * 400
 
 

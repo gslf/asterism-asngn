@@ -1,7 +1,7 @@
 /*
  * embedcache.c — cache/embeddings.bin read/write.
  *
- * On-disk layout, little-endian regardless of host (identical to Asper's
+ * On-disk layout, little-endian regardless of host (identical to ⁂ asper's
  * embedding cache, magic aside):
  *
  *   magic       4 B   "ASNG"
@@ -21,7 +21,7 @@
  * avoid alignment UB; header integers go through explicit little-endian
  * codecs, and the float payload is byte-swapped on big-endian hosts. The
  * model hash is written as zeroes when the embedder is unavailable, which
- * forces a rebuild on the next load — exactly the asper discipline.
+ * forces a rebuild on the next load — exactly the ⁂ asper discipline.
  *
  * Locking: none taken here. load runs from asngn_cache_init and save from
  * the compact path (cache_mu held) or shutdown; the caller serializes all

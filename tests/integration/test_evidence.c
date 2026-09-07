@@ -207,7 +207,7 @@ TEST(native_ranges_apply_without_certifying_success) {
     ASSERT_ERR(asngn_native_steps(f.c, &t, contract, &calls, steps), ASNGN_ERR_PROTOCOL);
     asngn_step_free(&steps[0]);
   }
-  /* Asper materializes its own events; this is not a local budget trim. */
+  /* ⁂ asper materializes its own events; this is not a local budget trim. */
   asngn_prompt prompt = {0};
   ASSERT_OK(asngn_context_assemble(f.c, f.s, &t, NULL, "inspect", 2, &prompt));
   ASSERT_CONTAINS(prompt.selection_json, "asper_owns_events");
@@ -225,7 +225,7 @@ TEST(invalid_text_creates_no_blob) {
   char text[1024], *digest = NULL;
   memset(text, 'x', sizeof text);
   text[sizeof text - 1] = 0;
-  text[100] = (char)0xff;
+  text[100] = (char)-1;
   ASSERT_ERR(
       asngn_digest_item(f.c, f.s, NULL, "project.test", text, strlen(text), NULL, NULL, &digest),
       ASNGN_ERR_INVALID);

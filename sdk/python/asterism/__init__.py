@@ -1,4 +1,4 @@
-"""Local Asterism SDK, wire contract 1."""
+"""Local asterism SDK, wire contract 1."""
 from .client import Client, Session, Task
 from .errors import ProtocolError, RequestTimeout, RpcError, ToolError, TransportError
 from .types import Approval, Consumption, ConsumptionTotals, Criterion, Definition, Event, Poll, Proof, TaskState, TaskRecord, WorkState

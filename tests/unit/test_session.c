@@ -65,8 +65,11 @@ static int fx_open_ctx_at(fx *f, const char *workspace) {
   p.engine_root = f->root;
   p.config_path = f->cfg;
   p.workspace_root = workspace;
-  if (asngn_open_with(&p, ifaces, 4, ids, &clk, &f->c) != ASNGN_OK)
+  asngn_err e = asngn_open_with(&p, ifaces, 4, ids, &clk, &f->c);
+  if (e != ASNGN_OK) {
+    fprintf(stderr, "session fixture open failed: %s (%s)\n", asngn_err_name(e), f->root);
     return 0;
+  }
   asngn_set_logger(f->c, NULL, NULL);
   return 1;
 }
@@ -197,7 +200,7 @@ TEST(manifest_project_persists) {
 
   ASSERT_TRUE(fx_setup(&f, CACHE_OFF));
   ASSERT_OK(asngn_session_open(f.c, "alpha", &s));
-  /* Session/project metadata is restored while Asper owns memory. */
+  /* Session/project metadata is restored while ⁂ asper owns memory. */
   ASSERT_OK(asngn_session_project(s, "proj-x"));
   ASSERT_EQ_STR(s->project, "proj-x");
   asngn_session_close(s);

@@ -1,5 +1,5 @@
 /*
- * draw.c — cell-buffer drawing primitives of the asngn TUI.
+ * draw.c — cell-buffer drawing primitives of the ⁂ asngn TUI.
  *
  * Every primitive clips against the frame, so callers can lay out for
  * the ideal geometry and degrade gracefully below 80×24. One

@@ -81,14 +81,14 @@ static int step(asngn_buf *b, const asmodel_json_value *o) {
   size_t fields = 1;
   if (!action) return -1;
   int call = !strcmp(action, "call");
-  int input = strcmp(action, "answer") != 0;
-  int why = input && strcmp(action, "think") != 0;
+  int needs_input = strcmp(action, "answer") != 0;
+  int why = needs_input && strcmp(action, "think") != 0;
   int recovery = call || !strcmp(action, "recall");
   if (strcmp(action,"answer") && strcmp(action,"think") && strcmp(action,"open") &&
       strcmp(action,"clarify") && strcmp(action,"recall") && strcmp(action,"discover") && !call) return -1;
   if (asngn_buf_appends(b, "{action: ") != ASNGN_OK || quoted(b, o, "action")) return -1;
   if (why) { fields++; if (field(b, o, "why")) return -1; }
-  if (input) {
+  if (needs_input) {
     fields++;
     if (asngn_buf_appends(b, ", input: ") != ASNGN_OK) return -1;
     if (call) {

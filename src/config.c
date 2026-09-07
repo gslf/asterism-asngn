@@ -1,5 +1,5 @@
 /*
- * config.c — asngn configuration: defaults + xCDN overlay.
+ * config.c — ⁂ asngn configuration: defaults + xCDN overlay.
  *
  * Same discipline as the siblings: every key optional; unknown keys WARN
  * and are skipped; wrong types / bad enums / out-of-range values are hard
@@ -84,7 +84,7 @@ void asngn_config_defaults(asngn_config *cfg) {
   cfg->s_answer.max_tokens = 0; /* per detail level */
   cfg->s_answer.repeat_penalty = 0.0;
   cfg->s_compress.temp = 0.2; cfg->s_compress.top_p = 0.9;
-  cfg->s_compress.max_tokens = 0; /* digest/Asper curator policy */
+  cfg->s_compress.max_tokens = 0; /* digest/asper curator policy */
   cfg->s_compress.repeat_penalty = 0.0;
   cfg->s_adapt.temp = 0.3; cfg->s_adapt.top_p = 0.9;
   cfg->s_adapt.max_tokens = 0; /* per detail level */

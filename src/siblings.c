@@ -1,15 +1,15 @@
 /*
- * siblings.c — in-process integration with Asper and astools.
+ * siblings.c — in-process integration with ⁂ asper and ⁂ astools.
  *
- * asngn owns the sibling lifecycle: both siblings are opened during
+ * ⁂ asngn owns the sibling lifecycle: both siblings are opened during
  * asngn_open against directories under the engine root and closed at
- * asngn_close; their log callbacks are funneled into asngn's logging
+ * asngn_close; their log callbacks are funneled into ⁂ asngn's logging
  * under the subsystem tags "asper" and "astools". Both integrations are
  * optional and degrade: a sibling that fails to open leaves the
  * engine running with the corresponding zones and steps absent.
  *
- * Policy: asngn narrows, never widens, sibling policy. Sandbox
- * level and grants come from the astools configuration; asngn only ever
+ * Policy: ⁂ asngn narrows, never widens, sibling policy. Sandbox
+ * level and grants come from the ⁂ astools configuration; ⁂ asngn only ever
  * layers tighter per-invocation deadlines and grant narrowing on top of
  * what the sibling already permits.
  *
@@ -45,7 +45,7 @@ static char *sib_join(const asngn_ctx *c, const char *path) {
   return os_path_join(c->root, path);
 }
 
-/* Sibling log levels share asngn's numeric convention (0..3); clamp
+/* Sibling log levels share ⁂ asngn's numeric convention (0..3); clamp
  * defensively anyway. */
 static int sib_level(int level) {
   if (level < ASNGN_LOG_ERROR) return ASNGN_LOG_ERROR;
@@ -150,8 +150,8 @@ static asngn_err sib_open_asper(asngn_ctx *c) {
         models.embedding_dim = c->models[embed_slot].cfg.dim;
       }
     }
-    /* Asper's relative model paths (the shared weights files) resolve
-     * under the engine root, exactly like asngn's own pool paths. */
+    /* ⁂ asper's relative model paths (the shared weights files) resolve
+     * under the engine root, exactly like ⁂ asngn's own pool paths. */
     ae = asper_open_at_with_models(&p, c->root, &models, &c->asper);
     if (ae != ASPER_OK) {
       /* No context was created, so there is no asper_last_error to read:
@@ -200,7 +200,7 @@ static asngn_err sib_open_astools_at(asngn_ctx *c, const char *workspace) {
     regs[0] = root;
     regs[1] = NULL;
     memset(&p, 0, sizeof(p));
-    /* an explicit astools config owns the registry roots (its entries
+    /* an explicit ⁂ astools config owns the registry roots (its entries
      * may carry full trust); the default root applies only without one,
      * so the same directory is never scanned at two trust levels */
     p.registry_paths = conf != NULL ? NULL : regs;
@@ -262,11 +262,11 @@ asngn_err asngn_siblings_readiness(asngn_ctx *c) {
   memset(&mr, 0, sizeof mr);
   memset(&tr, 0, sizeof tr);
   if (c->cfg.asper_enable && (!c->asper_ok || c->asper == NULL))
-    why = "Asper is unavailable";
+    why = "asper is unavailable";
   else if (c->cfg.asper_enable &&
            (asper_get_readiness(c->asper, &mr) != ASPER_OK ||
             !mr.store_ok || !mr.embedder_ok || !mr.curator_ok))
-    why = "Asper store, embedder, or curator is not ready";
+    why = "asper store, embedder, or curator is not ready";
   else if (c->cfg.astools_enable && (!c->astools_ok || c->astools == NULL))
     why = "astools is unavailable";
   else if (c->cfg.astools_enable &&
@@ -314,7 +314,7 @@ asngn_err asngn_siblings_workspace_sync(asngn_ctx *c, const char *root) {
   if (!c->cfg.astools_enable) return ASNGN_OK;
 
   /* The agent worker serializes turns across sessions.  Rebinding here
-   * gives every turn an astools context whose auto-grant and relative-path
+   * gives every turn an ⁂ astools context whose auto-grant and relative-path
    * base are exactly that session's private workspace. */
   if (c->astools_workspace_active != NULL &&
       strcmp(c->astools_workspace_active, root) == 0)
@@ -438,7 +438,7 @@ asngn_err asngn_siblings_annotations(asngn_ctx *c, const char *ref,
   return ASNGN_OK;
 }
 
-/* ═══════════════════════ memory zone (Asper) ═══════════════════════ */
+/* ═══════════════════════ memory zone (⁂ asper) ═══════════════════════ */
 
 static asngn_err sib_asper_err(asngn_ctx *c, asper_err e,
                                const char *operation) {
@@ -735,7 +735,7 @@ asngn_err asngn_siblings_project(asngn_ctx *c, const char *slug) {
   return ASNGN_OK;
 }
 
-/* Make Asper's active project match `want` (NULL = none). Asper holds a
+/* Make ⁂ asper's active project match `want` (NULL = none). ⁂ asper holds a
  * single active project per context while every session carries its
  * own: sessions sync it on open and at each turn, so switching
  * sessions switches the project memory with them. No-op when they

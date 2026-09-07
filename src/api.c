@@ -619,7 +619,7 @@ asngn_err asngn_session_open(asngn_ctx *c, const char *slug,
   }
   c->sessions[c->sessions_n++] = s;
   os_rwlock_wrunlock(&c->lock);
-  /* the session's saved project follows it into Asper (NULL deselects);
+  /* the session's saved project follows it into ⁂ asper (NULL deselects);
    * a failure only degrades the memory zone, never the open */
   (void)asngn_siblings_project_sync(c, s->project);
   *out = s;
@@ -899,7 +899,7 @@ asngn_err asngn_session_compact(asngn_session *s) {
   c = s->ctx;
   if (c->asper_ok) return asngn_siblings_compact(c);
   return asngn_seterr(c, ASNGN_ERR_UNSUPPORTED,
-                      "session compaction requires Asper");
+                      "session compaction requires asper");
 }
 
 /* ── stats ────────────────────────────────────────────────────────────── */

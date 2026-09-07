@@ -1,4 +1,4 @@
-"""Native proposals cross MCP, Asngn, asmodel, HTTP and the actual tool dispatcher.
+"""Native proposals cross MCP, asngn, asmodel, HTTP and the actual tool dispatcher.
 
 The HTTP peer is scripted: this measures contracts, never model quality.
 """

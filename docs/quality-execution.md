@@ -2,8 +2,8 @@
 
 This tracker distinguishes implementation, contract tests and model evaluation.
 It does not claim that the full research/product program is complete.
-Baseline on 2026-09-05: asngn 8869910, asper 5295ced, asmodel 5ccdc3b,
-astools efa6d22. Local source changes are included in the tested builds.
+Baseline on 2026-09-05: ⁂ asngn 8869910, ⁂ asper 5295ced, ⁂ asmodel 5ccdc3b,
+⁂ astools efa6d22. Local source changes are included in the tested builds.
 
 ## Milestones
 
@@ -12,8 +12,8 @@ astools efa6d22. Local source changes are included in the tested builds.
 | 1. Trustworthy outcomes | VERIFY-01, EVAL-01, verifier part of TOOLS-01 | Typed receipts, action/snapshot binding, stale-proof rejection, test collection, independent protected oracle | Expand adapters, toolchain identity and protected repository task suite |
 | 2. Reproducible foundation | RELEASE-01, TOKENS-01, USAGE-01 | Release manifest, ABI/header checks, standalone and reconstructed clean builds, explicit token uncertainty, durable operation reservations, atomic lifetime/day consumption views through C/MCP/SDKs | Published pins, calibrated remote tokenizer margins, complete session/cost attribution |
 | 3. Safe state | WORKSPACE-01, STORAGE-01, ACTIONS-01, CONCURRENCY-01 | Shared authorized enumeration, global snapshot quotas, bounded Git identity and registered worktree resolution, streaming file hashes, observed scan-conflict detection, expected edit hashes, writer lock, framed WAL/checksums, checked memory snapshots, validated compaction backups, I/O and compaction crash tests, durable bound approvals, streamed recovery and durable terminal task observations | Incremental snapshots/ignore syntax, other Git metadata layouts, effect reconciliation and resume, explicit data conversion, cross-process workspace coordination |
-| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
-| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, query-ranked bounded corpus across continued scans, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, generation trace/consumption correlation, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular Asper and embedding traces, fine-grained dependencies and task hypotheses |
+| 4. Runtime contract | RUNTIME-01, PROTOCOL-01, PROVIDERS-01, EMBED-01 | One ⁂ asmodel residency owner across lanes, intact cancellation/errors/partial output, per-request usage, cancellable generation queues, explicit output schemas, role/block input, remote native tool proposals, policy-bound native action loop and validated final-response reuse, embedding batches/receipts, shared versioned preprocessing and remaining deadlines | Attachments, native sequence batching, real provider conformance and turn-wide memory cancellation |
+| 5. Evidence and tasks | CODE-01, CONTEXT-01, TASK-01, CACHE-01 | Active-file admission, query-ranked bounded corpus across continued scans, build/config files, diversified results, optional managed clangd navigation, direct UTF-8 blob ranges, late diagnostic excerpts, bounded context/evidence selection and native-request traces, generation trace/consumption correlation, context/snapshot cache dependencies, persistent host acceptance graph, task/turn distinction | AST/incremental repo map, dependency-fresh LSP coverage, ranked role coverage, granular ⁂ asper and embedding traces, fine-grained dependencies and task hypotheses |
 | 6. Memory validity | MEMORY-01, MEMORY-02 | Confidence basis (unknown/heuristic/measured), indexed cursor search, checked event frames, bounded hash-verified object slices, progressive bounded source context, single-writer store, granular source ranges, dependency validity, support/conflict/correction links, retained revision history, checked offline whole-store export and resumable erasure, durable source-curation receipts, explicit partial-outcome reconciliation and reversible source deferral | Inverted text index, curator-proposed spans, selective retention/erasure, cleanup outside the store, authenticated owner APIs |
 | 7. Service and enforcement | SERVER-01, SECURITY-01, discovery part of TOOLS-01 | MCP submit/poll/cancel/release, cursor gaps, bounded event retention, edit conflict results, policy-filtered command snapshots, model-facing discovery, checked cancellable tool queues, durable approval inspection, package-bound persistent runtime, archived task retrieval through MCP/SDKs, instrumented shared JSON/provider and tool JSON/manifest/schema fuzz targets | Durable resume, interactive process control, discovery quality measurements, platform enforcement matrix, storage/process fuzzing and TSan |
 | 8. Measured policies | EVAL-02, ROUTING-01, EXPERIENCE-01, SEARCH-01, OPTIMIZE-01 | Repeats, isolated engine state, protected checks, Wilson interval, p50/p95, sampled process-tree RSS, no implicit calibration promotion | Real-model/hardware baseline and holdouts; measured routing, reusable procedures and candidate-search experiments |
@@ -46,7 +46,7 @@ trials require actual resources. No real-model result has been produced here.
   the observed exit status; setup errors cannot count as failing candidate tests.
   Public smoke tasks are always labelled `dev`, never `holdout`. These receipts
   do not make arbitrary in-process test code unable to forge its own output.
-- asmodel owns backend residency and locks. Session lanes borrow the same manager;
+- ⁂ asmodel owns backend residency and locks. Session lanes borrow the same manager;
   the current embedded wrapper serializes requests to one backend instance.
   This is shared residency, not native multi-sequence decoding. The former
   duplicate engine LRU/load machinery was removed.
@@ -61,10 +61,10 @@ trials require actual resources. No real-model result has been produced here.
   text proposal can now reuse the response validation path without a separate
   generation, retaining configured classification, output gates and review. See
   [native actions](native-actions.md) for bounds and unmeasured costs.
-- Output contracts now travel explicitly through asmodel ABI 8. The remote
+- Output contracts now travel explicitly through ⁂ asmodel ABI 8. The remote
   provider no longer identifies or rewrites engine/memory protocols by inspecting
-  GBNF. Asngn owns action/classification/judge schemas and validation; Asper owns
-  its curation/review/recall schema and exact output wrapper. Astools exports typed
+  GBNF. ⁂ asngn owns action/classification/judge schemas and validation; ⁂ asper owns
+  its curation/review/recall schema and exact output wrapper. ⁂ astools exports typed
   command argument schemas through the same registry selector as GBNF/catalog.
   JSON output metadata survives both shared-runtime adapters. Metadata strings
   preserve quotes/Unicode and reject oversized values instead of truncating intent.
@@ -82,7 +82,7 @@ trials require actual resources. No real-model result has been produced here.
   successful template-aware count and tokenizer/template identities. The current
   fallback admission margin is conservative but uncalibrated. Per-request
   generation info carries usage-known, partial output and diagnostics.
-- Operation reservations are durable before inference, including shared Asper
+- Operation reservations are durable before inference, including shared ⁂ asper
   generation and embeddings. Unknown usage retains its reservation. Conversation
   rollback cannot refund consumption. Replay validates reserve/settle identities
   and rejects double settlement. Schema-2 records correlate generation request
@@ -109,11 +109,11 @@ trials require actual resources. No real-model result has been produced here.
   Retrieval attaches full-file/chunk hashes and exact ranges and reports partial
   scans. See [workspace boundaries](workspace-tree.md) for the remaining incremental,
   ignore-pattern, hard-link and platform limits.
-- Asper record store format 2 rejects legacy/unframed data, complete corruption and
+- ⁂ asper record store format 2 rejects legacy/unframed data, complete corruption and
   impossible replay transitions. Checked snapshots and compaction markers bind
   backups by hash. Recovery validates all backups before restoring any target;
   uncertain sync blocks retrieval, mutations and compaction until reopen.
-- Asper stores AEV2 frames with separate metadata/payload checksums and bounded
+- ⁂ asper stores AEV2 frames with separate metadata/payload checksums and bounded
   event/log sizes. Cursor pages use a rebuildable offset index and one temporary
   frame; literal search can still scan the remaining tail. Full-list callers
   allocate the full result. A page validates returned events, not unrelated
@@ -123,7 +123,7 @@ trials require actual resources. No real-model result has been produced here.
   remove affected memories from retrieval. Runtime observations are renewed after
   restart. Checked history retains earlier claim text across record compaction.
   The engine observes the session workspace before memory materialization. See
-  [Asper grounding](../../asterism-asper/docs/knowledge.md) for semantics and limits.
+  [⁂ asper grounding](../../asterism-asper/docs/knowledge.md) for semantics and limits.
 - Optional clangd navigation uses a closed LSP contract on the existing process
   runtime. Source SHA-256 preconditions, UTF-8 position negotiation, exact-version
   diagnostics and final source rechecks prevent stale source observations from
@@ -133,7 +133,7 @@ trials require actual resources. No real-model result has been produced here.
   headers, server indexes and toolchain freshness are not certified. These results
   never count as verification receipts. See [LSP limits and setup](../../asterism-astools/docs/lsp.md).
 - Response cache keys include conversation, objective, active file, prompt,
-  security profile and current workspace. Response reuse is disabled while Asper
+  security profile and current workspace. Response reuse is disabled while ⁂ asper
   is active because a verifiable memory revision is not yet available.
 - Host acceptance contracts persist independently of turns, with revision checks,
   bounded prerequisite graphs, snapshot-bound runtime proofs and conservative
@@ -146,7 +146,7 @@ trials require actual resources. No real-model result has been produced here.
   other digests cannot drop recognized diagnostic excerpts. Explicit range objects
   replace implicit blob cursors across GBNF, JSON Schema and native controls.
   Selection traces identify versions, costs, omissions and reasons without copying
-  source text; delegated Asper materialization is not mislabeled as a budget trim.
+  source text; delegated ⁂ asper materialization is not mislabeled as a budget trim.
   Ring/batch byte quotas bound telemetry growth. See [evidence and context](evidence-context.md)
   for diagnostic coverage, attribution uncertainty and trace scope limitations.
 - A turn owns one bounded command snapshot for its prompt, GBNF, JSON Schema and
@@ -172,7 +172,7 @@ trials require actual resources. No real-model result has been produced here.
 - MCP jobs retain at most 256 events and 32 handles; poll reports cursor gaps.
   Without a host acceptance contract, a committed turn remains `unconfirmed`.
   Process restart does not preserve these event rings.
-- Python and JavaScript/TypeScript SDKs negotiate Asterism wire contract 1 and
+- Python and JavaScript/TypeScript SDKs negotiate ⁂ asterism wire contract 1 and
   expose live tasks, cursor pages, cancellation, acceptance revisions and read-only
   approvals. They preserve terminal failure/incomplete states and late-reply IDs;
   message, pending-request and stderr quotas bound payload retention. They own
@@ -185,8 +185,8 @@ trials require actual resources. No real-model result has been produced here.
 
 ## Validation at this checkpoint
 
-The latest clean checkpoint is Asngn `808dc77`, Asper `6cfb137`, asmodel
-`f097e33` and Astools `3d5b810`, reconstructed at
+The latest clean checkpoint is ⁂ asngn `808dc77`, ⁂ asper `6cfb137`, ⁂ asmodel
+`f097e33` and ⁂ astools `3d5b810`, reconstructed at
 `/tmp/asterism-restricted-release-ecwt73m5`. All available suites pass:
 57/31/6/35 respectively. The unsigned Linux remote-provider archive is
 `/tmp/asterism-runtime-consumption-20260906/asterism-0.1.0-linux-x86_64.tar.gz`,
@@ -214,8 +214,8 @@ LSan, 58 ordinary distribution suites and 53 non-threaded suites. Logs/JUnit are
 `/tmp/asterism-operation-quota-final-{sanitize,native,nothreads}-tests.*`.
 
 The preceding consumption checkpoint `8e6ffaa` passed clean reconstruction at
-`/tmp/asterism-restricted-release-dfq4nwrx`: 57 Asngn, 31 Asper, 6 asmodel and
-35 Astools suites. It predates the live operation-quota correction.
+`/tmp/asterism-restricted-release-dfq4nwrx`: 57 ⁂ asngn, 31 ⁂ asper, 6 ⁂ asmodel and
+35 ⁂ astools suites. It predates the live operation-quota correction.
 
 Engine-wide consumption now projects lifetime and reservation-day totals through
 one reducer for live admission and replay. Known usage, settled unknown usage and
@@ -251,8 +251,8 @@ The complete updated runs pass 55 restricted ASan/UBSan suites without LSan,
 `/tmp/asterism-state-final-{sanitize,native,nothreads}-tests.*`.
 
 The acceptance-replay checkpoint `d126888` passed clean reconstruction at
-`/tmp/asterism-restricted-release-wdwnjsen`: 55 Asngn, 31 Asper, 6 asmodel and
-35 Astools suites. The unsigned Linux remote-provider archive at
+`/tmp/asterism-restricted-release-wdwnjsen`: 55 ⁂ asngn, 31 ⁂ asper, 6 ⁂ asmodel and
+35 ⁂ astools suites. The unsigned Linux remote-provider archive at
 `/tmp/asterism-runtime-state-20260906/asterism-0.1.0-linux-x86_64.tar.gz`
 contains 3,226,443 bytes with SHA-256
 `b508c3e14025b861f4ce6e68f4733b14c71d8482c3d4be74242fc0b06eb686b5`.
@@ -262,8 +262,8 @@ This development package is unsigned and includes no weights; real inference,
 other distributions and complete provider/ACP conformance remain unvalidated.
 
 The approval checkpoint `7b3040f` passed clean reconstruction at
-`/tmp/asterism-restricted-release-guqjcud8`: 54 Asngn, 31 Asper, 6 asmodel and
-35 Astools suites. Its unsigned runtime archive at
+`/tmp/asterism-restricted-release-guqjcud8`: 54 ⁂ asngn, 31 ⁂ asper, 6 ⁂ asmodel and
+35 ⁂ astools suites. Its unsigned runtime archive at
 `/tmp/asterism-runtime-approval-20260906/asterism-0.1.0-linux-x86_64.tar.gz`
 contains 3,226,897 bytes with SHA-256
 `f00aa909fa3a6b82cec5d4e102c15ba0e45b8873a11a0299a7b569f3bdab7e20`.
@@ -284,8 +284,8 @@ distribution suites and 50 non-threaded suites. Their logs and JUnit reports are
 `/tmp/asterism-approval-final-{sanitize,native,nothreads}-tests.*`.
 
 The ACP checkpoint `6a737e8` passed clean reconstruction at
-`/tmp/asterism-restricted-release-_prtarbh`: 53 Asngn, 31 Asper, 6 asmodel and
-35 Astools suites. Its unsigned runtime archive is
+`/tmp/asterism-restricted-release-_prtarbh`: 53 ⁂ asngn, 31 ⁂ asper, 6 ⁂ asmodel and
+35 ⁂ astools suites. Its unsigned runtime archive is
 `/tmp/asterism-runtime-acp-20260906/asterism-0.1.0-linux-x86_64.tar.gz`,
 3,225,886 bytes, SHA-256
 `2083bcae4405ec3fb6467eef342cdfb802c3d90900b527f3636b6139ec6c13ae`.
@@ -310,12 +310,12 @@ checks use `/tmp/asterism-acp-final-*-tests.*`. HTTP, LSan and the production
 bubblewrap oracle remain excluded for the existing infrastructure reasons below.
 
 The retrieval/fuzzing checkpoint `1b01e44` passed clean reconstruction at
-`/tmp/asterism-restricted-release-bop9b65l`: 49 Asngn, 31 Asper, 6 asmodel and
-35 Astools executable suites passed. This clean result predates ACP.
+`/tmp/asterism-restricted-release-bop9b65l`: 49 ⁂ asngn, 31 ⁂ asper, 6 ⁂ asmodel and
+35 ⁂ astools executable suites passed. This clean result predates ACP.
 
 The `6974045` process/task checkpoint also passed clean reconstruction at
-`/tmp/asterism-restricted-release-kexafidt`: 48 Asngn, 31 Asper, 6 asmodel and
-35 Astools suites passed. Its clean unsigned runtime archive is
+`/tmp/asterism-restricted-release-kexafidt`: 48 ⁂ asngn, 31 ⁂ asper, 6 ⁂ asmodel and
+35 ⁂ astools suites passed. Its clean unsigned runtime archive is
 `/tmp/asterism-runtime-recovery-20260906/asterism-0.1.0-linux-x86_64.tar.gz`,
 2,653,785 bytes, SHA-256
 `f8082f25e2ff6b738e3b8a38f10c46fd981527fc0e283075843d58c3d4dca51e`.
@@ -323,7 +323,7 @@ The adjacent receipt records source pins, relocated installation, read-only doct
 and a real packaged strict-sandbox tool. This archive predates the following
 parser/admission changes; it is not evidence for their packaged behavior.
 
-Astools `3d5b810` adds optional real-library Clang/libFuzzer targets for JSON,
+⁂ astools `3d5b810` adds optional real-library Clang/libFuzzer targets for JSON,
 manifest/duration and MCP schema admission. The final bounded run completed
 2,494,558 / 90,851 / 1,443,811 executions respectively without a finding; the
 reviewed seeds, source changes, binary and log hashes are recorded. Both ordinary
@@ -351,8 +351,8 @@ tests passed in native CPU and ASan/UBSan/LeakSanitizer builds, and all four
 components passed from clean clones. No weights were loaded.
 
 The subsequent ancestor-marker correction, request traces and consumption
-correlation are built against the same pinned llama.cpp. asmodel now uses ABI 8;
-the coordinated manifest and Asper's standalone pin identify the updated contract.
+correlation are built against the same pinned llama.cpp. ⁂ asmodel now uses ABI 8;
+the coordinated manifest and ⁂ asper's standalone pin identify the updated contract.
 Local validation runs use
 ASan/UBSan with leak detection disabled. The automatic permission reviewer timed
 out twice when asked to run the current tests outside the sandbox. Current
@@ -370,7 +370,7 @@ I/O errors. Failed startup now retains its output/exit code but is explicitly
 This change has not yet passed successful production isolation outside the outer
 sandbox. The earlier complete oracle run remains evidence for the earlier code.
 
-Asper ABI 8 adds explicit source deferral, separate from source acknowledgement.
+⁂ asper ABI 8 adds explicit source deferral, separate from source acknowledgement.
 The integrated engine also passes 45 restricted ASan/UBSan executables against
 this memory ABI. Its 31 standalone executable suites pass in ordinary,
 ASan/UBSan (without leak detection) and
@@ -380,7 +380,7 @@ while the postponed event remains exact and unacknowledged. Decision removal
 allows later curation when the transcript budget admits it. Corrupt or changed
 source bindings fail store opening. See [offline deferral](../../asterism-asper/docs/curation-deferral.md).
 
-Astools adds a reviewed MCP stdio adapter in `88fe2d0` and shared batch
+⁂ astools adds a reviewed MCP stdio adapter in `88fe2d0` and shared batch
 admission in `aa8c418`, ABI 5 unchanged. It uses
 per-request MCP 2026-07-28 metadata, local command bindings, input/output validation,
 full error/incomplete payloads, bounded discovery and the existing sandboxed
@@ -391,8 +391,8 @@ and all 29 non-threaded executables pass. The new process/package tests cover
 both stdio hops, Linux basic/strict isolation and synthetic host environment
 grants. The updated integrated engine passes 45 restricted ASan/UBSan suites. See [MCP client scope](../../asterism-astools/docs/mcp-client.md).
 The MCP milestone now also passes a clean four-component reconstruction at
-`/tmp/asterism-restricted-release-8rveqo3n`: Asngn `155e3c5`, Asper `6cfb137`,
-asmodel `f097e33`, Astools `aa8c418`; 45/31/6/35 executables passed respectively.
+`/tmp/asterism-restricted-release-8rveqo3n`: ⁂ asngn `155e3c5`, ⁂ asper `6cfb137`,
+⁂ asmodel `f097e33`, ⁂ astools `aa8c418`; 45/31/6/35 executables passed respectively.
 HTTP/LSan/bubblewrap checks remain excluded for the stated infrastructure reasons.
 
 The Linux remote-provider distribution profile adds CMake installation and CPack
@@ -417,7 +417,7 @@ checks. These results do not establish resumable decoding or external-effect rep
 See [task recovery](task-recovery.md).
 
 The complete clean-source packaging CLI also produced an unsigned archive from
-Asngn `7ed4e7a`, Asper `6cfb137`, asmodel `f097e33` and Astools `aa8c418` at
+⁂ asngn `7ed4e7a`, ⁂ asper `6cfb137`, ⁂ asmodel `f097e33` and ⁂ astools `aa8c418` at
 `/tmp/asterism-runtime-local-20260906/asterism-0.1.0-linux-x86_64.tar.gz`.
 Its 2,628,136 bytes have SHA-256
 `dc011c39cec91de17d8dcfd4e1918641daef070964c250d8d3f4cfe4ea3d436a`;
@@ -425,23 +425,23 @@ the adjacent build receipt, JUnit and log record clean pins, relocation and
 extracted-archive checks. That archive predates the task-recovery extension.
 
 The task-recovery checkpoint has also passed clean reconstruction at
-`/tmp/asterism-restricted-release-9a7y85y_`: Asngn `fe0e127`, Asper `6cfb137`,
-asmodel `f097e33` and Astools `aa8c418`; 48/31/6/35 executable suites passed.
+`/tmp/asterism-restricted-release-9a7y85y_`: ⁂ asngn `fe0e127`, ⁂ asper `6cfb137`,
+⁂ asmodel `f097e33` and ⁂ astools `aa8c418`; 48/31/6/35 executable suites passed.
 
-Astools `0174cfa` fixes the POSIX local timeout after early standard-pipe closure,
+⁂ astools `0174cfa` fixes the POSIX local timeout after early standard-pipe closure,
 keeps spawn/capture/reaping under one local deadline, and reports `timed_out`
 separately from exit status. One integer duration parser preserves milliseconds
 in manifests, type validation, configuration and execution; period bounds exclude
 Windows' infinite-wait sentinel. Shared output encoding retains NUL/invalid UTF-8
 bytes as base64 with explicit byte counts in proc results and project steps.
-Astools passes 35 ordinary, 35 ASan/UBSan (without LSan) and 29 non-threaded
+⁂ astools passes 35 ordinary, 35 ASan/UBSan (without LSan) and 29 non-threaded
 executables; the updated integrated engine passes 48 restricted ASan/UBSan suites.
 These are one-shot process contracts, not interactive process persistence or
 new Windows enforcement claims. See [process results](../../asterism-astools/docs/process-results.md).
 
 The preceding clean restricted checkpoint at
-`/tmp/asterism-restricted-release-x_4_t5zu` verified Asngn `623ecad`, Asper
-`6cfb137`, asmodel `f097e33` and the earlier Astools `228ec5c` with respectively
+`/tmp/asterism-restricted-release-x_4_t5zu` verified ⁂ asngn `623ecad`, ⁂ asper
+`6cfb137`, ⁂ asmodel `f097e33` and the earlier ⁂ astools `228ec5c` with respectively
 45, 31, 6 and 32 executables. It does not validate the new MCP adapter.
 
 The shared runtime adds optional Clang/libFuzzer targets for strict JSON semantic
@@ -463,19 +463,19 @@ interleaved settlement across hash-table growth and failed replay publication.
 Invalid complete frames cannot be joined across record boundaries or discarded
 as an incomplete tail. The component replay comparison and its sanitizer limits
 are documented with [raw measurements](operations.md#component-measurement).
-Standalone Asper passes 30/30 with the updated runtime and ASan/UBSan; asmodel
+Standalone ⁂ asper passes 30/30 with the updated runtime and ASan/UBSan; ⁂ asmodel
 passes 6/6 available restricted checks in ordinary and sanitizer builds. Its HTTP
 check remains pending with the other external-sandbox validation.
-Clean local clones at engine `c02b6f9`, Asper `48f6720`, asmodel `2d0e3db` and
-astools `228ec5c` also build and pass the restricted release checks: 45 engine,
+Clean local clones at engine `c02b6f9`, ⁂ asper `48f6720`, ⁂ asmodel `2d0e3db` and
+⁂ astools `228ec5c` also build and pass the restricted release checks: 45 engine,
 30 memory, 6 runtime and 32 tool executables, plus 25 selected oracle cases.
 The HTTP target is explicitly built even though its execution is pending. This
 is a clean-build checkpoint, not completion of the external validation gates.
 
-- Standalone Asper: 30/30; astools: 32/32; asmodel: 7/7.
+- Standalone ⁂ asper: 30/30; ⁂ astools: 32/32; ⁂ asmodel: 7/7.
 - The shared strict JSON codec replaces protocol substring parsing. Provider
   tests reject misplaced usage counters, duplicate keys, invalid vector indices,
-  non-finite/wrong-size vectors and incomplete SSE. Standalone asmodel also passes
+  non-finite/wrong-size vectors and incomplete SSE. Standalone ⁂ asmodel also passes
   all seven executables with ASan/UBSan/LeakSanitizer.
 - The native controller also passes a full MCP/HTTP/tool-process integration for
   Chat Completions and Responses with scripted peers. Provider cancellation remains
@@ -495,7 +495,7 @@ is a clean-build checkpoint, not completion of the external validation gates.
   real-weight behavior remains unmeasured. Recall tests check remaining durations.
 - Embedding regressions cover reordered remote batches, queue expiry, cancellation,
   partial results, invalid vectors, immutable pipeline fields and identity changes.
-  A shared-host test proves that Asper and Asngn use the host prefixes exactly once;
+  A shared-host test proves that ⁂ asper and ⁂ asngn use the host prefixes exactly once;
   a 48-file retrieval fixture admits an active file and a late lexical candidate.
 - Explicit-schema mock tests pass without recognized grammar text; unsupported
   constraints and requests exceeding schema-inclusive admission fail before HTTP.
@@ -558,7 +558,7 @@ is a clean-build checkpoint, not completion of the external validation gates.
   the previous library reproduces re-proposal: two source events and one new model
   call after a partial insertion; the receipt runtime retains that insertion,
   suspends the batch and makes no further call. This is conservative reconciliation,
-  not atomic batch rollback or a task-success claim. Standalone no-thread Asper
+  not atomic batch rollback or a task-success claim. Standalone no-thread ⁂ asper
   also passes 30/30. See [curation recovery](../../asterism-asper/docs/curation-recovery.md).
 - Curation now selects complete inputs before retrieval or generation, retaining
   the omitted tail and checking the joined transcript against token and byte
@@ -569,7 +569,7 @@ is a clean-build checkpoint, not completion of the external validation gates.
   Oversized head events stop with `LIMIT` and remain pending. Explicit offline
   deferral can now postpone a reviewed event while later sources proceed;
   segmentation remains open. This is a contract regression, not model quality.
-- Asper ABI 7 bounds admitted and in-flight source text to 32 MiB and the configured
+- ⁂ asper ABI 7 bounds admitted and in-flight source text to 32 MiB and the configured
   event limit, retaining excess inputs on disk behind per-scope cursors. Retry
   restores reserved slots without allocating another array. Full flush captures
   endpoints, so concurrent appends cannot extend that drain indefinitely. Eleven
@@ -583,8 +583,8 @@ is a clean-build checkpoint, not completion of the external validation gates.
 - Release admission now tests actual temporary Git checkouts: stale standalone
   dependencies, dirty or replaced submodules, missing required checkouts and
   header changes cannot pass via the engine's development exception. All four
-  standalone Asper jobs and the real-model smoke read declared pins. Standalone
-  asmodel GCC and Clang/sanitizer recipes each pass 7/7 with mandatory HTTP coverage.
+  standalone ⁂ asper jobs and the real-model smoke read declared pins. Standalone
+  ⁂ asmodel GCC and Clang/sanitizer recipes each pass 7/7 with mandatory HTTP coverage.
   YAML was parsed locally; remote CI and the real-model smoke have not run here.
 - Grounding tests cover bad UTF-8 ranges, stale hashes/revisions, support cycles,
   partial coverage, changed dependencies, missing source events, contradictory
@@ -602,7 +602,7 @@ is a clean-build checkpoint, not completion of the external validation gates.
 - Ten persistent-runtime cases and two real-library cases pass. Seven lifecycle
   regressions also fail against the previous runtime: stale executable reuse,
   deleted scratch, delayed deadlines/cancellation and surviving descendants. The
-  no-thread Astools build passes 28/28 (persistent execution is unavailable there).
+  no-thread ⁂ astools build passes 28/28 (persistent execution is unavailable there).
 - Ten evidence cases cover late and dense diagnostics, compressor omissions,
   exact redacted offsets, invalid UTF-8, strict native/JSON range contracts and
   reads that cannot certify success. The native build also checks actual pinned
@@ -634,8 +634,8 @@ is a clean-build checkpoint, not completion of the external validation gates.
   interrupted turns, incomplete WAL tails, valid-text checksum corruption,
   short write, flush/fsync failure, unknown usage and duplicate settlement.
 
-The asmodel mock needs a loopback socket and LeakSanitizer needs process
-inspection, so these checks ran outside the tool sandbox. Astools' process-limit selector now exposes the same observation used to derive
+The ⁂ asmodel mock needs a loopback socket and LeakSanitizer needs process
+inspection, so these checks ran outside the tool sandbox. ⁂ astools' process-limit selector now exposes the same observation used to derive
 its headroom, removing the test's race between separate desktop task samples.
 The observation still is not a per-tree process quota guarantee. Windows/macOS, embedded llama and real-model
 behavior have not been validated by these Linux no-llama runs.

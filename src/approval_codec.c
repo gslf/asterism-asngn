@@ -43,8 +43,8 @@ xcdn_value_t *asngn_approval_encode(const asngn_approval *a) {
 
 asngn_err asngn_approval_decode(const xcdn_value_t *v, asngn_approval **out) {
   asngn_approval *a = calloc(1, sizeof *a);
-  int64_t schema, sequence, profile, status;
-  bool wide;
+  int64_t schema = 0, sequence = 0, profile = 0, status = 0;
+  bool wide = false;
   *out = NULL;
   if (!a) return ASNGN_ERR_NOMEM;
   /* Replay also checks canonical bytes: xCDN parsing can replace duplicate keys. */

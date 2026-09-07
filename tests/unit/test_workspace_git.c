@@ -64,7 +64,10 @@ TEST(empty_ancestor_marker_does_not_claim_a_repository) {
   ASSERT_TRUE(c && nested);
   os_mutex_init(&c->err_mu);
   ASSERT_OK(asngn_workspace_info_init(c, nested, &w));
-  ASSERT_EQ_STR(w.repository_root, nested);
+  char *canonical = os_realpath(nested);
+  ASSERT_TRUE(canonical != NULL);
+  ASSERT_EQ_STR(w.repository_root, canonical);
+  free(canonical);
   ASSERT_TRUE(!w.head[0] && !w.branch[0] && w.fingerprint[0]);
   free(nested);
   ASSERT_OK(put(&f, "main/src/source.c", "source"));

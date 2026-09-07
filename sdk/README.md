@@ -1,7 +1,7 @@
 # Local host SDKs
 
 Python and JavaScript/TypeScript clients launch `asngn-mcp` with an explicit argv,
-initialize MCP stdio revision `2025-06-18`, and require Asterism contract version 1.
+initialize MCP stdio revision `2025-06-18`, and require ⁂ asterism contract version 1.
 They have no runtime dependencies beyond Python 3.11+ or Node.js 22+.
 This is the host API for this engine, not a general MCP server importer or ACP adapter.
 

@@ -27,7 +27,7 @@ if(ASNGN_BUILD_DISTRIBUTION AND (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR
 endif()
 
 # Sibling working trees (pinned deps). By default
-# they are expected next to this repository, as in the asterism workspace.
+# they are expected next to this repository, as in the ⁂ asterism workspace.
 set(ASNGN_ASPER_DIR   "${CMAKE_CURRENT_SOURCE_DIR}/../asterism-asper"
     CACHE PATH "Path to the asterism-asper working tree")
 set(ASNGN_ASTOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../asterism-astools"
@@ -44,9 +44,11 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-# Strict flags apply to asngn translation units only (deps use their own).
+# Strict flags apply to ⁂ asngn translation units only (deps use their own).
 if(MSVC)
   set(ASNGN_C_FLAGS /W4 /WX)
+  # Include test fixtures and all CLI targets in the UTF-8 source contract.
+  add_compile_options(/utf-8)
   # The C sources use the portable libc string functions; keep MSVC's
   # "unsafe CRT" deprecation notes from tripping /WX.
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
@@ -71,7 +73,7 @@ endforeach()
 set(ASMODEL_BUILD_TESTS OFF)
 add_subdirectory("${ASNGN_ASMODEL_DIR}" deps-build/asmodel EXCLUDE_FROM_ALL)
 
-# xCDN-C: one copy for the whole process, supplied by astools' pinned
+# xCDN-C: one copy for the whole process, supplied by ⁂ astools' pinned
 # submodule. Configuration is deliberately read-only: dependency fixes belong
 # in the sibling's gitlink and must never be applied to a working tree here.
 set(ASNGN_XCDN_DIR "${ASNGN_ASTOOLS_DIR}/deps/xcdn-c")
@@ -89,7 +91,7 @@ endif()
 
 # libasper: memory sibling. Its guarded CMakeLists skips its own
 # xcdn-c because the target already exists; it still adds llama.cpp, which
-# asngn's model runtime links as well.
+# ⁂ asngn's model runtime links as well.
 set(ASPER_BUILD_MCP   ${ASNGN_BUILD_DISTRIBUTION})
 set(ASPER_BUILD_TESTS OFF)
 set(ASPER_NO_THREADS  ${ASNGN_NO_THREADS})
@@ -131,12 +133,12 @@ endif()
 
 # MSVC has no strtok_r; its strtok_s takes the same arguments in the same
 # order, so map the pinned xCDN source onto it.  C4244 (int64_t narrowing)
-# fires on the pinned astools revision under /W4 /WX; sibling-owned, silenced
+# fires on the pinned ⁂ astools revision under /W4 /WX; sibling-owned, silenced
 # here like the GCC 15 diagnostics below.
 if(MSVC)
   target_compile_definitions(xcdn PRIVATE strtok_r=strtok_s)
   target_compile_options(astools_obj PRIVATE /wd4244)
-  # llama.h is not /W4-clean (C4201 nameless struct/union); asper includes
+  # llama.h is not /W4-clean (C4201 nameless struct/union); ⁂ asper includes
   # it without an MSVC-side pragma guard.
   target_compile_options(asper_obj PRIVATE /wd4201)
 endif()
@@ -317,7 +319,7 @@ foreach(tgt asngn_static asngn_shared)
   endif()
 endforeach()
 
-# ── asngn (TUI + headless CLI) ───────────────────────────────────────────────
+# ── ⁂ asngn (TUI + headless CLI) ───────────────────────────────────────────────
 if(ASNGN_BUILD_TUI)
   if(ASNGN_NO_THREADS)
     message(FATAL_ERROR "the TUI requires the threaded build; "

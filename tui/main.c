@@ -1,8 +1,8 @@
 /*
- * main.c — the asngn terminal application: argument parsing, the
+ * main.c — the ⁂ asngn terminal application: argument parsing, the
  * event loop, slash commands, and the headless --once mode.
  *
- * Threading contract: asngn callbacks (tokens, events, log) fire
+ * Threading contract: ⁂ asngn callbacks (tokens, events, log) fire
  * on engine threads. They only append to the mutex-guarded queue and
  * write one byte down the self-pipe; the main loop polls stdin plus the
  * pipe, drains the queue, updates state, and renders. asngn_* is never
@@ -202,7 +202,7 @@ static void render_status(tui_app *a, tui_frame *f) {
   }
   if (a->sstats_ok) {
     /* whole-conversation spend (prompt+gen, from the ledger) and the
-     * share the Asper memory zone took of it */
+     * share the ⁂ asper memory zone took of it */
     tui_fmt_count(cnt, sizeof cnt,
                   (long long)(a->sstats.tokens_prompt +
                               a->sstats.tokens_gen));
@@ -1343,7 +1343,7 @@ static int run_frame_dump(int confirmation) {
   a.security_profile = ASNGN_SECURITY_CODING_SANDBOXED;
   a.sidebar_on = 1;
   a.pane = PANE_TRACE;
-  tui_theme_init(&a.theme, 0); /* golden frames are stable: asterism */
+  tui_theme_init(&a.theme, 0); /* golden frames are stable: ⁂ asterism */
   snprintf(a.slug, sizeof a.slug, "main");
   chat_init(&a.chat);
   ed_init(&a.ed);
@@ -1696,6 +1696,7 @@ static int run_interactive(const char *root, const char *config,
 
 static void usage(FILE *out) {
   fprintf(out,
+          "asngn — workflow and automation harness\n"
           "usage: asngn [--root <dir>] [--config <file>] "
           "[--workspace <dir>] [--allow-degraded] "
           "[--session <slug>]\n"

@@ -101,7 +101,7 @@ static const char *const route_verbs[] = {
   "copy",    "move",      "remove", "edit",    "use",     NULL
 };
 
-/* astools tool-name prefixes; a mention selects that family directly. */
+/* ⁂ astools tool-name prefixes; a mention selects that family directly. */
 static const struct { const char *prefix; unsigned family; } route_tools[] = {
   {"fs.", ASNGN_TOOLF_FS},     {"grep.", ASNGN_TOOLF_GREP},
   {"git.", ASNGN_TOOLF_GIT},   {"proc.", ASNGN_TOOLF_PROC},

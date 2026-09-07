@@ -5,14 +5,14 @@
       "repository": "gslf/asterism-asngn",
       "revision": "checkout",
       "headers": {
-        "include/asngn.h": "78ab12427a839f9351c0f7463465efcfcf8c9a11135d7803ece8f68856501ac4"
+        "include/asngn.h": "cc6bcf3074d01a4ac80affa171667cc4bf9fdfbc32faa174f1c93289e354e12e"
       }
     },
     "asper": {
       "repository": "gslf/asterism-asper",
-      "revision": "6cfb1375f4701f4447474f2f87b8de64b59a27d9",
+      "revision": "663b9f0e426570da2f716ce9e28db9733b31f614",
       "headers": {
-        "include/asper.h": "9586ca81bc7d8636dd61322be8cb5bc45a74171b13abb33c46e339bdedbc66b9"
+        "include/asper.h": "51e1660b49c72edbba633b683ea7b690f4b0a0e83a38bc8cbe2de0eaebcdffec"
       }
     },
     "asmodel": {

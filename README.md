@@ -1,17 +1,29 @@
-# ⁂ asngn
-## Asterism Engine
+# ⁂ asngn - asterism engine
 
-An outcome-gated agentic coding engine for small local LLMs.
+### A general-purpose agent harness for creating and completing real-world workflows and automations, with evidence-driven execution.
+
+>⁂ asterism is a modular agent harness that turns language models into tools for creating and completing real-world workflows and automations. **SLM** and **local inference** friendly. Read the central [architecture decisions and system value](https://github.com/gslf/asterism-asngn/blob/main/docs/ARCHITECTURE.md).
+
+| Project | Responsibility in the harness |
+|---|---|
+| [⁂ asngn](https://github.com/gslf/asterism-asngn) | Workflow orchestration, task state, execution policy and outcome checks |
+| [⁂ asper](https://github.com/gslf/asterism-asper) | Durable memory, exact evidence, checkpoints and bounded context |
+| [⁂ astools](https://github.com/gslf/asterism-astools) | Discoverable tool contracts, permissions and supervised actions |
+| [⁂ asmodel](https://github.com/gslf/asterism-asmodel) | Shared inference resources and explicit provider capabilities |
+
+The current distribution includes general system tools and specialized coding workflows. Other application domains require appropriate tool packages and host integrations. Persistent acceptance verification currently covers supported `project` workflows; broader domain-specific verifiers remain extension work.
+S
+ee [acceptance contracts](docs/acceptance.md).
 
 Architecture and design: [docs/SPECS.md](docs/SPECS.md).
 
 
-- **Lossless zoned context** — Asper owns exact scoped events, semantic memory, checkpoints and content-addressed objects; each call materializes only the best bounded view with explicit exact/estimated token accounting.
-- **Continuation instead of retry** — partial output returned at a token ceiling is preserved. Artifact drafts resume from a hashed exact prefix, while oversized tool output becomes a diagnostic view plus an Asper object reopenable at an explicit byte offset. [Evidence and context](docs/evidence-context.md).
-- **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "discover" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; coding and complex work is orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
+- **Lossless zoned context** — ⁂ asper owns exact scoped events, semantic memory, checkpoints and content-addressed objects. Each call materializes only the best bounded view with explicit exact/estimated token accounting.
+- **Continuation instead of retry** — partial output returned at a token ceiling is preserved. Artifact drafts resume from a hashed exact prefix, while oversized tool output becomes a diagnostic view plus an ⁂ asper object reopenable at an explicit byte offset. [Evidence and context](docs/evidence-context.md).
+- **Two-pass turns** — schema-constrained decision passes emit one action object per step (`{action: "call" | "discover" | "recall" | "open" | "think" | "clarify" | "answer", why, input, success, fallback}`, GBNF-enforced — the in-process analogue of llama.cpp-server JSON-schema output). Routine lookups may use the cheaper planner; complex workflows, including coding, are orchestrated by the generator tier. The final answer runs under an explicit terse/normal/rich budget that is stated in the prompt as well as enforced by the backend.
 - **Semantic cache** — embedding-keyed reuse and light-tier adaptation of previous answers; tool-touched entries are never replayed, only surfaced as plan hints; a world-epoch counter ties cache validity to destructive tool activity. A separate exact-key cache short-circuits repeated read-only tool calls.
 - **Safety** — input/plan/action/output gates, identical-call and oscillation guards, stall watchdog, step and tool caps, secret redaction, [durable action approvals](docs/approvals.md) with complete argument review, an optional judge pass — all measured in the ledger, never hidden.
-- **Telemetry** — per-turn attribution and savings plus a separate, durable operation log for inference consumption, including failed or cancelled calls. Unknown usage retains its reservation. QpT remains diagnostic only: coding quality is gated by task success, passing tests, applicable patches, valid tool calls, regressions, latency, and memory.
+- **Telemetry** — per-turn attribution and savings plus a separate, durable operation log for inference consumption, including failed or cancelled calls. Unknown usage retains its reservation. QpT remains diagnostic only: quality must be assessed against the requested outcome and observed evidence, alongside latency and memory. Coding checks include passing tests, applicable patches, valid tool calls and regressions.
 
 ---
 
@@ -41,7 +53,7 @@ any shell with CMake and git on PATH).
 
 ### 2. Clone the workspace
 
-asngn expects its three sibling repositories next to it (paths can be
+⁂ asngn expects its three sibling repositories next to it (paths can be
 overridden with `ASNGN_ASPER_DIR` / `ASNGN_ASTOOLS_DIR` /
 `ASNGN_ASMODEL_DIR`):
 
@@ -69,7 +81,7 @@ git clone https://github.com/gslf/asterism-asmodel
 All commands run from inside `asterism-asngn`. Pick **one** configure line
 (CPU or GPU), then build.
 
-The build consumes Asper's pinned, unmodified llama.cpp submodule. CMake
+The build consumes ⁂ asper's pinned, unmodified llama.cpp submodule. CMake
 configuration never patches a dependency working tree. Native calls go through
 `src/llama_guard.cpp`, which translates escaping C++ exceptions into model
 errors; it does not contain `abort`, segmentation faults or process termination.
@@ -145,10 +157,18 @@ Notes that apply to every platform:
   (OFF), `ASNGN_WITH_LLAMA` (ON), `ASNGN_BUILD_ACP` (ON for threaded POSIX
   builds, OFF elsewhere).
 - Artifacts: `libasngn.a` / `libasngn.dylib` (`asngn.lib` / `asngn.dll` on
-  Windows), the `asngn` terminal application, and the `asngn-mcp` MCP
+  Windows), the ⁂ asngn terminal application, and the `asngn-mcp` MCP
   server. Threaded POSIX builds also include the limited `asngn-acp` editor host.
 
-### 4. Download the model weights
+### 4. Choose model execution
+
+For hosted models or a separate inference server, configure the model pool as
+shown in [API providers](#shared-model-runtime-and-api-providers) and proceed to
+tool installation. The weight-download instructions below apply to embedded
+local inference. The reference SLM pool is a starting configuration; larger
+models and mixed local/remote pools are also valid choices.
+
+#### Download weights for embedded inference
 
 The general profile runs without weights (degraded: no model calls, tools and
 sessions still work), but for real use you want the reference pool —
@@ -224,13 +244,13 @@ uses remote providers and is an unsigned development artifact.
 POSIX (binaries in `build/`):
 
 ```bash
-# interactive TUI (dark theme, yellow accent)
+# interactive TUI 
 ./build/asngn
 ```
 
 ```bash
 # one-shot headless turn for scripts and pipes
-./build/asngn --once "create a small C++ program"
+./build/asngn --once "Inspect the workspace and summarize its files by type"
 ```
 
 ```bash
@@ -252,7 +272,7 @@ any Windows 10+ console works, Windows Terminal recommended):
 ```
 
 ```powershell
-.\build\Release\asngn.exe --once "create a small C++ program"
+.\build\Release\asngn.exe --once "Inspect the workspace and summarize its files by type"
 ```
 
 ```powershell
@@ -266,7 +286,7 @@ Windows), and `<engine-root>/config.xcdn` is discovered automatically.
 startup ceremony.
 
 Reusable starter configurations live together under [`examples/`](examples/README.md):
-one for embedded GGUF models, one for LM Studio, and a companion astools
+one for embedded GGUF models, one for LM Studio, and a companion ⁂ astools
 policy. Copy them to a separate engine root and replace the marked model/tool
 paths. The repository itself is not an engine root and should never accumulate
 sessions, memory, cache, telemetry, logs, models, or generated workspaces.
@@ -275,7 +295,7 @@ By default `integration.astools.workspace: "session"` gives every session an
 isolated writable tree at `sessions/<slug>/workspace/`. Relative tool paths
 are resolved only there. Operational metadata (`session.xcdn`, ledger) stays
 beside the workspace; all conversation/checkpoint/object memory lives under
-Asper's `memory/` root and is never exposed as the tool working directory.
+⁂ asper's `memory/` root and is never exposed as the tool working directory.
 Set a concrete workspace path, or pass `--workspace`, only when a
 session is deliberately meant to operate on an external checkout.
 
@@ -297,12 +317,18 @@ or server restart through `agent_recover`.
 
 ## Shared model runtime and API providers
 
-asngn and embedded Asper share one `asmodel` runtime. Asper's curator
+⁂ asngn and embedded ⁂ asper share one ⁂ asmodel runtime. ⁂ asper's curator
 borrows the configured compressor slot and retrieval borrows the embedder
 slot, so weights and reusable contexts/KV allocations are not loaded twice.
-Standalone Asper/MCP creates its own manager and remains independent.
+Standalone ⁂ asper/MCP creates its own manager and remains independent.
 
-Every pool entry may be an embedded GGUF or an OpenAI-compatible endpoint:
+Pool entries can mix embedded GGUF models with compatible HTTP endpoints on
+localhost, another machine or a hosted service. Local model downloads are not
+required for roles served remotely. Model size is a deployment choice, not a
+restriction of the harness. APIs outside the implemented profiles require a
+provider adapter; required structured-output and reasoning controls still apply.
+
+For example, the following configuration uses a local HTTP server:
 
 ```xcdn
 #asngn_config {
@@ -336,26 +362,7 @@ Every pool entry may be an embedded GGUF or an OpenAI-compatible endpoint:
 }
 ```
 
-`api_key_env` is the name of an environment variable, not the credential.
-`provider` selects an asmodel protocol profile; OpenAI-shaped endpoints are
-not assumed to have interchangeable extensions. Decision, classifier, and
-judge calls require constrained output and reasoning-off per request. Draft
-and answer calls keep the model's normal reasoning behavior. An unsupported
-combination fails closed instead of dropping a control. Provider selection is
-explicit; reasoning policy is exclusively per request.
-Remote long-form calls use Chat Completions SSE on LM Studio, llama.cpp server,
-and vLLM. Token budgets, not elapsed time, bound inference by default:
-`safety.turn_deadline` and `safety.stall_timeout` are both `PT0S` (disabled).
-`Esc`, `Ctrl+C`, or `asngn_task_cancel()` immediately aborts the in-flight
-provider request. A client may still opt into a per-turn `deadline_ms`, and an
-operator may configure a nonzero stall timeout; neither path retries.
-When an endpoint reports `finish_reason=length`, asmodel returns the decoded
-partial bytes with the limit status. ASNGN consumes them only in resumable
-phases; it never pays again for the same completed prefix.
-`ram_mb`/`vram_mb` may be declared per entry when automatic estimates
-are not appropriate; the manager evicts the least-recently-used idle model
-to stay within resident, RAM and VRAM budgets. `warm: false` leaves a slot
-lazy.
+`api_key_env` is the name of an environment variable, **not** the credential.
 
 ## GPU vs CPU at runtime
 
@@ -367,13 +374,9 @@ Compiling with `-DGGML_CUDA=ON` / `-DGGML_METAL=ON` only makes the GPU
 - `gpu_layers: 0` — CPU only
 - `gpu_layers: N` — offload N layers, rest on CPU (for VRAM-tight setups)
 
-The same knob exists for Asper's memory models (`curator.gpu_layers`,
-`embedding.gpu_layers` in Asper's own config). On a CPU-only build the
-value is ignored entirely — one config works everywhere.
-
-To confirm the GPU is actually in use, watch VRAM while a turn runs
-(`nvidia-smi` on NVIDIA, Activity Monitor's GPU history on macOS): loading
-the 7B model should claim several GB.
+The same knob exists for ⁂ asper's memory models (`curator.gpu_layers`,
+`embedding.gpu_layers` in ⁂ asper's own config). On a CPU-only build the
+value is ignored entirel. One config works everywhere.
 
 The optional [native action protocol](docs/native-actions.md) sends selected tools
 as native function schemas and retains correlated results. Enable it explicitly
@@ -382,7 +385,7 @@ constrained controller.
 
 ## Bigger context and longer answers
 
-The defaults use a professional 32k profile: enough room for substantial
+The defaults use a 32k profile, enough room for substantial
 tool traces, source drafts, and long-form answers without starving the
 response pass. On machines with less memory, reduce the model contexts and
 zone budgets together rather than shrinking only the answer cap. The core
@@ -435,10 +438,7 @@ profile is equivalent to:
 }
 ```
 
-Model paths are relative to the engine root. Rough VRAM guide for this
-profile with everything on the GPU: the three Qwen models plus 32k KV
-caches settle around 11–12 GB; halve `ctx` (or set `gpu_layers: 0` on
-`light`) to fit smaller cards.
+Model paths are relative to the engine root.
 
 ## Interactive TUI controls
 
@@ -465,48 +465,7 @@ Chat and input history use separate controls:
 - Operational rationales appear live in blue; final assistant output keeps the
   normal foreground color. Rationales are short and redacted.
 
-## Troubleshooting
 
-- **`ASNGN_ERR_MODEL: model 'std': failed to load models/...`** — the
-  weights are missing from `<engine-root>/models/`: run step 4. Paths in
-  the config are engine-root-relative.
-- **The model never calls tools — it answers with CLI instructions
-  ("run `git status` yourself") instead of acting** — the tool registry is
-  empty: `<engine-root>/tools/` has no packages, so the decision grammar
-  has no `call` action and the model literally cannot emit one. Run
-  step 5 (copy `build/packages/*` into `<engine-root>/tools/`).
-- **`bert model needs to define token type count`** — the embedder GGUF
-  lacks the `tokenizer.ggml.token_type_count` metadata key (common in
-  older community conversions): `python3 scripts/gguf_add_kv.py <file>
-  tokenizer.ggml.token_type_count 2`, or just use the fetch script.
-- **“the interactive TUI needs a terminal”** — stdin/stdout is a pipe, or
-  `TERM=dumb`, or (Windows) the console has no VT support. Use a real
-  terminal (Windows 10+ console / Windows Terminal), or `--once` for
-  scripted use.
-- **Windows: `LNK1104: cannot open ... asngn.exe`** — the TUI is still
-  running and holds the file; close it and rebuild.
-- **Windows sandbox note** — tool sandboxing rides on Job Objects (cpu /
-  memory / process-count caps are kernel-enforced); the `strict` level
-  (fs confinement, network deny) is not wired on Windows yet and degrades
-  to `basic` with a warning.
-- **First turn after changing the embedder file** — a one-time
-  `embedding cache invalid ... vectors rebuild lazily` warning is
-  expected; the cache rebuilds itself.
 
-## Layout
-
-```
-include/asngn.h   public C API
-src/              libasngn: session store, context engine, caches,
-                  orchestrator, control loop, safety, telemetry
-tui/              in-house VT terminal application (no curses)
-mcp/              asngn-mcp (JSON-RPC 2.0 over stdio)
-scripts/          model-pool fetch + tool-registry install helpers
-                  (sh / ps1), GGUF kv patcher
-tests/            unit / integration / golden tests, scripted fakes
-docs/             SPECS.md, telemetry.md
-```
-
-MIT — see [LICENSE](LICENSE).
-
-Design and operational details for hybrid retrieval, evidence metadata, the turn WAL and concurrent session scheduling: [retrieval-memory-transactions](docs/retrieval-memory-transactions.md).
+## License
+MIT [LICENSE](LICENSE).

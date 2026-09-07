@@ -1,7 +1,7 @@
 {
   "name": "@asterism/sdk",
   "version": "0.1.0",
-  "description": "Async local host SDK for the Asterism coding engine",
+  "description": "Async local host SDK for the asngn workflow and automation harness",
   "type": "module",
   "license": "MIT",
   "engines": { "node": ">=22" },

@@ -1,4 +1,4 @@
-# asngn tests: one CTest executable per test_*.c, linked against
+# ⁂ asngn tests: one CTest executable per test_*.c, linked against
 # asngn_static, using the in-house harness (asngn_test.h) and the scripted
 # fakes (fakes.c). Golden values are inline C string literals.
 
@@ -70,12 +70,18 @@ foreach(test_name ${ASNGN_TEST_PROGRAMS})
   if(ASNGN_SANITIZERS)
     # Sanitizer runtimes reserve a very large virtual address range.  The
     # integration fixture therefore runs its instrumented helper without
-    # astools' RLIMIT_AS; the normal test build still exercises the sandbox.
+    # ⁂ astools' RLIMIT_AS; the normal test build still exercises the sandbox.
     target_compile_definitions(${test_name} PRIVATE ASNGN_TEST_SANITIZERS)
   endif()
   add_test(NAME ${test_name} COMMAND ${test_name})
   set_tests_properties(${test_name} PROPERTIES TIMEOUT 120)
 endforeach()
+
+# This boundary test builds and replays the full-capacity journal several
+# times; sanitizer allocators need more time without reducing the exercised limit.
+if(ASNGN_SANITIZERS AND TARGET test_consumption)
+  set_tests_properties(test_consumption PROPERTIES TIMEOUT 300)
+endif()
 
 if(ASNGN_WITH_LLAMA AND TARGET test_grammar)
   target_sources(test_grammar PRIVATE grammar_validate.cpp)
@@ -102,9 +108,9 @@ add_test(NAME test_model_manifest
     "-DMANIFEST=${CMAKE_CURRENT_SOURCE_DIR}/../scripts/models.manifest.tsv"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/model_manifest_smoke.cmake")
 
-# ── asngn_fake_tool: scripted protocol tool (xcdn only, like astools') ───────
-# Spawned by the engine integration tests through the real astools registry;
-# mirrors astools' tests/tools/tool_fake pattern.
+# ── asngn_fake_tool: scripted protocol tool (xcdn only, like ⁂ astools') ───────
+# Spawned by the engine integration tests through the real ⁂ astools registry;
+# mirrors ⁂ astools' tests/tools/tool_fake pattern.
 add_executable(asngn_fake_tool tools/fake_tool.c)
 target_include_directories(asngn_fake_tool PRIVATE ${ASNGN_XCDN_DIR}/src)
 if(MSVC)
@@ -175,7 +181,8 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(test_workspace_git test_workspace_git_live PROPERTIES TIMEOUT 120)
   add_test(NAME test_release_admission
     COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/test_release.py)
-  set_tests_properties(test_release_admission PROPERTIES TIMEOUT 120)
+  # The clean/dirty checkout fixtures launch hundreds of Git processes.
+  set_tests_properties(test_release_admission PROPERTIES TIMEOUT 300)
   if(TARGET asngn)
     add_test(NAME test_confirmation_tui
       COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/confirmation_tui.py
@@ -189,15 +196,18 @@ if(Python3_Interpreter_FOUND)
     add_test(NAME test_approval_mcp
       COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/approval_mcp.py
         $<TARGET_FILE:asngn-mcp>)
+    set_tests_properties(test_approval_mcp PROPERTIES TIMEOUT 60)
     add_test(NAME test_work_mcp
       COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/work_smoke.py
         $<TARGET_FILE:asngn-mcp>)
-    # Imported CURL targets can be scoped to the asmodel subdirectory.
+    set_tests_properties(test_work_mcp PROPERTIES TIMEOUT 60)
+    # Imported CURL targets can be scoped to the ⁂ asmodel subdirectory.
     get_target_property(ASNGN_MODEL_LINKS asmodel_static INTERFACE_LINK_LIBRARIES)
     if(WIN32 OR "CURL::libcurl" IN_LIST ASNGN_MODEL_LINKS)
       add_test(NAME test_native_wire
         COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/native_wire.py
           $<TARGET_FILE:asngn-mcp> $<TARGET_FILE:asngn_fake_tool>)
+      set_tests_properties(test_native_wire PROPERTIES TIMEOUT 60)
     endif()
   endif()
 endif()

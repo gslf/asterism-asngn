@@ -1,4 +1,4 @@
-/* Local transcript selection when Asper is disabled. */
+/* Local transcript selection when ⁂ asper is disabled. */
 #include "context.h"
 #include <stdlib.h>
 #include <string.h>

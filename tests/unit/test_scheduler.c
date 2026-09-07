@@ -105,10 +105,6 @@ TEST(concurrent_sessions_backpressure_and_queue_deadline) {
   int entered = b.entered;
   os_mutex_unlock(&b.mu);
   ASSERT_EQ_INT(entered, 1);
-  ASSERT_TRUE(strcmp(c->lanes[0]->workspace.canonical_root,
-                     c->lanes[1]->workspace.canonical_root) != 0);
-  ASSERT_TRUE(strcmp(c->workspace.canonical_root,
-                     c->lanes[0]->workspace.canonical_root) != 0);
   ASSERT_ERR(asngn_submit(s[0], "overlap", NULL, NULL, NULL, &rejected),
              ASNGN_ERR_BUSY);
   asngn_submit_opts opts;
@@ -131,6 +127,12 @@ TEST(concurrent_sessions_backpressure_and_queue_deadline) {
     asngn_turn_result_free(&r);
     asngn_task_free(t[i]);
   }
+  /* active_task is published before workspace binding. Inspect lane state
+   * after both tasks finish, when the workers cannot still be writing it. */
+  ASSERT_TRUE(strcmp(c->lanes[0]->workspace.canonical_root,
+                     c->lanes[1]->workspace.canonical_root) != 0);
+  ASSERT_TRUE(strcmp(c->workspace.canonical_root,
+                     c->lanes[0]->workspace.canonical_root) != 0);
   ASSERT_EQ_INT(b.entered, 2);
   ASSERT_EQ_INT(s[2]->log_n, 0);
   ASSERT_OK(asngn_submit(s[0], "hello again", NULL, NULL, NULL, &t[3]));

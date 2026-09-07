@@ -3,7 +3,7 @@
 The `linux-remote` profile builds a relocatable runtime archive from the four
 clean local component pins. It contains the TUI/headless CLI, three MCP servers,
 the limited [ACP editor host](acp.md),
-the Astools checker/jail helper, standard tool packages, starter configurations
+the ⁂ astools checker/jail helper, standard tool packages, starter configurations
 and licenses. It contains no weights, secrets, session state or development
 libraries. It uses the host Linux C/C++ runtime and libcurl dependencies;
 relocation on the build host does not prove portability to another distribution.
@@ -34,7 +34,7 @@ must not create engine state. Configure a real provider using the included
 `share/asterism/examples` documentation; a remote endpoint/model and any required
 credential must be supplied. The current archive does not provide offline
 inference. Keep writable engine state separate from the extracted installation.
-Configure the Astools registry to use the absolute
+Configure the ⁂ astools registry to use the absolute
 `share/asterism/tools` path, or copy those packages into a new engine root's
 `tools` directory as shown in the examples. The jail helper lives beside the
 executables so relocation retains Linux strict sandbox discovery.

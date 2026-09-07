@@ -1,6 +1,6 @@
-# Asterism JavaScript / TypeScript SDK
+# ⁂ asterism JavaScript / TypeScript SDK
 
-ESM host client for the local `asngn-mcp` server, Asterism wire contract 1.
+ESM host client for the local `asngn-mcp` server, ⁂ asterism wire contract 1.
 Requires Node.js 22+. TypeScript declarations are included; no runtime dependencies.
 
 ```javascript

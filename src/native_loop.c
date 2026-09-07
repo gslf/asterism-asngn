@@ -101,7 +101,7 @@ asngn_err asngn_native_run(asngn_ctx *c, asngn_turn_state *t) {
   asngn_native_history history = {0};
   asngn_prompt seed = {0};
   /* The initial repository/conversation context is compiled once. Current-turn
-   * observations retain native roles; historical Asper context is still text. */
+   * observations retain native roles; historical ⁂ asper context is still text. */
   asngn_turn_state initial = *t;
   initial.catalog = NULL;
   asngn_err e = asngn_context_assemble(c, t->s, &initial, NULL, instruction, t->gen_slot, &seed);

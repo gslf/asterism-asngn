@@ -1,0 +1,2 @@
+# Keep protocol fixtures and pinned header digests identical on every OS.
+* text=auto eol=lf

@@ -235,7 +235,7 @@ TEST(native_free_text_cannot_bypass_artifact_or_empty_output_gates) {
     asngn_turn_result r = {0}; eng_sink sink = {0};
     ASSERT_ERR(eng_turn(&f, artifact ? "Create a file" : "Inspect fake tools", NULL, &sink, &r),
         artifact ? ASNGN_ERR_MODEL : ASNGN_ERR_PROTOCOL);
-    /* The required-tools contract rejects missing calls in asmodel first. */
+    /* The required-tools contract rejects missing calls in ⁂ asmodel first. */
     ASSERT_EQ_INT(f.stdm.calls, 1);
     ASSERT_NOT_CONTAINS(sink.buf, "Created the requested");
     asngn_stats stats; ASSERT_OK(asngn_get_stats(f.c, &stats)); ASSERT_EQ_INT(stats.tool_calls, 0);

@@ -8,7 +8,7 @@
  * private-key blocks, Authorization headers, key=value pairs), scanned left
  * to right with longest-match-wins and consumed regions; then a Shannon-
  * entropy pass for base64/hex-looking runs over whatever the structural
- * pass left untouched. Replacements are never rescanned. Pure libc + asngn
+ * pass left untouched. Replacements are never rescanned. Pure libc + ⁂ asngn
  * utils; every pattern is ASCII-delimited, so valid UTF-8 in means valid
  * UTF-8 out.
  *

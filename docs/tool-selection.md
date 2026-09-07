@@ -30,7 +30,7 @@ selection as function schemas, with at most 59 tools plus runtime controls.
 
 The host filters disabled runtimes, statically impossible permissions and commands
 excluded by the read-only profile. Argument-specific path checks remain mandatory.
-Before confirmation or a cached result, Astools validates the selected package,
+Before confirmation or a cached result, ⁂ astools validates the selected package,
 arguments and current policy. Cache keys include package bytes and workspace state.
 After queue admission, invocation checks identity and availability again. Changes
 require a fresh discovery. Invocation propagates cancellation and waits for the

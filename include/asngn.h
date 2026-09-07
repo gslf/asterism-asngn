@@ -1,7 +1,9 @@
 /*
- * asngn.h — Asterism Engine ("asngn")
+ * asngn.h — ⁂ asngn — the ⁂ asterism agent harness
  *
- * An outcome-gated agentic coding engine for small local LLMs.
+ * A general-purpose harness for real-world workflows and automations.
+ * SLM-friendly and local-first; larger models and remote providers are supported
+ * through adapters that satisfy each role's inference contract.
  * Public C API of libasngn.
  *
  * Contract notes:
@@ -54,7 +56,7 @@ typedef enum {
   ASNGN_ERR_PROTOCOL,    /* malformed step / model protocol output          */
   ASNGN_ERR_CONTEXT,     /* prompt exceeds the model's global context budget */
   ASNGN_ERR_UNSUPPORTED, /* disabled feature or unsupported operation       */
-  ASNGN_ERR_SIBLING,     /* asper / astools failure (see asngn_last_error)  */
+  ASNGN_ERR_SIBLING,     /* ⁂ asper / ⁂ astools failure (see asngn_last_error)  */
   ASNGN_ERR_NOMEM,       /* allocation failure                              */
   ASNGN_ERR_LIMIT        /* model completion exhausted its token budget      */
 } asngn_err;
@@ -153,7 +155,7 @@ typedef struct {
   long long spent_tokens;  /* committed-turn projection, not consumption */
   long long created_at;    /* unix seconds UTC                        */
   long long last_turn_at;  /* unix seconds UTC; 0 = no turns yet      */
-  char      project[65];   /* active Asper project or ""              */
+  char      project[65];   /* active ⁂ asper project or ""              */
 } asngn_session_peek_info;
 asngn_err asngn_session_peek(asngn_ctx *c, const char *slug,
                              asngn_session_peek_info *out);
@@ -170,7 +172,7 @@ asngn_err asngn_session_get_mode(const asngn_session *s,
 asngn_err asngn_session_workspace(asngn_session *s,
                                   asngn_workspace_info *out);
 asngn_err asngn_session_pin    (asngn_session *s, size_t turn, int on);
-asngn_err asngn_session_compact(asngn_session *s);    /* delegate to Asper */
+asngn_err asngn_session_compact(asngn_session *s);    /* delegate to ⁂ asper */
 
 /* One transcript entry of an open session (history replay). */
 typedef struct {
@@ -382,7 +384,7 @@ asngn_err asngn_cache_clear(asngn_ctx *c, const char *scope);
 typedef struct {
   size_t   turns;                 /* committed ledger entries            */
   size_t   tokens_prompt, tokens_gen, tokens_saved;
-  size_t   tokens_memory;         /* memory-zone (Asper) share of prompt */
+  size_t   tokens_memory;         /* memory-zone (⁂ asper) share of prompt */
   size_t   cache_hits, cache_adapts, cache_misses;
   size_t   clarifies, capped;
   size_t   escalations;
@@ -393,7 +395,7 @@ typedef struct {
 asngn_err asngn_session_get_stats(asngn_session *s,
                                   asngn_session_stats *out);
 
-/* Inference accounting for the entire engine store, including shared Asper
+/* Inference accounting for the entire engine store, including shared ⁂ asper
  * calls. Unknown usage retains its reservation; charged_tokens is a budget
  * charge, not an exact count of consumed tokens. Unsettled calls may be live
  * or interrupted. A failed/uncertain journal returns IO and clears the output. */
@@ -412,20 +414,20 @@ typedef struct {
   int       asper_ok, astools_ok;
   size_t    mem_identity, mem_context, mem_project, mem_deprecated;
   long long mem_last_cycle_at;    /* unix seconds UTC; 0 = never         */
-  char      project[65];          /* active Asper project or ""          */
+  char      project[65];          /* active ⁂ asper project or ""          */
   size_t    tools_total, tools_enabled, tools_unavailable;
   size_t    tool_invocations, tool_ok, tool_failed, tool_denied;
 } asngn_sibling_stats;
 asngn_err asngn_get_sibling_stats(asngn_ctx *c, asngn_sibling_stats *out);
 
-/* One resolved tool of the astools registry. */
+/* One resolved tool of the ⁂ astools registry. */
 typedef struct {
   char ref[64];   /* tool id                                          */
   int  enabled;   /* host toggle AND pinning gate                     */
   int  available; /* runnable on this platform                        */
 } asngn_tool_info;
 /* Every resolved tool, sorted by id; *out is one allocation released
- * with asngn_free. *out = NULL, *out_n = 0 when astools is disabled. */
+ * with asngn_free. *out = NULL, *out_n = 0 when ⁂ astools is disabled. */
 asngn_err asngn_tool_list(asngn_ctx *c, asngn_tool_info **out,
                           size_t *out_n);
 /* Enable or disable a tool ("fs" or "fs@1.2.0") for CALL steps. Under
@@ -433,11 +435,11 @@ asngn_err asngn_tool_list(asngn_ctx *c, asngn_tool_info **out,
  * verifies; re-read the state with asngn_tool_list. */
 asngn_err asngn_tool_enable(asngn_ctx *c, const char *ref, int on);
 
-/* Direct Asper recall, bypassing the loop (/memory). Answer rendered
+/* Direct ⁂ asper recall, bypassing the loop (/memory). Answer rendered
  * with citations; asngn_free. */
 asngn_err asngn_recall(asngn_ctx *c, const char *question, char **out);
 
-/* Select the Asper project for this session; NULL deselects. The
+/* Select the ⁂ asper project for this session; NULL deselects. The
  * semantic cache is additionally partitioned by the project slug. */
 asngn_err asngn_session_project(asngn_session *s, const char *slug);
 asngn_err asngn_project_list(asngn_ctx *c, char ***out_slugs,

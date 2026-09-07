@@ -1,12 +1,12 @@
 /*
- * engine_fx.h — the shared end-to-end fixture of the asngn integration
+ * engine_fx.h — the shared end-to-end fixture of the ⁂ asngn integration
  * tests: a full engine over 4 scripted fake
- * models (fakes.h) plus the REAL astools registry around the scripted
+ * models (fakes.h) plus the REAL ⁂ astools registry around the scripted
  * asngn_fake_tool binary (fixtures.h).
  *
  * Each TEST gets fresh tmpdirs, fresh fake queues, and a fresh context:
- * call eng_setup at the top and eng_drop at the bottom. The Asper sibling
- * is disabled by the fixture config; astools opens over a full-trust
+ * call eng_setup at the top and eng_drop at the bottom. The ⁂ asper sibling
+ * is disabled by the fixture config; ⁂ astools opens over a full-trust
  * fixture root whose single tool "fake" dispatches the ASNGN_TEST_TOOL_PATH
  * binary with the scripted behavior as argv[1].
  *
@@ -38,8 +38,8 @@ static const char *eng_tool_path(void) {
 
 typedef struct {
   char root_raw[256]; /* engine root                  */
-  char reg_raw[256];  /* astools registry root        */
-  char ws_raw[256];   /* astools workspace            */
+  char reg_raw[256];  /* ⁂ astools registry root        */
+  char ws_raw[256];   /* ⁂ astools workspace            */
   char cfg_raw[256];  /* config files live here       */
   char astools_cfg[512], engine_cfg[512];
   fake_model nano, light, stdm, embed;
@@ -48,7 +48,7 @@ typedef struct {
   asngn_session *s;
 } eng_fx;
 
-/* Build the registry (tool id "fake" running `behavior`), the astools
+/* Build the registry (tool id "fake" running `behavior`), the ⁂ astools
  * config, the engine config (+ caller `extra` sections), then open the
  * engine with the 4 fakes and the fake clock and open session "s1".
  * 1 on success. */

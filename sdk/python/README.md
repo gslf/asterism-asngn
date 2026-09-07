@@ -1,6 +1,6 @@
-# Asterism Python SDK
+# ⁂ asterism Python SDK
 
-Async host client for the local `asngn-mcp` server, Asterism wire contract 1.
+Async host client for the local `asngn-mcp` server, ⁂ asterism wire contract 1.
 Requires Python 3.11+. No third-party runtime dependencies.
 
 ```python

@@ -1,5 +1,5 @@
 /*
- * theme.c — palette and glyph sets of the asngn TUI.
+ * theme.c — palette and glyph sets of the ⁂ asngn TUI.
  *
  * Theme "asterism" (default): dark, starry, precision instrument — the
  * background stays the terminal default, chrome is dim gray, and the

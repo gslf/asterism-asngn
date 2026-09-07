@@ -6,6 +6,10 @@ import sys
 import threading
 import time
 
+# MCP is UTF-8 even when Python inherits a Windows ANSI code page.
+for stream in (sys.stdin, sys.stdout, sys.stderr):
+    stream.reconfigure(encoding="utf-8")
+
 lock = threading.Lock()
 
 

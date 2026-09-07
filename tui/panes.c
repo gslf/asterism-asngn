@@ -1,5 +1,5 @@
 /*
- * panes.c — the five sidebar panes of the asngn TUI and the
+ * panes.c — the five sidebar panes of the ⁂ asngn TUI and the
  * telemetry ingest that feeds them.
  *
  * Each #asngn_event xCDN line is parsed with xcdn on the main
@@ -305,7 +305,7 @@ void tui_events_log(tui_app *a, int level, const char *msg) {
   if (msg[0] == '\0') return; /* no message body: nothing worth a row */
   snprintf(name, sizeof name, "%.39s", msg);
 
-  /* The astools registry re-scan re-emits the same warning set every
+  /* The ⁂ astools registry re-scan re-emits the same warning set every
    * few seconds; a repeated line bumps an "xN" counter on its earlier
    * row instead of flushing the turn trace out of the ring. */
   lo = a->evs.seq > 32 ? a->evs.seq - 32 : 0;

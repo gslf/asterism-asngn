@@ -4,7 +4,7 @@
  *
  * A decision pass emits one single-line schema-constrained action
  * object (fixed key order, quoted values without escapes; the call
- * input embeds the astools call production raw):
+ * input embeds the ⁂ astools call production raw):
  *
  *   {action: "call", why: "…", input: <ref>.<cmd> {…}, success: "…",
  *    fallback: "…"}

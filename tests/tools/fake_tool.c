@@ -1,6 +1,6 @@
 /*
- * fake_tool.c — scripted oneshot protocol tool for the asngn integration
- * tests. Ported from astools' tests/tools/
+ * fake_tool.c — scripted oneshot protocol tool for the ⁂ asngn integration
+ * tests. Ported from ⁂ astools' tests/tools/
  * tool_fake.c: one tiny xcdn-linked binary; the FIRST argv argument
  * selects the behavior:
  *

@@ -30,7 +30,7 @@ A change while the user was reviewing invalidates that request. Consuming the
 approval is durable before dispatch, and the action journal carries its ID.
 Consumed means authorization was used, not that the tool ran or succeeded;
 consult the action journal and verifier receipt for those outcomes. The ordinary
-Astools identity/policy checks and edit preconditions still apply after queues.
+⁂ astools identity/policy checks and edit preconditions still apply after queues.
 The snapshot check and external process execution are not an atomic transaction;
 concurrent writers still require edit hashes or isolated workspaces.
 

@@ -1,6 +1,6 @@
 /*
  * test_grammar.c — classify/judge micro-grammars, the per-turn
- * action-object step grammar (minimal, blob handles), and astools
+ * action-object step grammar (minimal, blob handles), and ⁂ astools
  * grafting.
  *
  * MIT License — per aspera ad astra.
@@ -142,10 +142,10 @@ TEST(steps_graft_astools) {
   char *g = NULL;
   ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, false, 0, k_export, &g));
   ASSERT_EQ_STR(g, k_grafted);
-  /* astools' own root line is dropped: exactly one root rule remains */
+  /* ⁂ astools' own root line is dropped: exactly one root rule remains */
   ASSERT_EQ_INT((long long)count_substr(g, "root"), 1);
   ASSERT_TRUE(strncmp(g, "root      ::=", 13) == 0);
-  /* the bare astools "call" rule was renamed to astools-call */
+  /* the bare ⁂ astools "call" rule was renamed to astools-call */
   ASSERT_TRUE(strstr(g, "\ncall ::=") == NULL);
   ASSERT_TRUE(strstr(g, "astools-call ::= t-x-c-y\n") != NULL);
   ASSERT_TRUE(strstr(g, "t-x-c-y ::= \"x.y {}\"\n") != NULL);
@@ -164,7 +164,7 @@ TEST(steps_graft_deterministic) {
 }
 
 TEST(steps_call_dropped_without_export) {
-  /* with_call without a usable astools grammar: CALL is dropped, not
+  /* with_call without a usable ⁂ astools grammar: CALL is dropped, not
    * emitted with an undefined rule. */
   char *g = NULL;
   ASSERT_OK(asngn_grammar_steps(NULL, true, false, true, false, 0, NULL, &g));

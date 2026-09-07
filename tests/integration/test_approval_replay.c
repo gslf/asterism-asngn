@@ -275,7 +275,7 @@ TEST(lossy_strings_and_unwritten_metadata_cannot_become_review_records) {
       if (mode == 0)
         ASSERT_OK(asngn_buf_appends(&record, "\\u0000"));
       else
-        ASSERT_OK(asngn_buf_appendc(&record, (char)0xff));
+        ASSERT_OK(asngn_buf_appendc(&record, (char)-1));
       ASSERT_OK(asngn_buf_appends(&record, at + 1));
     }
     ASSERT_OK(replace(&f, path, &record));

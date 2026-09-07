@@ -5,7 +5,7 @@
 
 /* ── response pass with the judge ladder ─────────────────────────────── */
 
-/* Recognize actual astools syntax, including the common model variant that
+/* Recognize actual ⁂ astools syntax, including the common model variant that
  * omits the CALL prefix inside a fenced block.  This is a hard output gate:
  * response text is never reinterpreted as an action and never reaches the
  * user when it looks like one. */

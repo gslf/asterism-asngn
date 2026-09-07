@@ -1,5 +1,5 @@
 /*
- * chat.c — chat pane of the asngn TUI with markdown-lite rendering.
+ * chat.c — chat pane of the ⁂ asngn TUI with markdown-lite rendering.
  *
  * Entries wrap at the pane width. Markdown-lite: ``` fences
  * render dim on a shaded background, "- " bullets get a yellow "·",

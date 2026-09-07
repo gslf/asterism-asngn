@@ -7,10 +7,10 @@ separate publisher signing step is configured.
 `release.json` pins sibling revisions and hashes their public headers. The engine
 revision is the checked-out commit; `scripts/release.py` emits that exact revision
 in the resolved manifest. Engine CI and the real-model smoke workflow consume
-the same pins. Asper's standalone jobs read `dependencies.json`; the release
-checker rejects a dependency that differs from the coordinated asmodel pin.
+the same pins. ⁂ asper's standalone jobs read `dependencies.json`; the release
+checker rejects a dependency that differs from the coordinated ⁂ asmodel pin.
 The integrated job runs all sibling suites separately. Both it and standalone
-asmodel CI require the HTTP conformance target, so a missing test dependency
+⁂ asmodel CI require the HTTP conformance target, so a missing test dependency
 cannot silently remove provider coverage.
 
 From the parent directory, after checking out the recorded revisions:
@@ -44,3 +44,19 @@ checksums. Older WAL formats are rejected; no
 implicit migration can establish checksums for their original historical contents.
 Keep a backup and use a fresh store for this development release. Conversation
 projections and operation consumption have distinct semantics.
+
+To publish workspace changes with one push per repository, commit in dependency
+order. After committing `asmodel` and `astools`, run from the workspace root:
+
+```sh
+python3 asterism-asngn/scripts/release.py --update-asper-pin
+# Commit asper, including dependencies.json and its platform fixes.
+python3 asterism-asngn/scripts/release.py --update-pins
+# Commit asngn, including release.json.
+python3 asterism-asngn/scripts/release.py
+```
+
+The update commands never commit or push. Engine pin updates require clean sibling
+commits and a matching Asper/asmodel dependency; they also refresh header hashes
+and retain the submodule checks. Push `asmodel` and `astools`, then `asper`, then
+`asngn`. Header hashes normalize CRLF checkout line endings to LF.

@@ -3,7 +3,7 @@
  *
  * An append stream is a FILE* opened "ab" plus its path; every append is
  * one compact single-line value + '\n', flushed, with offset rollback on
- * partial writes (the asper journal discipline). Loading applies the
+ * partial writes (the ⁂ asper journal discipline). Loading applies the
  * torn-tail rule: a parse failure confined to the final value truncates
  * the file to the last good offset with a WARN; a parse error before the
  * tail is fatal and the file is left untouched.

@@ -5,7 +5,7 @@
  * through asngn_loop_run; llama.cpp calls block on this thread with the
  * stall watchdog and the cancellation flag cascading into the backend.
  * The background worker owns cache sweeps, telemetry flushes, model warmup
- * and the optional stall-watchdog tick. Asper owns memory curation on its
+ * and the optional stall-watchdog tick. ⁂ asper owns memory curation on its
  * own worker.
  *
  * ASNGN_NO_THREADS builds run turns synchronously on the caller and do

@@ -194,7 +194,7 @@ asngn_err asngn_workspace_init(asngn_ctx *c, const asngn_open_params *p) {
   const char *selected = p->workspace_root != NULL ? p->workspace_root
                                                    : c->cfg.astools_workspace;
   /* "session" is a mode, not a literal directory.  The engine opens
-   * astools against the sessions container for startup readiness and binds
+   * ⁂ astools against the sessions container for startup readiness and binds
    * it to sessions/<slug>/workspace before each turn. */
   if (p->workspace_root == NULL && selected != NULL &&
       strcmp(selected, "session") == 0)

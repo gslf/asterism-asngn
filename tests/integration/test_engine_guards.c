@@ -1,7 +1,7 @@
 /*
  * test_engine_guards.c — the loop/resource guards and the input
  * gate, end to end over the same sibling fixture as test_engine_turns
- * (engine_fx.h): scripted fake models + the real astools registry running
+ * (engine_fx.h): scripted fake models + the real ⁂ astools registry running
  * the scripted asngn_fake_tool binary.
  *
  * MIT License — per aspera ad astra.
@@ -136,7 +136,7 @@ TEST(futile_steps) {
   /* One successful CALL, then the model spins: an identical RECALL
    * repeated twice is two consecutive guard-blocked steps with a good
    * result in hand — the loop forces the answer pass instead of burning
-   * the step budget (asper is disabled in the fixture, so the fresh
+   * the step budget (⁂ asper is disabled in the fixture, so the fresh
    * RECALL yields nothing but still counts as progress). */
   eng_fx f;
   asngn_turn_result r;

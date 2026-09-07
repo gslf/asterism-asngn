@@ -225,7 +225,26 @@ TEST(snapshot_tracks_content_rename_and_deletion) {
   free(two);
   drop(&f);
 }
-TEST_LIST = {TEST_ENTRY(shared_ignores_keep_configuration_and_dependencies),
+TEST(held_writer_lock_allows_workspace_reads_but_excludes_another_writer) {
+  fixture f;
+  ASSERT_TRUE(setup(&f));
+  char *path = os_path_join(f.root, ".writer.lock");
+  ASSERT_TRUE(path != NULL);
+  FILE *lock = os_store_lock(path);
+  ASSERT_TRUE(lock != NULL);
+  FILE *second = os_store_lock(path);
+  ASSERT_TRUE(second == NULL);
+  ASSERT_OK(put(f.root, "source.c", "code"));
+  ASSERT_OK(asngn_tree_walk(f.root, NULL, collect, NULL, &f, NULL));
+  ASSERT_TRUE(strstr(f.seen.data, "source.c:code") != NULL);
+  fclose(lock);
+  second = os_store_lock(path);
+  ASSERT_TRUE(second != NULL);
+  fclose(second);
+  free(path);
+  drop(&f);
+}
+TEST_LIST = {TEST_ENTRY(held_writer_lock_allows_workspace_reads_but_excludes_another_writer),TEST_ENTRY(shared_ignores_keep_configuration_and_dependencies),
              TEST_ENTRY(flat_entry_limit_applies_during_enumeration),
              TEST_ENTRY(byte_limits_apply_before_file_callbacks),
              TEST_ENTRY(nested_limits_are_global),

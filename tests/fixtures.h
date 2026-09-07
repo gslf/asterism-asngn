@@ -1,11 +1,11 @@
 /*
- * fixtures.h — sibling-fixture writers for the asngn integration tests,
- * modeled on astools' tests/fakes.c writers.
+ * fixtures.h — sibling-fixture writers for the ⁂ asngn integration tests,
+ * modeled on ⁂ astools' tests/fakes.c writers.
  *
- * Three plain-text emitters: an astools registry package around the
+ * Three plain-text emitters: an ⁂ astools registry package around the
  * scripted asngn_fake_tool binary, an #astools_config with one FULL-trust
- * root (absolute argv[0] entries require full trust, astools), and
- * the engine's own #asngn_config wiring the 4-fake pool, the astools
+ * root (absolute argv[0] entries require full trust, ⁂ astools), and
+ * the engine's own #asngn_config wiring the 4-fake pool, the ⁂ astools
  * integration, and any caller-supplied extra sections.
  *
  * All paths are taken and written verbatim — pass absolute paths
@@ -62,8 +62,8 @@ int asngn_fix_astools_config(const char *path, const char *registry_root,
 
 /*
  * Write the engine config.xcdn at `path`: models.pool of 4 (nano / light
- * / std / embed dim 16, see ASNGN_FIX_POOL), integration asper off +
- * astools on (root / workspace / config as given, absolute), validation
+ * / std / embed dim 16, see ASNGN_FIX_POOL), integration ⁂ asper off +
+ * ⁂ astools on (root / workspace / config as given, absolute), validation
  * judge off, cache disabled, routing.classifier "model". `extra` (may be
  * NULL) is appended verbatim before the closing brace: additional
  * top-level sections, each ending with a comma. 1 on success, 0 on
@@ -72,7 +72,7 @@ int asngn_fix_astools_config(const char *path, const char *registry_root,
 int asngn_fix_engine_config(const char *path, const char *astools_cfg_path,
                             const char *registry_root, const char *workspace,
                             const char *extra);
-/* Same fixture, with Asper enabled and its store rooted at `memory`. */
+/* Same fixture, with ⁂ asper enabled and its store rooted at `memory`. */
 int asngn_fix_engine_config_asper(const char *path,
                                   const char *astools_cfg_path,
                                   const char *registry_root,

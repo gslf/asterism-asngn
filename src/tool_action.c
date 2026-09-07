@@ -322,7 +322,7 @@ asngn_err asngn_call_execute(asngn_ctx *c, asngn_turn_state *t, const char *line
     }
   }
 
-  /* dispatch through astools */
+  /* dispatch through ⁂ astools */
   {
     astools_result r;
     char *out_line = NULL;

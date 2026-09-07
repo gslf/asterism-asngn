@@ -1,5 +1,5 @@
 /*
- * term.c — terminal layer of the asngn TUI.
+ * term.c — terminal layer of the ⁂ asngn TUI.
  *
  * POSIX: raw mode via termios; output is VT escape sequences over a
  * damage-tracked double buffer diffed per frame. Resize via SIGWINCH

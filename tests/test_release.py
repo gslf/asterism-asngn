@@ -23,7 +23,7 @@ def initialize(path):
     path.mkdir(parents=True)
     git(path, "init", "-q")
     (path / "include").mkdir()
-    (path / "include/api.h").write_text("/* fixture public contract */\n")
+    (path / "include/api.h").write_bytes(b"/* fixture public contract */\n")
     git(path, "add", "include")
 
 
@@ -53,7 +53,7 @@ class ReleaseAdmission(unittest.TestCase):
             git(path, "commit", "-qm", "fixture")
             cls.manifest["components"][name] = {"repository": "gslf/asterism-" + name,
                 "revision": "checkout" if name == "asngn" else git(path, "rev-parse", "HEAD"),
-                "headers": {"include/api.h": hashlib.sha256((path / "include/api.h").read_bytes()).hexdigest()}}
+                "headers": {"include/api.h": hashlib.sha256((path / "include/api.h").read_bytes().replace(b"\r\n", b"\n")).hexdigest()}}
 
     @classmethod
     def tearDownClass(cls):
@@ -74,6 +74,16 @@ class ReleaseAdmission(unittest.TestCase):
             release.verify(self.root, self.manifest, with_llama=True)
         shutil.copytree(self.root / "asterism-asper/deps/xcdn-c", self.root / "asterism-asper/deps/llama.cpp")
         self.assertTrue(release.verify(self.root, self.manifest, with_llama=True)["submodules"]["asper/llama"]["initialized"])
+
+    def test_crlf_checkout_preserves_the_pinned_public_contract(self):
+        for name in self.manifest["components"]:
+            path = self.root / ("asterism-" + name)
+            git(path, "config", "core.autocrlf", "true")
+            header = path / "include/api.h"
+            header.unlink()
+            git(path, "checkout", "--", "include/api.h")
+            self.assertIn(b"\r\n", header.read_bytes())
+        self.assertEqual(len(release.verify(self.root, self.manifest)["components"]), 4)
 
     def test_engine_dirty_opt_in_does_not_hide_contract_drift(self):
         path = self.root / "asterism-asngn"
@@ -105,9 +115,37 @@ class ReleaseAdmission(unittest.TestCase):
             release.verify(self.root, self.manifest)
 
     def test_uninitialized_required_submodule_cannot_fall_back_to_parent_git(self):
-        shutil.rmtree(self.root / "asterism-asper/deps/xcdn-c/.git")
+        # Git pack files are read-only on Windows; moving metadata models the
+        # missing checkout without depending on platform deletion permissions.
+        (self.root / "asterism-asper/deps/xcdn-c/.git").rename(self.root / "removed-xcdn-git")
         with self.assertRaisesRegex(ValueError, "not initialized"):
             release.verify(self.root, self.manifest)
+
+    def test_refresh_uses_clean_commits_and_rejects_uncommitted_siblings(self):
+        path = self.root / "asterism-astools"
+        (path / "include/api.h").write_bytes(b"/* updated contract */\n")
+        with self.assertRaisesRegex(ValueError, "dirty source"):
+            release.refresh(self.root, self.manifest)
+        git(path, "add", "include/api.h"); git(path, "commit", "-qm", "updated contract")
+        updated = release.refresh(self.root, self.manifest)
+        self.assertEqual(updated["components"]["astools"]["revision"], git(path, "rev-parse", "HEAD"))
+        self.assertNotEqual(updated["components"]["astools"]["headers"],
+                            self.manifest["components"]["astools"]["headers"])
+        release.verify(self.root, updated)
+
+    def test_refresh_requires_the_coordinated_standalone_model_pin(self):
+        path = self.root / "asterism-asmodel"
+        (path / "new.txt").write_text("new model implementation")
+        with self.assertRaisesRegex(ValueError, "commit its changes"):
+            release.refresh_asper_dependency(self.root)
+        git(path, "add", "new.txt"); git(path, "commit", "-qm", "new implementation")
+        with self.assertRaisesRegex(ValueError, "standalone dependency"):
+            release.refresh(self.root, self.manifest)
+        dependency = release.refresh_asper_dependency(self.root)
+        asper = self.root / "asterism-asper"
+        (asper / "dependencies.json").write_text(json.dumps(dependency))
+        git(asper, "add", "dependencies.json"); git(asper, "commit", "-qm", "model pin")
+        release.verify(self.root, release.refresh(self.root, self.manifest))
 
     def test_sibling_dirty_cannot_use_engine_exception(self):
         (self.root / "asterism-asmodel/extra.c").write_text("unpublished dependency")

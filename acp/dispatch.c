@@ -15,7 +15,7 @@ static void initialize(acp_server *s, const acp_json *id, const acp_json *params
       "\"promptCapabilities\":{\"image\":false,\"audio\":false,\"embeddedContext\":false},"
       "\"mcpCapabilities\":{\"http\":false,\"sse\":false},"
       "\"sessionCapabilities\":{\"close\":{}}},\"authMethods\":[],"
-      "\"agentInfo\":{\"name\":\"asngn-acp\",\"title\":\"Asterism\"}}");
+      "\"agentInfo\":{\"name\":\"asngn-acp\",\"title\":\"asngn\"}}");
   if (asmodel_json_object_set(asmodel_json_object_get(result, "agentInfo"), "version",
                               asmodel_json_string(asngn_version()))) {
     asmodel_json_free(result);

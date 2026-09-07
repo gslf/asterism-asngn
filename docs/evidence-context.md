@@ -1,9 +1,9 @@
 # Evidence views and context selection
 
-Large results are stored as content-addressed Asper objects after redaction.
+Large results are stored as content-addressed ⁂ asper objects after redaction.
 The short view and every byte offset refer to these stored bytes, even when
 ordinary context redaction is disabled. Invalid UTF-8 is rejected before a blob
-is created. No auxiliary archive is created when Asper is disabled.
+is created. No auxiliary archive is created when ⁂ asper is disabled.
 
 ## Selecting a log view
 
@@ -35,7 +35,7 @@ The action protocol requires an explicit object:
 The native function `asterism_open` takes `{"blob":1,"offset":80000}`. Both fields
 are required; unknown fields, negative offsets and unobserved handles are rejected.
 The old string input `"B1"` is not accepted. Handles belong to the current session;
-the header also includes the stable Asper object hash.
+the header also includes the stable ⁂ asper object hash.
 
 Reads return the source hash and `[start,end)` byte range, up to 32 KiB according
 to the working budget. There is no hidden cursor. A reader can jump directly to
@@ -57,9 +57,9 @@ history selects pinned turns and then recent turns that fit. Empty fragments hav
 zero byte cost. A trace describes at most 128 fragments, with explicit total and
 omitted counts. Identical inputs produce identical prompt and trace bytes.
 
-With Asper enabled, historical selection belongs to Asper. The trace identifies
+With ⁂ asper enabled, historical selection belongs to ⁂ asper. The trace identifies
 the materialized memory blocks and marks local duplicates as delegated; it does
-not pretend to explain Asper's individual event decisions. Native action history
+not pretend to explain ⁂ asper's individual event decisions. Native action history
 and additional per-request schemas are covered by `request_context`, below.
 This is selection observability, not yet the full repository evidence compiler.
 
@@ -83,7 +83,7 @@ the session and parent turn; unscoped helpers leave them absent. Dispatch means
 calling the model runtime, not proof that a provider performed inference. These
 spans also populate `request_id` in durable generation reservations/settlements.
 The accounting operation has its own UUID; correlation never deduplicates calls.
-Direct Asper calls through its manager do not cross this engine trace boundary
+Direct ⁂ asper calls through its manager do not cross this engine trace boundary
 and currently record an empty request ID. See [consumption records](operations.md).
 
 Detail covers at most 128 items, prioritizing the active tool contract. Total and

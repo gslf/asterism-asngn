@@ -207,7 +207,7 @@ asngn_err asngn_action_apply(asngn_ctx *c, asngn_turn_state *t, asngn_step *st, 
       asngn_work_push(c, t, "[notice] CALL is unavailable for this decision");
       break;
     }
-    /* synthesize the call line for astools' authoritative parser:
+    /* synthesize the call line for ⁂ astools' authoritative parser:
      * the action object carries the call as its input field */
     {
       asngn_buf cl;

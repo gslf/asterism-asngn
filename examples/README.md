@@ -1,9 +1,9 @@
 # Starter configurations
 
 These are configuration templates, not engine roots. Copy the files you need
-into a separate runtime directory; do not run asngn with `examples/` itself as
-the engine root. Copy the assembled astools package directories from
-`build/packages/` (or another asngn build tree) into the runtime directory's
+into a separate runtime directory; do not run ⁂ asngn with `examples/` itself as
+the engine root. Copy the assembled ⁂ astools package directories from
+`build/packages/` (or another ⁂ asngn build tree) into the runtime directory's
 `tools/` folder.
 
 Embedded llama.cpp:

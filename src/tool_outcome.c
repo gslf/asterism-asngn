@@ -27,7 +27,7 @@ void asngn_call_state_key(const uint8_t intent[32], const uint8_t workspace[32],
  * whitespace outside string literals is dropped, so `{path: "a"}` and
  * `{ path:"a" }` hash equal. Key order is not normalized — the grammar
  * emits params in manifest order, so reorderings do not occur in
- * practice; astools' validator is the semantic authority. */
+ * practice; ⁂ astools' validator is the semantic authority. */
 char *asngn_call_args(const char *args) {
   asngn_buf b;
   bool in_str = false, esc = false;

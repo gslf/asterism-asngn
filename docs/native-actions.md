@@ -9,7 +9,7 @@ integration: { astools: { tool_limit: 16, tool_schema_bytes: 24000 } }
 models: { sampling: { decide: { max_tokens: 2048 } } }
 ```
 
-This requires a backend that implements the asmodel native-tool contract. The
+This requires a backend that implements the ⁂ asmodel native-tool contract. The
 embedded adapter currently returns `ASNGN_ERR_UNSUPPORTED`. A provider label alone
 does not certify a server/model/template combination. Test it before deployment.
 No automatic fallback silently changes protocols after a failed native request.
@@ -25,7 +25,7 @@ not yet a measured improvement in real-model latency, cost or task success.
 
 Tool names are stable provider-safe hashes of the exact reference, command and
 package content. Descriptions include the public command label. Native schemas,
-preflight and invocation use the same immutable Astools selection. Names change
+preflight and invocation use the same immutable ⁂ astools selection. Names change
 when package identity changes; they cannot acquire authority from descriptions.
 Five slots are reserved for runtime controls, so native selection supports at most
 59 tools. A larger selection fails explicitly instead of dropping arbitrary tools.
@@ -33,7 +33,7 @@ Five slots are reserved for runtime controls, so native selection supports at mo
 Runtime functions provide discovery, memory recall, blob expansion, clarification
 and transition to the response phase. Functions are absent when their capability
 is unavailable. Their small JSON argument contracts are validated by the runtime;
-Astools validates tool arguments and current permissions. `asterism_finish` takes
+⁂ astools validates tool arguments and current permissions. `asterism_finish` takes
 an empty object and does not assert task success. The artifact gate still applies.
 
 When that gate allows reporting, tool choice is `auto`: a request can return calls
@@ -65,9 +65,9 @@ cancelled, limited or incomplete generation cannot dispatch its partial proposal
 ## Context and limits
 
 Initial repository and conversation context is compiled once. Current-turn
-assistant calls and tool results retain roles and correlation IDs through asmodel;
+assistant calls and tool results retain roles and correlation IDs through ⁂ asmodel;
 the current acceptance and verification state is supplied separately on each
-request. Earlier Asper history is still compiled text. Historical arguments and
+request. Earlier ⁂ asper history is still compiled text. Historical arguments and
 observations follow session redaction policy. A redaction that breaks argument
 JSON stops the request rather than sending the original sensitive text.
 
@@ -90,7 +90,7 @@ Deterministic tests cover batch preflight, disabled capabilities, artifact gates
 discovery, result correlation, interruption, Unicode final text, response caps,
 review rejection, stale verification, withheld output and single-charge reuse.
 An HTTP integration test exercises
-the complete MCP/Asngn/asmodel/Astools path for Chat Completions and Responses with
+the complete MCP / ⁂ asngn / ⁂ asmodel / ⁂ astools path for Chat Completions and Responses with
 scripted local peers. In both wire formats, the explicit-finish baseline makes
 four requests (classification, tool call, finish, response); the same scripted
 answer as native text needs three (classification, tool call, final response).

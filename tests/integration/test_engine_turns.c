@@ -1,6 +1,6 @@
 /*
  * test_engine_turns.c — full agent turns end to end: scripted fake
- * models behind asngn_open_with plus the REAL astools registry running
+ * models behind asngn_open_with plus the REAL ⁂ astools registry running
  * the scripted asngn_fake_tool binary. Every scenario runs on a fresh
  * engine root, fresh fake queues, and a fresh session (engine_fx.h).
  *
@@ -239,7 +239,7 @@ TEST(plan_tool_turn) {
   ASSERT_EQ_STR(f.s->log[1].mode, "plan");
   ASSERT_EQ_INT(f.s->log[1].steps, 2); /* CALL + ANSWER */
 
-  /* astools dispatched exactly once */
+  /* ⁂ astools dispatched exactly once */
   ASSERT_OK(asngn_get_stats(f.c, &st));
   ASSERT_EQ_INT((long long)st.tool_calls, 1);
 
@@ -458,7 +458,7 @@ TEST(generate_draft_then_write) {
   ASSERT_TRUE(fake_model_push(
       &f.stdm,
       "{action: \"call\", why: \"create calculator source\", input: "
-      "fs.write {path: \"C:/workspace/calculator.cpp\", content: "
+      "fs.write {path: \"calculator.cpp\", content: "
       "\"@asngn:draft\"}, "
       "success: \"bytes written\", fallback: \"report failure\"}\n"));
   ASSERT_TRUE(fake_model_push(
@@ -868,7 +868,7 @@ TEST(digestion) {
   ASSERT_CONTAINS(f.light.last_user, "digest of the result");
   ASSERT_NOT_CONTAINS(f.light.last_user, "xxxxxxxxxxxxxxxx");
 
-  /* The exact payload is an Asper content-addressed object, not an
+  /* The exact payload is an ⁂ asper content-addressed object, not an
    * ASNGN-owned session blob file. */
   ASSERT_EQ_INT((long long)f.s->blobs_n, 1);
   ASSERT_CONTAINS(f.s->blobs[0].object_ref, "sha256:");
@@ -1012,7 +1012,7 @@ TEST(tool_permissions) {
   eng_drop(&f);
 }
 
-/* Asper is the authoritative transcript/context path in normal operation:
+/* ⁂ asper is the authoritative transcript/context path in normal operation:
  * exact source events feed the next turn, survive a session reopen, and no
  * ASNGN-owned transcript or rolling-summary file is created. */
 TEST(asper_source_context_and_reopen) {

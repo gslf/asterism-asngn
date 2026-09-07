@@ -138,7 +138,7 @@ FILE *os_store_lock(const char *path);
 /* Create directory and any missing parents. Existing dir is OK. */
 asngn_err os_mkdir_p(const char *path);
 int       os_file_exists(const char *path);   /* 1 = yes */
-/* Read whole file. *out is NUL-terminated (asngn internal: free with free()).
+/* Read whole file. *out is NUL-terminated (⁂ asngn internal: free with free()).
  * out_len may be NULL. */
 asngn_err os_read_file(const char *path, char **out, size_t *out_len);
 /* Write whole buffer (truncate). Not atomic — pair with os_file_replace for

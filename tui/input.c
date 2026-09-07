@@ -1,5 +1,5 @@
 /*
- * input.c — the asngn TUI input editor.
+ * input.c — the ⁂ asngn TUI input editor.
  *
  * A byte-buffer editor with a UTF-8-aware cursor: history (Ctrl+P/N),
  * kill/yank (Ctrl+U/K/W/Y), and multi-row layout for

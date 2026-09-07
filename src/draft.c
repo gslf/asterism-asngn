@@ -67,7 +67,7 @@ static bool draft_ident_char(char ch) {
          ch == '_';
 }
 
-/* Serialize one UTF-8 string as the quoted xCDN value accepted by astools.
+/* Serialize one UTF-8 string as the quoted xCDN value accepted by ⁂ astools.
  * The draft itself never passes through the decision grammar. */
 static asngn_err append_xcdn_string(asngn_buf *b, const char *text) {
   const unsigned char *p = (const unsigned char *)(text != NULL ? text : "");
@@ -311,10 +311,10 @@ fail:
 }
 
 /* Some OpenAI-compatible chat templates teach models a virtual
- * `/workspace` mount. astools deliberately accepts only paths beneath its
+ * `/workspace` mount. ⁂ astools deliberately accepts only paths beneath its
  * configured workspace, so translate that well-known presentation alias to
  * the canonical workspace-relative form before validation. This does not
- * widen grants: the resulting path still goes through astools' normal path
+ * widen grants: the resulting path still goes through ⁂ astools' normal path
  * resolver and policy checks. */
 static char *normalize_virtual_workspace_aliases(const char *args) {
   static const char win_prefix[] = "C:/workspace/";

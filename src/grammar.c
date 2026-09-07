@@ -9,13 +9,13 @@
  *   {action: "call", why: "…", input: <astools-call>, success: "…",
  *    fallback: "…"}
  *
- * The merged grammar keeps asngn's own productions (root, step, call,
+ * The merged grammar keeps ⁂ asngn's own productions (root, step, call,
  * recall, open, think, clarify, answer, handle, text, meta, tchar) and
- * grafts the astools export below them: the astools root line is
+ * grafts the ⁂ astools export below them: the ⁂ astools root line is
  * dropped, its "call" rule is renamed to "astools-call", and the
  * remainder is appended verbatim — the grafted production is embedded
  * raw (xCDN args, unquoted) as the value of the call action's `input`
- * key. The astools shared terminals (str, char, int, num, ws, obj,
+ * key. The ⁂ astools shared terminals (str, char, int, num, ws, obj,
  * t-*) do not collide with our rule names. The rename is a token scan —
  * a rule name is a maximal run of [a-zA-Z0-9-] — that leaves quoted
  * literals, character classes, and comments untouched.
@@ -24,7 +24,7 @@
  * ASNGN_STEP_META_MAX chars via {m,n} repetition, so at the limit the
  * only legal continuation is the closing quote and the sampler
  * completes the object instead of rambling into the decide max_tokens
- * cap. The cap still bounds CALL objects (astools' grafted productions
+ * cap. The cap still bounds CALL objects (⁂ astools' grafted productions
  * stay unbounded); an output it truncates lacks the newline root
  * requires and is rejected as malformed by the control loop;
  * asngn_step_parse re-caps payloads at the same limits as defense in
@@ -47,12 +47,12 @@ static bool rule_char(char ch) {
          (ch >= '0' && ch <= '9') || ch == '-';
 }
 
-/* Does the astools text define a bare "call" rule beyond its first (root)
+/* Does the ⁂ astools text define a bare "call" rule beyond its first (root)
  * line? Without one there is nothing to graft — the CALL alternative is
  * dropped rather than emitting a grammar with an undefined rule. */
 static bool has_call_rule(const char *gbnf) {
   const char *p = gbnf;
-  while (*p != '\0' && *p != '\n') p++; /* skip the astools root line */
+  while (*p != '\0' && *p != '\n') p++; /* skip the ⁂ astools root line */
   while (*p == '\n') p++;
   while (*p != '\0') {
     const char *q = p;
@@ -72,7 +72,7 @@ static bool has_call_rule(const char *gbnf) {
   return false;
 }
 
-/* Append the astools grammar with its first line (its own root rule)
+/* Append the ⁂ astools grammar with its first line (its own root rule)
  * dropped and every rule-name token `call` renamed to `astools-call`.
  * Quoted literals ("..."), character classes ([...]) and # comments are
  * copied verbatim — a "call" inside them is grammar text, not a rule
@@ -112,7 +112,7 @@ static asngn_err graft_astools(asngn_buf *b, const char *gbnf) {
     }
   }
   if (e != ASNGN_OK) return e;
-  /* the astools export ends with exactly one '\n'; normalize anyway */
+  /* the ⁂ astools export ends with exactly one '\n'; normalize anyway */
   if (b->len == 0 || b->data[b->len - 1] != '\n')
     e = asngn_buf_appendc(b, '\n');
   return e;

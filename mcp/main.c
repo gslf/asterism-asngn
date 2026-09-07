@@ -53,7 +53,7 @@ static const char USAGE[] =
     "       asngn-mcp --help | --version\n";
 
 static const char HELP[] =
-    "asngn-mcp - MCP stdio server for the Asterism Engine (asngn)\n"
+    "asngn-mcp - MCP stdio server for asngn\n"
     "\n"
     "usage: asngn-mcp [--root <dir>] [--config <file>] "
     "[--workspace <dir>] [--allow-degraded]\n"
@@ -124,6 +124,7 @@ static int decorate_modern_result(asmodel_json_value *result) {
   info = asmodel_json_object();
   ok = meta != NULL && info != NULL;
   ok &= asmodel_json_object_set(info, "name", asmodel_json_string("asngn-mcp")) == 0;
+  ok &= asmodel_json_object_set(info, "title", asmodel_json_string("asngn")) == 0;
   ok &= asmodel_json_object_set(info, "version", asmodel_json_string(asngn_version())) == 0;
   ok &= asmodel_json_object_set(meta, "io.modelcontextprotocol/serverInfo", info) == 0;
   ok &= asmodel_json_object_set(result, "resultType", asmodel_json_string("complete")) == 0;
@@ -659,8 +660,8 @@ static int parse_security_profile(const char *value,
 static int tool_session_mode(server_state *st, const asmodel_json_value *args,
                              asmodel_json_value **out, const char **msg) {
   const char *session = NULL, *mode_value = NULL, *profile_value = NULL;
-  asngn_usage_mode mode;
-  asngn_security_profile profile;
+  asngn_usage_mode mode = ASNGN_USAGE_CHAT;
+  asngn_security_profile profile = ASNGN_SECURITY_CHAT;
   asngn_session *s = NULL;
   asngn_err e;
   asmodel_json_value *o;
@@ -1036,7 +1037,7 @@ static const tool_def TOOLS[] = {
      "\"required\":[\"session\"]}",
      tool_session_stats},
     {"project_select",
-     "Select the Asper project for a session (proxied to Asper); null "
+     "Select the asper project for a session (proxied to asper); null "
      "deselects.",
      "{\"type\":\"object\",\"properties\":{"
      "\"slug\":{\"type\":[\"string\",\"null\"],\"description\":"
@@ -1086,6 +1087,7 @@ static asmodel_json_value *initialize_result(void) {
   ok &= asmodel_json_object_set(res, "capabilities", caps) == 0;
   si = asmodel_json_object();
   ok &= asmodel_json_object_set(si, "name", asmodel_json_string("asngn-mcp")) == 0;
+  ok &= asmodel_json_object_set(si, "title", asmodel_json_string("asngn")) == 0;
   ok &= asmodel_json_object_set(si, "version", asmodel_json_string(asngn_version())) == 0;
   ok &= asmodel_json_object_set(res, "serverInfo", si) == 0;
   if (!ok) {
@@ -1106,7 +1108,7 @@ static asmodel_json_value *discover_result(void) {
   ok &= asmodel_json_object_set(res, "supportedVersions", versions) == 0;
   ok &= asmodel_json_object_set(res, "capabilities", caps) == 0;
   ok &= asmodel_json_object_set(res, "instructions",
-                      asmodel_json_string("Local Asterism agent tools.")) == 0;
+                      asmodel_json_string("Local asterism agent tools.")) == 0;
   ok &= asmodel_json_object_set(res, "ttlMs", asmodel_json_int(3600000)) == 0;
   ok &= asmodel_json_object_set(res, "cacheScope", asmodel_json_string("private")) == 0;
   if (!ok) {
@@ -1453,7 +1455,8 @@ int main(int argc, char **argv) {
     free(line);
   }
 
-  for (size_t i = 0; i < 32; i++) mcp_job_free(st.jobs[i]);
+  for (size_t job_index = 0; job_index < 32; job_index++)
+    mcp_job_free(st.jobs[job_index]);
   while (st.sessions_n > 0) {
     asngn_session_close(st.sessions[--st.sessions_n]);
   }

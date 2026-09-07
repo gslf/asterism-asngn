@@ -1,5 +1,5 @@
 /*
- * asngn_test.h — minimal test harness for asngn (no framework dependency).
+ * asngn_test.h — minimal test harness for ⁂ asngn (no framework dependency).
  *
  * Usage:
  *   TEST(my_case) { ASSERT_EQ_INT(1 + 1, 2); }
@@ -34,6 +34,7 @@
 #include <string.h>
 
 #include "asngn.h"
+#include "../src/os.h"
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -131,12 +132,22 @@ static int asngn_test_tmpdir(char out[256]) {
   for (tries = 0; tries < 100; tries++) {
     snprintf(out, 256, "%sasngn_test_%08x_%u", base,
              (unsigned)GetTickCount() ^ ((unsigned)rand() << 12), tries);
-    if (_mkdir(out) == 0) return 1;
+    if (_mkdir(out) == 0) {
+      for (size_t i = 0; out[i]; i++) if (out[i] == '\\') out[i] = '/';
+      return 1;
+    }
   }
   return 0;
 #else
   snprintf(out, 256, "%s", "/tmp/asngn_test_XXXXXX");
-  return mkdtemp(out) != NULL;
+  if (mkdtemp(out) == NULL) return 0;
+  char *resolved = os_realpath(out);
+  if (!resolved || strlen(resolved) >= 256) {
+    free(resolved); rmdir(out); return 0;
+  }
+  strcpy(out, resolved);
+  free(resolved);
+  return 1;
 #endif
 }
 
